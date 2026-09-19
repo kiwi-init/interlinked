@@ -181,8 +181,7 @@ struct PageHandle: View {
                         .padding(.trailing, 14)
                 } else {
                     Button { workspace.editActiveLine() } label: {
-                        Text(identity)
-                            .font(.system(size: 12))
+                        JevLabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
                             .lineLimit(1)
                             .padding(.trailing, 16)
                             .frame(height: 44)
@@ -199,6 +198,8 @@ struct PageHandle: View {
         .frame(width: size.width, height: size.height, alignment: .bottomLeading)
         .clipShape(RoundedRectangle(cornerRadius: workspace.overviewOpen ? 20 : 14, style: .continuous))
         .modifier(PageGlass(radius: workspace.overviewOpen ? 20 : 14))
+        .modifier(JevLabelGlow(effect: workspace.assistance.labelEffect, pane: pane,
+                               radius: workspace.overviewOpen ? 20 : 14))
         .foregroundStyle(palette.text)
         .onHover { workspace.quickSwitchOpen = $0 }
         .onChange(of: workspace.addressResults.map(\.id)) { _, _ in workspace.selectedSearchResult = nil }
@@ -246,6 +247,103 @@ struct PageHandle: View {
         .accessibilityIdentifier(id)
     }
 
+}
+
+/// Jev's chosen label arrives with a brief spectrum sweep. The ordinary local
+/// label and user-authored tab names retain the browser's normal text color.
+private struct JevLabel: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var identity: String
+    var pane: PaneID?
+    var effect: JevLabelEffect?
+    @State private var sweep: CGFloat = -1
+    @State private var rainbowOpacity = 0.0
+
+    private let colors: [Color] = [
+        Color(red: 0.20, green: 0.72, blue: 1.00),
+        Color(red: 0.48, green: 0.36, blue: 1.00),
+        Color(red: 0.94, green: 0.31, blue: 0.78),
+        Color(red: 1.00, green: 0.47, blue: 0.28),
+        Color(red: 0.27, green: 0.88, blue: 0.80)
+    ]
+
+    var body: some View {
+        Text(identity)
+            .font(.system(size: 12))
+            .overlay {
+                GeometryReader { geometry in
+                    let width = max(52, geometry.size.width * 0.72)
+                    LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+                        .frame(width: width)
+                        .offset(x: ((sweep + 1) / 2) * (geometry.size.width + width) - width)
+                }
+                .mask {
+                    Text(identity)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                }
+                .opacity(rainbowOpacity)
+                .accessibilityHidden(true)
+            }
+            .onChange(of: effect) { _, update in
+                guard update?.pane == pane else { return }
+                sweep = reduceMotion ? 0 : -1
+                rainbowOpacity = 1
+                if !reduceMotion {
+                    withAnimation(.easeInOut(duration: 1.15)) { sweep = 1 }
+                }
+                withAnimation(.easeOut(duration: 0.5).delay(reduceMotion ? 0.25 : 0.85)) {
+                    rainbowOpacity = 0
+                }
+            }
+    }
+}
+
+/// A restrained version of the Apple Intelligence spectrum glow. It hugs the
+/// glass handle only while the Jev-authored label is being revealed.
+private struct JevLabelGlow: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var effect: JevLabelEffect?
+    var pane: PaneID?
+    var radius: CGFloat
+    @State private var glowOpacity = 0.0
+    @State private var hue = 0.0
+
+    private var gradient: AngularGradient {
+        AngularGradient(colors: [
+            Color(red: 0.20, green: 0.72, blue: 1.00),
+            Color(red: 0.48, green: 0.36, blue: 1.00),
+            Color(red: 0.94, green: 0.31, blue: 0.78),
+            Color(red: 1.00, green: 0.47, blue: 0.28),
+            Color(red: 0.27, green: 0.88, blue: 0.80),
+            Color(red: 0.20, green: 0.72, blue: 1.00)
+        ], center: .center)
+    }
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+            ZStack {
+                shape.stroke(gradient, lineWidth: 3).blur(radius: 4).opacity(0.55)
+                shape.stroke(gradient, lineWidth: 1.25)
+            }
+            .hueRotation(.degrees(hue))
+            .opacity(glowOpacity)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .onChange(of: effect) { _, update in
+            guard update?.pane == pane else { return }
+            hue = 0
+            glowOpacity = 1
+            if !reduceMotion {
+                withAnimation(.linear(duration: 1.25)) { hue = 150 }
+            }
+            withAnimation(.easeOut(duration: 0.55).delay(reduceMotion ? 0.25 : 0.85)) {
+                glowOpacity = 0
+            }
+        }
+    }
 }
 
 struct PageGlass: ViewModifier {

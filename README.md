@@ -32,6 +32,8 @@ Meaning search uses Jev to select the best answer and rank existing page text by
 
 Configure the optional Jev tools and an OpenRouter key in Settings. The key stays in macOS Keychain. Explicit meaning searches, reading checks and Vault description searches send page or saved text to OpenRouter and TypeSafe. Automatic public-page label refinement has a separate opt-in setting. Requests use the [OpenRouter decisions API](https://openrouter.ai/openapi.json) with [Jev 1.13](https://openrouter.ai/typesafe/jev-1.13), with cancellation and an in-memory cache. Exact find and local labels work without a key.
 
+When Jev replaces the local page label with its selected label, the page handle briefly picks up a spectrum glow. Local labels and names you type yourself do not trigger it.
+
 To inspect wording, click **Critical reading** in the bottom-right controls. It is also available under **Page → Critical Reading…** in the macOS menu bar. The check starts immediately, with progress on the button. Results highlight the source paragraphs in yellow. Hover or click a highlighted paragraph to see its evaluation beside the text; the note has previous/next controls. Click elsewhere to hide the note, or click **Critical reading** again to clear all annotations. It identifies possible loaded wording, emotional pressure, unsupported certainty and opinion presented as fact. It does not verify factual claims.
 
 ## Shortcuts
