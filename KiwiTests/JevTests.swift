@@ -84,6 +84,19 @@ final class JevServiceTests: XCTestCase {
         let provider = OpenRouterJev(credential: { throw JevError.noKey })
         do { _ = try await provider.decide(request); XCTFail() } catch { XCTAssertEqual(error as? JevError, .noKey) }
     }
+    func testCriticalReadingRunsByDefaultAndPersistsOnRequestMode() throws {
+        let name = "CriticalReadingPreferences-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        XCTAssertTrue(JevPreferences.enabled(in: defaults))
+        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .automatic)
+
+        defaults.set(false, forKey: JevPreferences.enabledKey)
+        CriticalReadingMode.onRequest.save(to: defaults)
+        XCTAssertFalse(JevPreferences.enabled(in: defaults))
+        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
+    }
 }
 
 @MainActor final class ContextFeatureTests: XCTestCase {

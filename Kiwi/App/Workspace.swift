@@ -112,6 +112,7 @@ final class Workspace {
         let selected = activeTab?.id
         tabs.remove(at: index)
         active = tabs.firstIndex(where: { $0.id == selected }) ?? min(active, max(0, tabs.count - 1))
+        if let pane = activePane { assistance.activated(pane) }
         forgetClosed()
         if tabs.isEmpty { setOverviewOpen(true) }
         keep()
@@ -233,6 +234,7 @@ final class Workspace {
         assistance.changedTab()
         overviewOpen = false
         active = index
+        if let pane = activePane { assistance.activated(pane) }
         restoreFocus()
         keep()
     }
@@ -244,6 +246,7 @@ final class Workspace {
         overviewOpen = false
         let count = tabs.count
         active = ((active + step) % count + count) % count
+        if let pane = activePane { assistance.activated(pane) }
         restoreFocus()
         keep()
     }
@@ -275,6 +278,7 @@ final class Workspace {
         guard let index = tabs.firstIndex(where: { $0.contains(pane) }) else { return }
         active = index
         tabs[index].active = pane
+        assistance.activated(pane)
         keep()
     }
 
@@ -297,6 +301,7 @@ final class Workspace {
         }
         tabs.remove(at: index)
         active = min(active, max(0, tabs.count - 1))
+        if let pane = activePane { assistance.activated(pane) }
         forgetClosed()
         keep()
         return true
