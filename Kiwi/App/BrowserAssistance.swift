@@ -5,6 +5,12 @@ import WebKit
 @MainActor @Observable
 final class BrowserAssistance {
     enum Panel { case find, reading, permission }
+    private struct ReadingResult {
+        var document: String
+        var findings: [PassageDecisions.Finding]
+        var status: String
+    }
+
     var panel: Panel?
     var query = ""
     var byMeaning = true
@@ -25,14 +31,17 @@ final class BrowserAssistance {
     private(set) var labels: [PaneID: String] = [:]
     private(set) var grants: [PaneID: String] = [:]
     let history = BrowsingHistory()
-    var enabled = UserDefaults.standard.bool(forKey: "jev.enabled")
+    var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.bool(forKey: "jev.labels")
+    var criticalReadingMode = CriticalReadingMode()
     @ObservationIgnored weak var workspace: Workspace?
     @ObservationIgnored private var service: JevService
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var revisions: [String: RequestRevision] = [:]
     @ObservationIgnored private var resultDocument = ""
     @ObservationIgnored private var nextPanel: Panel?
+    @ObservationIgnored private var readingResults: [PaneID: ReadingResult] = [:]
+    @ObservationIgnored private var readingInFlight: [PaneID: String] = [:]
 
     init(service: JevService = JevService()) {
         self.service = service
@@ -52,6 +61,7 @@ final class BrowserAssistance {
             let exists = await Task.detached { JevCredential.exists() }.value
             guard let self, self.accepts(key, revision) else { return }
             self.hasKey = exists
+            if exists { self.automaticReadingForCurrentPage() }
         }
     }
 
@@ -76,6 +86,7 @@ final class BrowserAssistance {
     func committed(_ pane: PaneID) {
         for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)"] { cancel(key) }
         metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); grants.removeValue(forKey: pane)
+        readingResults.removeValue(forKey: pane); readingInFlight.removeValue(forKey: pane)
         cancel("groups"); groups = []
         if workspace?.activePane == pane { closePanel() }
     }
@@ -95,6 +106,7 @@ final class BrowserAssistance {
                     self.grants[pane] = page.document
                     self.selectLabel(pane, page: page)
                 }
+                self.startAutomaticReading(pane: pane, page: page, view: view)
             } catch { /* The address and normal browsing remain available. */ }
         }
     }
@@ -102,12 +114,39 @@ final class BrowserAssistance {
         guard let workspace else { return }
         for pane in metadata.keys where !workspace.paneAlive(pane) { committed(pane) }
     }
-    func changedTab() { closePanel(); historySharing = false; vaultStatus = "" }
+    func changedTab() {
+        if criticalReadingMode == .automatic, panel == .reading {
+            cancel("reading")
+            if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
+            panel = nil; nextPanel = nil; busy = false; findings = []; status = ""
+        } else {
+            closePanel()
+        }
+        historySharing = false; vaultStatus = ""
+    }
+
+    func activated(_ pane: PaneID) {
+        guard let view = workspace?.hosts.existingBrowser(pane) else { return }
+        guard criticalReadingMode == .automatic else {
+            PageTextBridge.clear(view)
+            readingResults.removeValue(forKey: pane)
+            return
+        }
+        guard let page = metadata[pane] else { return }
+        startAutomaticReading(pane: pane, page: page, view: view)
+    }
 
     func configure() {
-        UserDefaults.standard.set(enabled, forKey: "jev.enabled")
+        UserDefaults.standard.set(enabled, forKey: JevPreferences.enabledKey)
         UserDefaults.standard.set(automaticLabels, forKey: "jev.labels")
+        criticalReadingMode.save()
         for key in Array(tasks.keys) { cancel(key) }
+        readingInFlight.removeAll()
+        if !enabled || criticalReadingMode == .onRequest {
+            readingResults.removeAll()
+            if panel == .reading { closePanel() }
+            else if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
+        }
         refreshCredentialStatus()
         grants.removeAll(); historySharing = false; busy = false
         matches = []; findings = []; groups = []
@@ -189,6 +228,7 @@ final class BrowserAssistance {
     }
     func closePanel() {
         cancel("find"); cancel("exact"); cancel("reading"); panel = nil; nextPanel = nil
+        if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
         busy = false; matches = []; findings = []; status = ""
         if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
     }
@@ -236,10 +276,35 @@ final class BrowserAssistance {
         grants[pane] = page.document
         runPassages(reading: true)
     }
+    private func automaticReadingForCurrentPage() {
+        guard let pane = workspace?.activePane, let page = metadata[pane],
+              let view = workspace?.hosts.existingBrowser(pane) else { return }
+        startAutomaticReading(pane: pane, page: page, view: view)
+    }
+    private func startAutomaticReading(pane: PaneID, page: PageMetadata, view: WKWebView) {
+        guard enabled, hasKey, criticalReadingMode == .automatic, page.publicWebPage,
+              workspace?.activePane == pane, workspace?.hosts.existingBrowser(pane) === view,
+              panel == nil || panel == .reading else { return }
+        if let result = readingResults[pane], result.document == page.document {
+            panel = .reading; busy = false; findings = result.findings; status = result.status
+            grants[pane] = page.document
+            Task { [weak self, weak view] in
+                guard let self, let view else { return }
+                let shown = await PageTextBridge.annotate(result.findings, document: result.document, view: view)
+                if !shown, self.workspace?.activePane == pane { self.readingResults.removeValue(forKey: pane) }
+            }
+            return
+        }
+        guard readingInFlight[pane] != page.document else { return }
+        panel = .reading; findings = []; status = "Checking wording in this page."
+        grants[pane] = page.document
+        runPassages(reading: true)
+    }
     private func runPassages(reading: Bool) {
         let key = reading ? "reading" : "find", revision = token(reading ? "reading" : "find")
         guard let pane = workspace?.activePane, let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) else { return }
         let query = query
+        if reading { readingInFlight[pane] = page.document }
         busy = true; status = reading ? "Checking selected passages…" : "Finding related passages…"
         tasks[key] = Task { [weak self, weak view] in
             guard let self, let view else { return }
@@ -249,7 +314,14 @@ final class BrowserAssistance {
                 let extract = try await PageTextBridge.extract(view)
                 guard self.accepts(key, revision), extract.document == page.document, extract.url == view.url?.absoluteString else { return }
                 let candidates = reading ? extract.passages.filter { $0.role == "passage" || $0.role == nil } : extract.passages
-                guard !candidates.isEmpty else { self.busy = false; self.status = "No readable passages found. Exact find still works."; return }
+                guard !candidates.isEmpty else {
+                    self.busy = false; self.status = "No readable passages found. Exact find still works."
+                    if reading {
+                        self.readingInFlight.removeValue(forKey: pane)
+                        self.readingResults[pane] = ReadingResult(document: page.document, findings: [], status: self.status)
+                    }
+                    return
+                }
                 let request = reading ? PassageDecisions.readingRequest(candidates) : PassageDecisions.findRequest(query: query, passages: candidates)
                 let response = try await self.service.decide(request)
                 guard self.accepts(key, revision), self.workspace?.activePane == pane, self.grants[pane] == page.document,
@@ -261,8 +333,14 @@ final class BrowserAssistance {
                     self.findings = PassageDecisions.findings(response, passages: candidates)
                     self.status = (self.findings.isEmpty ? "No clear signals selected. " : "Possible wording signals. ") + coverage
                     let shown = await PageTextBridge.annotate(self.findings, document: extract.document, view: view)
+                    self.readingInFlight.removeValue(forKey: pane)
                     if !self.accepts(key, revision) || self.panel != .reading { return }
-                    if !shown { self.findings = []; self.status = "The page changed. Run the check again." }
+                    if shown {
+                        self.readingResults[pane] = ReadingResult(document: extract.document, findings: self.findings, status: self.status)
+                    } else {
+                        self.findings = []; self.status = "The page changed. Run the check again."
+                        self.readingResults.removeValue(forKey: pane)
+                    }
                 } else {
                     self.findScores = Dictionary(uniqueKeysWithValues: candidates.map { ($0.text, response.answers[$0.id]?.score ?? -1) })
                     self.matches = PassageDecisions.matches(response, passages: candidates)
@@ -271,6 +349,7 @@ final class BrowserAssistance {
                 }
             } catch {
                 guard self.accepts(key, revision) else { return }
+                if reading { self.readingInFlight.removeValue(forKey: pane) }
                 self.busy = false; self.status = self.errorMessage(error)
             }
         }

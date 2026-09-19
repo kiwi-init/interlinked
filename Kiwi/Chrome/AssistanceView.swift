@@ -77,9 +77,9 @@ struct AssistanceSettings: View {
         @Bindable var assistant = workspace.assistance
         Form {
             Section("Jev") {
-                Toggle("Enable optional Jev tools", isOn: $assistant.enabled)
+                Toggle("Enable Jev tools", isOn: $assistant.enabled)
                     .onChange(of: assistant.enabled) { _, _ in assistant.configure() }
-                Text("Meaning search, reading checks, and Vault description searches send the selected text through OpenRouter and TypeSafe when you use them. Normal browsing and exact find work locally.")
+                Text("Critical reading, meaning search, and Vault description searches send page or saved text through OpenRouter and TypeSafe. Normal browsing and exact find work locally.")
                     .font(.callout).foregroundStyle(.secondary)
                 SecureField("OpenRouter API key", text: $key)
                     .textContentType(.password)
@@ -94,6 +94,16 @@ struct AssistanceSettings: View {
                 Text(message.isEmpty ? (assistant.hasKey ? "A key is saved in Keychain." : "No API key saved.") : message)
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Reading checks assess wording and can be wrong. Meaning matches and related pages are suggestions. Inspect the original text before relying on them.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Critical reading") {
+                Picker("Run", selection: $assistant.criticalReadingMode) {
+                    ForEach(CriticalReadingMode.allCases) { mode in Text(mode.label).tag(mode) }
+                }
+                .onChange(of: assistant.criticalReadingMode) { _, _ in assistant.configure() }
+                Text(assistant.criticalReadingMode == .automatic
+                    ? "Checks each public page after it loads and marks possible wording signals. Local, editable, and password pages stay on this Mac."
+                    : "Checks a page only when you choose Critical reading from the page controls or Page menu.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Page labels") {
