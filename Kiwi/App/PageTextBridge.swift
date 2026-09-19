@@ -69,15 +69,17 @@ import WebKit
           if (!items.length) return true;
           const visible = item => { const r=nodes.get(item.id)?.getBoundingClientRect(); return r && r.bottom>0 && r.top<innerHeight-80; };
           let index=Math.max(0,items.findIndex(visible)), pending=0, dismissed=false;
+          const itemIndexes=new Map(items.map((item,index)=>[item.id,index]));
+          let cardSize;
           if (!this.highlight(items,items[index].id,document,false)) return false;
           const host=window.document.createElement('div'); host.id='kiwi-reading-'+documentID;
-          host.style.cssText='all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647';
+          host.style.cssText='all:initial;position:fixed;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:2147483647';
           const root=host.attachShadow({mode:'open'});
           const style=window.document.createElement('style');
           style.textContent=`:host{all:initial}*{box-sizing:border-box}
-            aside{position:absolute;width:240px;max-width:calc(100vw - 32px);padding:14px;pointer-events:auto;color:#fff;
+            aside{position:fixed;left:0;top:0;width:240px;max-width:calc(100vw - 32px);padding:14px;pointer-events:auto;color:#fff;
               background:rgba(35,35,38,.88);backdrop-filter:blur(24px) saturate(1.35);border:1px solid #ffffff30;
-              border-radius:14px;box-shadow:0 8px 28px #0003;font:12px/1.45 -apple-system,BlinkMacSystemFont,sans-serif}
+              border-radius:14px;box-shadow:0 8px 28px #0003;font:12px/1.45 -apple-system,BlinkMacSystemFont,sans-serif;will-change:transform}
             header{display:flex;align-items:center;gap:8px;margin-bottom:7px}strong{flex:1;font-weight:600}
             p{margin:0;color:#ffffffbd}footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:10px}
             small{margin-right:auto;color:#ffffff8c;font:10px -apple-system,sans-serif}
@@ -94,6 +96,7 @@ import WebKit
             card.querySelector('strong').textContent=item.label;
             card.querySelector('p').textContent=item.explanation;
             card.querySelector('small').textContent=(index+1)+' / '+items.length+' · Wording signal';
+            cardSize=null;
             position();
           };
           const position=()=>{
@@ -102,25 +105,33 @@ import WebKit
             const r=nodes.get(items[index].id).getBoundingClientRect();
             card.hidden=dismissed || r.bottom<=0 || r.top>=innerHeight-64;
             if (card.hidden) return;
-            const w=card.offsetWidth,h=card.offsetHeight,gap=12;
+            cardSize ||= {width:card.offsetWidth,height:card.offsetHeight};
+            const w=cardSize.width,h=cardSize.height,gap=12;
             const right=r.right+gap,left=r.left-w-gap;
+            const beside=right+w<=innerWidth-16 || left>=16;
             const x=right+w<=innerWidth-16 ? right : left>=16 ? left : Math.max(16,innerWidth-w-16);
-            const y=right+w<=innerWidth-16 || left>=16 ? r.top : r.bottom+gap;
-            card.style.left=x+'px';card.style.top=Math.max(16,Math.min(y,innerHeight-h-76))+'px';
+            const y=beside ? r.top : r.bottom+gap;
+            card.style.transform='translate3d('+x+'px,'+Math.max(16,Math.min(y,innerHeight-h-76))+'px,0)';
           };
           const schedule=()=>{ if (!pending) pending=requestAnimationFrame(position); };
           const point=event=>{
             if (event.composedPath().includes(host)) return;
-            const found=items.findIndex(item=>nodes.get(item.id).contains(event.target));
-            if (found>=0) { if (found!==index || dismissed) select(found); }
+            let target=event.target,found=Infinity;
+            while (target) {
+              const candidate=itemIndexes.get(ids.get(target));
+              if (candidate!==undefined) found=Math.min(found,candidate);
+              target=target.parentNode;
+            }
+            if (found!==Infinity) { if (found!==index || dismissed) select(found); }
             else if (event.type==='click') { dismissed=true;position(); }
           };
+          const resized=()=>{cardSize=null;schedule();};
           buttons[0].onclick=()=>{dismissed=true;position();};
           buttons[1].onclick=()=>select(index-1,true);buttons[2].onclick=()=>select(index+1,true);
           window.document.addEventListener('pointerover',point);
           window.document.addEventListener('click',point);
           window.document.addEventListener('scroll',schedule,{passive:true,capture:true});
-          window.addEventListener('resize',schedule);
+          window.addEventListener('resize',resized);
           const resize=new ResizeObserver(schedule);resize.observe(window.document.body);
           const mutations=new MutationObserver(()=>{
             if (items.some(item=>!nodes.get(item.id)?.isConnected || clean(nodes.get(item.id).innerText)!==item.text)) this.clear();
@@ -130,7 +141,7 @@ import WebKit
           stopReading=()=>{
             host.remove();resize.disconnect();mutations.disconnect();cancelAnimationFrame(pending);
             window.document.removeEventListener('pointerover',point);window.document.removeEventListener('click',point);
-            window.document.removeEventListener('scroll',schedule,true);window.removeEventListener('resize',schedule);
+            window.document.removeEventListener('scroll',schedule,true);window.removeEventListener('resize',resized);
           };
           select(index,!visible(items[index]));
           return true;
@@ -157,7 +168,13 @@ import WebKit
         try await value(view, call: "return kiwiContext.extract();", type: PageExtract.self)
     }
     private static func value<T: Decodable>(_ view: WKWebView, call: String, type: T.Type) async throws -> T {
-        let result = try await view.callAsyncJavaScript(install + call, arguments: [:], in: nil, contentWorld: .defaultClient)
+        let result: Any?
+        do {
+            result = try await view.callAsyncJavaScript(call, arguments: [:], in: nil, contentWorld: .defaultClient)
+        } catch {
+            // Standalone web views (including tests) do not have the document-end user script.
+            result = try await view.callAsyncJavaScript(install + call, arguments: [:], in: nil, contentWorld: .defaultClient)
+        }
         let data = try JSONSerialization.data(withJSONObject: result as Any)
         return try JSONDecoder().decode(T.self, from: data)
     }

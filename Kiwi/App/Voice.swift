@@ -31,6 +31,34 @@ enum VoiceState: Equatable {
     }
 }
 
+private final class VoiceLevelMeter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest: Float = 0
+    private var peak: Float = 0
+
+    func store(_ level: Float) {
+        lock.lock()
+        latest = level
+        peak = max(peak, level)
+        lock.unlock()
+    }
+
+    func consume() -> (latest: Float, peak: Float) {
+        lock.lock()
+        let sample = (latest, peak)
+        peak = 0
+        lock.unlock()
+        return sample
+    }
+
+    func reset() {
+        lock.lock()
+        latest = 0
+        peak = 0
+        lock.unlock()
+    }
+}
+
 /// Apple's speech recognizer, in process. Hold fn to write a line; cmd-fn to run a command.
 @MainActor
 @Observable
@@ -39,6 +67,8 @@ final class Voice {
     var mode: VoiceMode = .write
     var fnHeld = false
     var target: PaneID?
+    @ObservationIgnored private(set) var currentLevel: Float = 0
+    @ObservationIgnored private let levelMeter = VoiceLevelMeter()
     private var session: UInt64 = 0
     private var engine: AVAudioEngine?
     private var task: SFSpeechRecognitionTask?
@@ -49,7 +79,6 @@ final class Voice {
     private var quietTimer: Timer?
     private var levelTimer: Timer?
     private var shownTimer: Timer?
-    private var stopping = false
 
     private let quietEnough: TimeInterval = 1
     private let loudEnough: Float = 0.02
@@ -74,7 +103,8 @@ final class Voice {
         session += 1
         let this = session
         heard = ""
-        stopping = false
+        currentLevel = 0
+        levelMeter.reset()
         state = .starting
 
         let locale = Locale(identifier: ProcessInfo.processInfo.environment["KIWI_SPEECH_LOCALE"] ?? "en-US")
@@ -116,6 +146,8 @@ final class Voice {
         engine?.inputNode.removeTap(onBus: 0)
         quietTimer?.invalidate()
         levelTimer?.invalidate()
+        levelTimer = nil
+        currentLevel = 0
         switch state {
         case .starting:
             state = .finishing(heard: "")
@@ -169,16 +201,10 @@ final class Voice {
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        let levelMeter = self.levelMeter
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak levelMeter] buffer, _ in
             request.append(buffer)
-            let level = Voice.level(of: buffer)
-            DispatchQueue.main.async {
-                guard let self, session == self.session else { return }
-                if level >= self.loudEnough { self.lastLoud = Date() }
-                if case .listening(let heard, _) = self.state {
-                    self.state = .listening(heard: heard, level: level)
-                }
-            }
+            levelMeter?.store(Voice.level(of: buffer))
         }
 
         do {
@@ -193,6 +219,12 @@ final class Voice {
         opened = Date()
         lastLoud = Date()
         state = .listening(heard: "", level: 0)
+
+        levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.publishLevel(session: session)
+            }
+        }
 
         if mode == .command {
             quietTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
@@ -211,8 +243,8 @@ final class Voice {
                         self.finish(said: self.heard, session: session, onFinal: onFinal)
                     } else {
                         switch self.state {
-                        case .listening(_, let level):
-                            self.state = .listening(heard: self.heard, level: level)
+                        case .listening:
+                            self.state = .listening(heard: self.heard, level: self.currentLevel)
                         case .finishing:
                             self.state = .finishing(heard: self.heard)
                         default:
@@ -242,6 +274,13 @@ final class Voice {
         }
     }
 
+    private func publishLevel(session: UInt64) {
+        guard session == self.session, state.isListening else { return }
+        let sample = levelMeter.consume()
+        currentLevel = sample.latest
+        if sample.peak >= loudEnough { lastLoud = Date() }
+    }
+
     private func finish(said: String, session: UInt64, onFinal: @escaping (String, VoiceMode, UInt64) -> Void) {
         guard session == self.session else { return }
         let mode = self.mode
@@ -258,6 +297,9 @@ final class Voice {
         quietTimer?.invalidate()
         quietTimer = nil
         levelTimer?.invalidate()
+        levelTimer = nil
+        currentLevel = 0
+        levelMeter.reset()
         task?.cancel()
         task = nil
         request?.endAudio()
@@ -265,10 +307,9 @@ final class Voice {
         engine?.stop()
         engine?.inputNode.removeTap(onBus: 0)
         engine = nil
-        stopping = false
     }
 
-    private static func level(of buffer: AVAudioPCMBuffer) -> Float {
+    nonisolated private static func level(of buffer: AVAudioPCMBuffer) -> Float {
         guard let data = buffer.floatChannelData?[0] else { return 0 }
         let count = Int(buffer.frameLength)
         guard count > 0 else { return 0 }

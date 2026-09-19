@@ -391,8 +391,8 @@ enum Control {
             return ["state": "idle"]
         case .starting:
             return ["state": "starting", "mode": mode]
-        case .listening(let heard, let level):
-            return ["state": "listening", "mode": mode, "heard": heard, "level": Double(level)]
+        case .listening(let heard, _):
+            return ["state": "listening", "mode": mode, "heard": heard, "level": Double(voice.currentLevel)]
         case .finishing(let heard):
             return ["state": "finishing", "heard": heard]
         case .heard(let said, let outcome):
