@@ -28,6 +28,12 @@ targets:
       path: Kiwi/Info.plist
       properties:
         CFBundleDisplayName: Interlinked
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Viewer
+            CFBundleURLName: computer.kiwi.web-url
+            CFBundleURLSchemes:
+              - http
+              - https
     entitlements:
       path: Kiwi/Kiwi.entitlements
     settings:

@@ -71,6 +71,7 @@
 		5F2818D11AF009F51DF7E8C8 /* KiwiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KiwiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		64DBD37FC93C853C4D225125 /* ToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarView.swift; sourceTree = "<group>"; };
 		6BB7DB4F423A2C5CB5552058 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
+		7C944C9F6EFE4C48382F72E9 /* KiwiPasskeys.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = KiwiPasskeys.entitlements; sourceTree = "<group>"; };
 		7DC7A947C22ED4A5E2730C2B /* Jev.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jev.swift; sourceTree = "<group>"; };
 		86F45B94DA095CFD93BB445E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8C82513F8505D72349A72D44 /* PageContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageContext.swift; sourceTree = "<group>"; };
@@ -151,6 +152,7 @@
 				EE379E73D9A15A294E733313 /* Info.plist */,
 				38919C1630BC57AA242C72DB /* Kiwi.entitlements */,
 				521004CD4E17A7F11E8A94E5 /* KiwiApp.swift */,
+				7C944C9F6EFE4C48382F72E9 /* KiwiPasskeys.entitlements */,
 				D42563DE199E8D3DA7F57AEB /* App */,
 				5D8F0A19AF70AA4E44734AE8 /* Chrome */,
 				ADF0DA3947C2611423BA0F8C /* Model */,

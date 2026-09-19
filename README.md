@@ -54,6 +54,18 @@ To inspect wording, click **Critical reading** in the bottom-right controls. It 
 
 Voice needs microphone and speech-recognition permission, which macOS asks for the first time.
 
+## Passkeys and Touch ID
+
+WebKit only permits a third-party browser to use passkeys for arbitrary websites when Apple has approved the app for the managed `com.apple.developer.web-browser.public-key-credential` entitlement. The ordinary `script/run` build stays ad-hoc signed and cannot use passkeys.
+
+The Account Holder must first submit Apple's [macOS browser passkey entitlement request](https://developer.apple.com/contact/request/macos-browsers-passkeys/). After Apple enables the capability for the app's Developer account, run the provisioned build with:
+
+```sh
+INTERLINKED_DEVELOPMENT_TEAM=YOUR_TEAM_ID script/run-passkeys
+```
+
+The script stops if Xcode cannot provision that managed capability or if the signed app does not contain it. Once present, `WKWebView` handles WebAuthn challenges and macOS presents the passkey and Touch ID UI.
+
 ## Development
 
 `build/Build/Products/Debug/kiwi commands` lists the local control API. For example:
