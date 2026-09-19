@@ -301,6 +301,16 @@ final class DomainIconCacheTests: XCTestCase {
         XCTAssertNil(cache.begin("example.com"))
     }
 
+    func testRestoredImageSkipsANewRequest() {
+        var cache = DomainIconCache<String>()
+        _ = cache.retain([PaneID(1): "example.com"])
+        XCTAssertTrue(cache.restore("example.com", value: "saved icon"))
+        XCTAssertEqual(cache.value(for: PaneID(1)), "saved icon")
+        XCTAssertNil(cache.begin("example.com"))
+        XCTAssertFalse(cache.restore("example.com", value: "replacement"))
+        XCTAssertFalse(cache.restore("closed.example", value: "unused"))
+    }
+
     func testRetainedByOtherTabsAndReleasedAfterLastTabLeaves() throws {
         var cache = DomainIconCache<String>()
         _ = cache.retain([PaneID(1): "example.com", PaneID(2): "example.com"])
@@ -334,5 +344,32 @@ final class DomainIconCacheTests: XCTestCase {
         XCTAssertEqual(DomainIconCache<String>.domain(URL(string: "http://example.com/b")), "example.com")
         XCTAssertEqual(DomainIconCache<String>.domain(URL(string: "https://studio.example.com/")), "studio.example.com")
         XCTAssertNil(DomainIconCache<String>.domain(URL(string: "file:///tmp/page.html")))
+    }
+}
+
+final class DomainIconStoreTests: XCTestCase {
+    func testSavedDataSurvivesANewStoreInstance() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let saved = Data([0, 1, 2, 3])
+        try DomainIconStore(directory: directory).write(saved, for: "example.com")
+
+        let restarted = DomainIconStore(directory: directory)
+        XCTAssertEqual(restarted.data(for: "example.com"), saved)
+        XCTAssertNil(restarted.data(for: "other.example"))
+    }
+
+    func testRemovingOneDomainLeavesOtherDomainsAlone() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DomainIconStore(directory: directory)
+        try store.write(Data([1]), for: "one.example")
+        try store.write(Data([2]), for: "two.example")
+
+        store.remove("one.example")
+
+        XCTAssertNil(store.data(for: "one.example"))
+        XCTAssertEqual(store.data(for: "two.example"), Data([2]))
     }
 }
