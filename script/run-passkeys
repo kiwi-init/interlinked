@@ -1,0 +1,30 @@
+#!/bin/sh
+# Build with Apple's managed browser passkey capability and open the app.
+set -eu
+cd "$(dirname "$0")/.."
+
+: "${INTERLINKED_DEVELOPMENT_TEAM:?Set INTERLINKED_DEVELOPMENT_TEAM to the Apple Developer team approved for the macOS browser passkey entitlement}"
+
+if [ ! -f Kiwi.xcodeproj/project.pbxproj ]; then
+  xcodegen generate
+fi
+
+xcodebuild \
+  -project Kiwi.xcodeproj \
+  -scheme Kiwi \
+  -configuration Debug \
+  -derivedDataPath build-passkeys \
+  -destination 'platform=macOS' \
+  -allowProvisioningUpdates \
+  CODE_SIGN_STYLE=Automatic \
+  CODE_SIGN_IDENTITY='Apple Development' \
+  DEVELOPMENT_TEAM="$INTERLINKED_DEVELOPMENT_TEAM" \
+  CODE_SIGN_ENTITLEMENTS=Kiwi/KiwiPasskeys.entitlements \
+  build
+
+app=build-passkeys/Build/Products/Debug/Interlinked.app
+codesign -d --entitlements - --xml "$app" 2>&1 | \
+  plutil -extract com.apple.developer.web-browser.public-key-credential raw -o - - | \
+  /usr/bin/grep -qx true
+
+open "$app"
