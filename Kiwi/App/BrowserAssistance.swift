@@ -2,6 +2,11 @@ import AppKit
 import Observation
 import WebKit
 
+struct JevLabelEffect: Equatable {
+    var id = UUID()
+    var pane: PaneID
+}
+
 @MainActor @Observable
 final class BrowserAssistance {
     enum Panel { case find, reading, permission }
@@ -23,6 +28,7 @@ final class BrowserAssistance {
     var groups: [ResearchGroup] = []
     private(set) var metadata: [PaneID: PageMetadata] = [:]
     private(set) var labels: [PaneID: String] = [:]
+    private(set) var labelEffect: JevLabelEffect?
     private(set) var grants: [PaneID: String] = [:]
     let history = BrowsingHistory()
     var enabled = UserDefaults.standard.bool(forKey: "jev.enabled")
@@ -76,6 +82,7 @@ final class BrowserAssistance {
     func committed(_ pane: PaneID) {
         for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)"] { cancel(key) }
         metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); grants.removeValue(forKey: pane)
+        if labelEffect?.pane == pane { labelEffect = nil }
         cancel("groups"); groups = []
         if workspace?.activePane == pane { closePanel() }
     }
@@ -111,6 +118,7 @@ final class BrowserAssistance {
         refreshCredentialStatus()
         grants.removeAll(); historySharing = false; busy = false
         matches = []; findings = []; groups = []
+        labelEffect = nil
         labels = metadata.mapValues { ContextLabels.candidates($0).first?.text ?? $0.host }
         Task { await service.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
@@ -157,7 +165,10 @@ final class BrowserAssistance {
                 let response = try await self.service.decide(ContextLabels.request(page, candidates: candidates))
                 guard self.accepts(key, revision), self.grants[pane] == page.document,
                       self.metadata[pane]?.document == page.document else { return }
-                if let label = ContextLabels.selected(response, candidates: candidates) { self.labels[pane] = label }
+                if let label = ContextLabels.selected(response, candidates: candidates), label != self.labels[pane] {
+                    self.labels[pane] = label
+                    self.labelEffect = JevLabelEffect(pane: pane)
+                }
                 self.lastDecisionStatus = "Live Jev label decision received"
             } catch { if self.accepts(key, revision) { self.lastDecisionStatus = self.errorMessage(error) } }
         }
