@@ -1,0 +1,85 @@
+name: Kiwi
+options:
+  bundleIdPrefix: computer.kiwi
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+  xcodeVersion: "16.0"
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
+    ENABLE_HARDENED_RUNTIME: YES
+    COMBINE_HIDPI_IMAGES: YES
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_ALLOWED: YES
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  Kiwi:
+    type: application
+    platform: macOS
+    category: public.app-category.productivity
+    sources:
+      - path: Kiwi
+    info:
+      path: Kiwi/Info.plist
+      properties:
+        CFBundleDisplayName: Interlinked
+    entitlements:
+      path: Kiwi/Kiwi.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.kiwi.dev
+        PRODUCT_NAME: Interlinked
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Kiwi/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Kiwi/Kiwi.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_APP_SANDBOX: NO
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        ENABLE_TESTABILITY: YES
+        DEFINES_MODULE: YES
+        ENABLE_DEBUG_DYLIB: NO
+  kiwi-ctl:
+    type: tool
+    platform: macOS
+    sources:
+      - path: KiwiControl
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.kiwi.cli
+        PRODUCT_NAME: kiwi
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_FORCE_DYNAMIC_LINK_STDLIB: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path"
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
+  KiwiTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: KiwiTests
+      - path: Kiwi/Model
+      - path: Kiwi/App/Intent.swift
+      - path: Kiwi/App/PageTextBridge.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.kiwi.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Kiwi:
+    build:
+      targets:
+        Kiwi: all
+        kiwi-ctl: all
+        KiwiTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - KiwiTests

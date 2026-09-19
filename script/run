@@ -1,0 +1,18 @@
+#!/bin/sh
+# Build Interlinked.app with xcodebuild and open it.
+set -e
+cd "$(dirname "$0")/.."
+
+if [ ! -f Kiwi.xcodeproj/project.pbxproj ]; then
+  xcodegen generate
+fi
+
+xcodebuild \
+  -project Kiwi.xcodeproj \
+  -scheme Kiwi \
+  -configuration Debug \
+  -derivedDataPath build \
+  -destination 'platform=macOS' \
+  build
+
+open build/Build/Products/Debug/Interlinked.app
