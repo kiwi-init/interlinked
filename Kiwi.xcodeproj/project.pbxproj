@@ -18,6 +18,7 @@
 		3A3B162312A9AB6733B99E48 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA977A1F55EFA840BFA81CC /* Theme.swift */; };
 		42F1BFE4F98989F74E04555F /* PaneHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4880A32D9201E2BF032E2F10 /* PaneHosts.swift */; };
 		4662C49AA77FF267F8839456 /* BrowsingHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A35553141B410C78A89E6FC /* BrowsingHistory.swift */; };
+		4D5901727D6A45B82B252D7F /* DomainIconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0207136EEE0E43253645C0CA /* DomainIconStore.swift */; };
 		52258E9195C61B465FEA07FA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FDB847920565F1F8F92BF7DF /* Assets.xcassets */; };
 		527B266B253E5E5D6020B76A /* ToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DBD37FC93C853C4D225125 /* ToolbarView.swift */; };
 		52A8B4B7E4C5A9EA72A2B5E8 /* BrowserAssistance.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD5098F0721BCC446E6C653 /* BrowserAssistance.swift */; };
@@ -48,11 +49,13 @@
 		D3DE010D5A363639BE07CD32 /* Intent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6BB2A98E0DAD96594DA5B0 /* Intent.swift */; };
 		DBEAE2D9AB19EF793D395BE8 /* KiwiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 521004CD4E17A7F11E8A94E5 /* KiwiApp.swift */; };
 		E93F63DC35130A7628539785 /* AssistancePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEEAC49C8B264C0139C73DDD /* AssistancePreferences.swift */; };
+		E980C6FDAAE0CE6BAC1DB9AA /* DomainIconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0207136EEE0E43253645C0CA /* DomainIconStore.swift */; };
 		EAAFBED7F0F4992B0C1EC2B7 /* WindowChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96130FC87B705945F4C71D46 /* WindowChrome.swift */; };
 		EABD5CAF4F088F66CB9F5729 /* PageTextBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40BC6A4A9FD50D32512C1F26 /* PageTextBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0207136EEE0E43253645C0CA /* DomainIconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainIconStore.swift; sourceTree = "<group>"; };
 		1165969AA771543BBA03CA42 /* Pane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pane.swift; sourceTree = "<group>"; };
 		1612C204896B51E2EF4EC3D0 /* Control.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Control.swift; sourceTree = "<group>"; };
 		165F30266EF6AC64DB4A4E7A /* Surface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surface.swift; sourceTree = "<group>"; };
@@ -70,6 +73,7 @@
 		5F2818D11AF009F51DF7E8C8 /* KiwiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KiwiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		64DBD37FC93C853C4D225125 /* ToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarView.swift; sourceTree = "<group>"; };
 		6BB7DB4F423A2C5CB5552058 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
+		7C944C9F6EFE4C48382F72E9 /* KiwiPasskeys.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = KiwiPasskeys.entitlements; sourceTree = "<group>"; };
 		7DC7A947C22ED4A5E2730C2B /* Jev.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jev.swift; sourceTree = "<group>"; };
 		86F45B94DA095CFD93BB445E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		8C82513F8505D72349A72D44 /* PageContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageContext.swift; sourceTree = "<group>"; };
@@ -151,6 +155,7 @@
 				EE379E73D9A15A294E733313 /* Info.plist */,
 				38919C1630BC57AA242C72DB /* Kiwi.entitlements */,
 				521004CD4E17A7F11E8A94E5 /* KiwiApp.swift */,
+				7C944C9F6EFE4C48382F72E9 /* KiwiPasskeys.entitlements */,
 				D42563DE199E8D3DA7F57AEB /* App */,
 				5D8F0A19AF70AA4E44734AE8 /* Chrome */,
 				ADF0DA3947C2611423BA0F8C /* Model */,
@@ -173,6 +178,7 @@
 				FEEAC49C8B264C0139C73DDD /* AssistancePreferences.swift */,
 				1A35553141B410C78A89E6FC /* BrowsingHistory.swift */,
 				32FB3815664D35FC37459B00 /* DomainIconCache.swift */,
+				0207136EEE0E43253645C0CA /* DomainIconStore.swift */,
 				7DC7A947C22ED4A5E2730C2B /* Jev.swift */,
 				1DA4E064FDAE4CAFAA24C4FF /* JevCredential.swift */,
 				8C82513F8505D72349A72D44 /* PageContext.swift */,
@@ -326,6 +332,7 @@
 				69562FCB7266DDA023B2EA9A /* ContentView.swift in Sources */,
 				061B0DF730E6CC7EFDADBB1C /* Control.swift in Sources */,
 				15651E313BE38C060E12E2C0 /* DomainIconCache.swift in Sources */,
+				4D5901727D6A45B82B252D7F /* DomainIconStore.swift in Sources */,
 				8F32CB588318108C1811F61C /* EmptyPaneView.swift in Sources */,
 				676B07F41F1D6A9944331526 /* Intent.swift in Sources */,
 				1AE699193402CB4CCB279E75 /* Jev.swift in Sources */,
@@ -355,6 +362,7 @@
 				CC6313A21E75FD18E02B37D9 /* AssistancePreferences.swift in Sources */,
 				7DB42E61D472CA902D99F8FB /* BrowsingHistory.swift in Sources */,
 				6CABCBCA9247E937CB74A2D3 /* DomainIconCache.swift in Sources */,
+				E980C6FDAAE0CE6BAC1DB9AA /* DomainIconStore.swift in Sources */,
 				D3DE010D5A363639BE07CD32 /* Intent.swift in Sources */,
 				6E033D5E33697FDCCDFA80D4 /* Jev.swift in Sources */,
 				8A6513784B0210FCBE86346F /* JevCredential.swift in Sources */,

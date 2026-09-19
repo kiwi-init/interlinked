@@ -18,7 +18,7 @@ Click a page icon to switch directly. Click the current page's favicon for a sea
 
 The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state while WebKit can throttle their rendering.
 
-Favicons are fetched once per open hostname and shared across tabs. Closing or navigating away from the last tab on that hostname releases its icon and cancels any pending fetch. Failed lookups are also remembered until that hostname is no longer open. Page previews are captured when you open the overview.
+Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Kiwi/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
 Tabs restore from `~/Library/Application Support/Kiwi/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
 
@@ -31,6 +31,8 @@ Meaning search uses Jev to select the best answer and rank existing page text by
 **Might need later** explicitly saves the current page's URL, metadata and selected text on this Mac. Ordinary browsing does not save pages to Vault. Search saved pages from the address field; use **Find by description** to ask Jev to rank saved excerpts. Vault stores text, not screenshots, and can be cleared in Settings.
 
 Configure Jev and an OpenRouter key in Settings. The key stays in macOS Keychain. Critical reading runs automatically on public pages by default. Settings can change it to **Run only when asked**. Meaning searches, reading checks and Vault description searches send page or saved text to OpenRouter and TypeSafe. Automatic public-page label refinement has a separate opt-in setting. Requests use the [OpenRouter decisions API](https://openrouter.ai/openapi.json) with [Jev 1.13](https://openrouter.ai/typesafe/jev-1.13), with cancellation and an in-memory cache. Exact find and local labels work without a key.
+
+When Jev replaces the local page label with its selected label, the page handle briefly picks up a spectrum glow. Local labels and names you type yourself do not trigger it.
 
 Critical reading checks public pages after they load. To run it again, click **Critical reading** in the bottom-right controls or choose **Page → Critical Reading…** in the macOS menu bar. Progress appears on the button. Results highlight the source paragraphs in yellow. Hover or click a highlighted paragraph to see its evaluation beside the text; the note has previous/next controls. Click elsewhere to hide the note, or click **Critical reading** again to clear all annotations. It identifies possible loaded wording, emotional pressure, unsupported certainty and opinion presented as fact. It does not verify factual claims.
 
@@ -53,6 +55,18 @@ Critical reading checks public pages after they load. To run it again, click **C
 | `cmd-q` | Quit |
 
 Voice needs microphone and speech-recognition permission, which macOS asks for the first time.
+
+## Passkeys and Touch ID
+
+WebKit only permits a third-party browser to use passkeys for arbitrary websites when Apple has approved the app for the managed `com.apple.developer.web-browser.public-key-credential` entitlement. The ordinary `script/run` build stays ad-hoc signed and cannot use passkeys.
+
+The Account Holder must first submit Apple's [macOS browser passkey entitlement request](https://developer.apple.com/contact/request/macos-browsers-passkeys/). After Apple enables the capability for the app's Developer account, run the provisioned build with:
+
+```sh
+INTERLINKED_DEVELOPMENT_TEAM=YOUR_TEAM_ID script/run-passkeys
+```
+
+The script stops if Xcode cannot provision that managed capability or if the signed app does not contain it. Once present, `WKWebView` handles WebAuthn challenges and macOS presents the passkey and Touch ID UI.
 
 ## Development
 
