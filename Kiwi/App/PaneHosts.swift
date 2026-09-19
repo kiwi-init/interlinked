@@ -10,6 +10,7 @@ final class PaneHosts {
     @ObservationIgnored private var coordinators: [PaneID: BrowserCoordinator] = [:]
     @ObservationIgnored private var iconTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var iconCache = DomainIconCache<NSImage>()
+    @ObservationIgnored private let iconStore = DomainIconStore()
     @ObservationIgnored private var pageURLs: [PaneID: URL] = [:]
     @ObservationIgnored private var capturing: Set<PaneID> = []
     private(set) var titles: [PaneID: String] = [:]
@@ -98,6 +99,14 @@ final class PaneHosts {
             owners[pane] = DomainIconCache<NSImage>.domain(url)
         }
         for domain in iconCache.retain(owners) { iconTasks.removeValue(forKey: domain)?.cancel() }
+        for domain in Set(owners.values) where !iconCache.contains(domain) {
+            guard let data = iconStore.data(for: domain) else { continue }
+            guard let image = NSImage(data: data) else {
+                iconStore.remove(domain)
+                continue
+            }
+            _ = iconCache.restore(domain, value: image)
+        }
         publishFavicons()
     }
 
@@ -117,6 +126,7 @@ final class PaneHosts {
             var candidates = DomainIconCache<NSImage>.domain(view?.url) == domain ? links.compactMap(URL.init(string:)) : []
             if let fallback = URL(string: "/favicon.ico", relativeTo: page)?.absoluteURL { candidates.append(fallback) }
             var icon: NSImage?
+            var iconData: Data?
             var tried: Set<URL> = []
             for url in candidates where ["https", "http"].contains(url.scheme ?? "") && tried.insert(url).inserted {
                 guard !Task.isCancelled else { return }
@@ -125,10 +135,12 @@ final class PaneHosts {
                       (response as? HTTPURLResponse)?.statusCode == 200,
                       data.count < 1_048_576, let image = NSImage(data: data) else { continue }
                 icon = image
+                iconData = data
                 break
             }
             guard !Task.isCancelled, let self,
                   self.iconCache.complete(domain, token: token, value: icon) else { return }
+            if let iconData { try? self.iconStore.write(iconData, for: domain) }
             self.iconTasks.removeValue(forKey: domain)
             self.publishFavicons()
         }

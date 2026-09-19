@@ -29,6 +29,16 @@ struct DomainIconCache<Value> {
         return token
     }
 
+    mutating func restore(_ domain: String, value: Value) -> Bool {
+        guard owners.values.contains(domain), entries[domain] == nil else { return false }
+        entries[domain] = Entry(token: UUID(), value: value)
+        return true
+    }
+
+    func contains(_ domain: String) -> Bool {
+        entries[domain] != nil
+    }
+
     @discardableResult
     mutating func complete(_ domain: String, token: UUID, value: Value?) -> Bool {
         guard entries[domain]?.token == token else { return false }

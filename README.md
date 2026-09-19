@@ -18,7 +18,7 @@ Click a page icon to switch directly. Click the current page's favicon for a sea
 
 The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state while WebKit can throttle their rendering.
 
-Favicons are fetched once per open hostname and shared across tabs. Closing or navigating away from the last tab on that hostname releases its icon and cancels any pending fetch. Failed lookups are also remembered until that hostname is no longer open. Page previews are captured when you open the overview.
+Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Kiwi/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
 Tabs restore from `~/Library/Application Support/Kiwi/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
 
