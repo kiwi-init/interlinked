@@ -508,6 +508,11 @@ std::atomic_bool g_running(false);
   [self updateBrowserVisibility];
 }
 
+- (void)setFrameSize:(NSSize)newSize {
+  [super setFrameSize:newSize];
+  [self syncBrowserViewFrame];
+}
+
 - (void)createBrowserIfPossible {
   if (_browser || _client || !ILChromiumRuntime.running) {
     return;
@@ -531,17 +536,29 @@ std::atomic_bool g_running(false);
   if (!_browser) {
     return;
   }
+  [self syncBrowserViewFrame];
   NSView *browserView = (__bridge NSView *)_browser->GetHost()->GetWindowHandle();
   if (browserView && browserView != self) {
-    // CEF owns a windowed child NSView with autoresizing enabled. Explicitly
-    // hiding it while SwiftUI detaches a background tab stops AppKit/Core
-    // Animation from compositing a page that cannot be seen. CEF's WasHidden
-    // API is only valid for windowless rendering and must not be used here.
+    // Hiding the windowed child while SwiftUI detaches a background tab stops
+    // AppKit/Core Animation from compositing a page that cannot be seen. CEF's
+    // WasHidden API is only valid for windowless rendering.
     browserView.hidden = self.window == nil;
   }
   if (self.window == nil) {
     _browser->GetHost()->SetFocus(false);
   }
+}
+
+- (void)syncBrowserViewFrame {
+  if (!_browser) {
+    return;
+  }
+  NSView *browserView = (__bridge NSView *)_browser->GetHost()->GetWindowHandle();
+  if (!browserView || browserView == self) {
+    return;
+  }
+  browserView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  browserView.frame = self.bounds;
 }
 
 - (void)navigateToURL:(NSURL *)URL {
