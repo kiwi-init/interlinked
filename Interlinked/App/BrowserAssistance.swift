@@ -2,7 +2,7 @@ import AppKit
 import Observation
 import WebKit
 
-struct JevLabelEffect: Equatable {
+struct AILabelEffect: Equatable {
     var id = UUID()
     var pane: PaneID
 }
@@ -38,7 +38,7 @@ final class BrowserAssistance {
     var groups: [ResearchGroup] = []
     private(set) var metadata: [PaneID: PageMetadata] = [:]
     private(set) var labels: [PaneID: String] = [:]
-    private(set) var labelEffect: JevLabelEffect?
+    private(set) var labelEffect: AILabelEffect?
     private(set) var grants: [PaneID: String] = [:]
     let history = BrowsingHistory()
     let personalFilters = PersonalFilters()
@@ -46,7 +46,7 @@ final class BrowserAssistance {
     var automaticLabels = UserDefaults.standard.bool(forKey: "jev.labels")
     var criticalReadingMode = CriticalReadingMode()
     @ObservationIgnored weak var workspace: Workspace?
-    @ObservationIgnored private var service: JevService
+    @ObservationIgnored private var intelligence: BrowserIntelligence
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var revisions: [String: RequestRevision] = [:]
     @ObservationIgnored private var resultDocument = ""
@@ -55,8 +55,8 @@ final class BrowserAssistance {
     @ObservationIgnored private var readingInFlight: [PaneID: String] = [:]
     @ObservationIgnored private var filterResults: [PaneID: [UUID: Int]] = [:]
 
-    init(service: JevService = JevService()) {
-        self.service = service
+    init(intelligence: BrowserIntelligence = BrowserIntelligence()) {
+        self.intelligence = intelligence
         refreshCredentialStatus()
     }
     var current: PageMetadata? { workspace?.activePane.flatMap { metadata[$0] } }
@@ -133,8 +133,7 @@ final class BrowserAssistance {
                 if self.metadata[pane]?.document != page.document { self.grants.removeValue(forKey: pane) }
                 self.metadata[pane] = page
                 self.labels[pane] = ContextLabels.candidates(page).first?.text
-                if self.enabled && self.automaticLabels && self.hasJevAccess && page.publicWebPage {
-                    self.grants[pane] = page.document
+                if self.automaticLabels && page.publicWebPage {
                     self.selectLabel(pane, page: page)
                 }
                 self.applyPersonalFilters(pane: pane, page: page, view: view)
@@ -187,7 +186,7 @@ final class BrowserAssistance {
         matches = []; findings = []; groups = []
         labelEffect = nil
         labels = metadata.mapValues { ContextLabels.candidates($0).first?.text ?? $0.host }
-        Task { await service.reset() }
+        Task { await intelligence.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
         if let pane = workspace?.activePane, let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) {
             applyPersonalFilters(pane: pane, page: page, view: view)
@@ -195,17 +194,17 @@ final class BrowserAssistance {
     }
     func clearHistory() {
         cancel("history"); history.clear(); historyResults = []; historyStatus = "Vault cleared."
-        Task { await service.reset() }
+        Task { await intelligence.reset() }
     }
     func forgetVisit(_ id: UUID) {
         cancel("history"); history.remove(id); historyResults.removeAll { $0.id == id }
-        Task { await service.reset() }
+        Task { await intelligence.reset() }
     }
     func clearDecisionCache() {
         cacheStatus = "Clearing…"
         Task { [weak self] in
             guard let self else { return }
-            await self.service.clearCache()
+            await self.intelligence.clearCache()
             self.cacheStatus = "AI cache cleared."
         }
     }
@@ -231,25 +230,32 @@ final class BrowserAssistance {
     func revokePage() {
         if let pane = workspace?.activePane { grants.removeValue(forKey: pane); cancel("label-\(pane.rawValue)") }
         cancel("find"); cancel("reading"); cancel("groups"); busy = false; matches = []; findings = []; groups = []
-        Task { await service.reset() }
+        Task { await intelligence.reset() }
     }
     private func selectLabel(_ pane: PaneID, page: PageMetadata) {
         let candidates = ContextLabels.candidates(page)
         guard !candidates.isEmpty else { return }
+        let allowJev = enabled && hasJevAccess && (automaticLabels || grants[pane] == page.document)
         let key = "label-\(pane.rawValue)", revision = token("label-\(pane.rawValue)")
         tasks[key] = Task { [weak self] in
             guard let self else { return }
             do {
-                let response = try await self.service.decide(ContextLabels.request(page, candidates: candidates))
-                guard self.accepts(key, revision), self.grants[pane] == page.document,
-                      self.metadata[pane]?.document == page.document else { return }
-                if let label = ContextLabels.selected(response, candidates: candidates), label != self.labels[pane] {
-                    self.labels[pane] = label
-                    self.labelEffect = JevLabelEffect(pane: pane)
+                let decision = try await self.intelligence.refinePageLabel(
+                    page: page, candidates: candidates, allowJev: allowJev)
+                guard self.accepts(key, revision), self.metadata[pane]?.document == page.document,
+                      let decision else { return }
+                if decision.source == .jev { self.grants[pane] = page.document }
+                if decision.value != self.labels[pane] {
+                    self.labels[pane] = decision.value
+                    self.labelEffect = AILabelEffect(pane: pane)
                 }
-                self.lastDecisionStatus = "Live Jev label decision received"
+                self.lastDecisionStatus = "\(decision.source.rawValue) label decision received"
             } catch { if self.accepts(key, revision) { self.lastDecisionStatus = self.errorMessage(error) } }
         }
+    }
+
+    func navigationAdvice(_ review: NavigationReview) async -> String? {
+        await intelligence.navigationAdvice(review)
     }
 
     var savedInVault: Bool { current.map { page in history.visits.contains { $0.url == page.url } } ?? false }
@@ -352,10 +358,10 @@ final class BrowserAssistance {
                                                                        candidates: extract.candidates)
                     if matches.isEmpty, self.enabled, self.hasJevAccess {
                         for candidates in PersonalFilterDecisions.batches(extract.candidates) {
-                            let response = try await self.service.decide(
-                                PersonalFilterDecisions.request(description: rule.description, candidates: candidates))
+                            let decision = try await self.intelligence.personalFilterMatches(
+                                description: rule.description, candidates: candidates)
                             try Task.checkCancellation()
-                            matches.append(contentsOf: PersonalFilterDecisions.matches(response, candidates: candidates))
+                            matches.append(contentsOf: decision.value)
                             usedJev = true
                         }
                     }
@@ -471,23 +477,22 @@ final class BrowserAssistance {
                     }
                     return
                 }
-                let response: JevResponse
+                var readingFindings: [PassageDecisions.Finding] = []
+                var meaningDecision: MeaningDecision?
                 if reading {
-                    var answers: [String: JevAnswer] = [:]
                     let batches = PassageDecisions.readingBatches(candidates)
                     for (index, batch) in batches.enumerated() {
                         self.status = batches.count == 1
                             ? "Checking selected passages…"
                             : "Checking passage batch \(index + 1) of \(batches.count)…"
-                        let partial = try await self.service.decide(PassageDecisions.readingRequest(batch))
+                        let partial = try await self.intelligence.criticalReading(batch)
                         try Task.checkCancellation()
                         guard self.accepts(key, revision), self.workspace?.activePane == pane,
                               self.grants[pane] == page.document, view.url?.absoluteString == extract.url else { return }
-                        answers.merge(partial.answers) { _, new in new }
+                        readingFindings.append(contentsOf: partial.value)
                     }
-                    response = JevResponse(answers: answers)
                 } else {
-                    response = try await self.service.decide(PassageDecisions.findRequest(query: query, passages: candidates))
+                    meaningDecision = try await self.intelligence.meaningFind(query: query, passages: candidates).value
                 }
                 guard self.accepts(key, revision), self.workspace?.activePane == pane, self.grants[pane] == page.document,
                       view.url?.absoluteString == extract.url else { return }
@@ -495,7 +500,7 @@ final class BrowserAssistance {
                 self.lastDecisionStatus = "Jev decision received for " + (reading ? "reading" : "find")
                 let coverage = "Checked \(candidates.count) passages" + (extract.truncated ? "; page coverage is limited." : ".")
                 if reading {
-                    self.findings = PassageDecisions.findings(response, passages: candidates)
+                    self.findings = readingFindings
                     self.status = (self.findings.isEmpty ? "No clear signals selected. " : "Possible wording signals. ") + coverage
                     let shown = await PageTextBridge.annotate(self.findings, document: extract.document, view: view)
                     self.readingInFlight.removeValue(forKey: pane)
@@ -507,8 +512,8 @@ final class BrowserAssistance {
                         self.readingResults.removeValue(forKey: pane)
                     }
                 } else {
-                    self.findScores = Dictionary(uniqueKeysWithValues: candidates.map { ($0.text, response.answers[$0.id]?.score ?? -1) })
-                    self.matches = PassageDecisions.matches(response, passages: candidates)
+                    self.findScores = meaningDecision?.scores ?? [:]
+                    self.matches = meaningDecision?.matches ?? []
                     self.status = self.matches.isEmpty ? "No clear meaning matches. \(coverage)" : "\(self.matches.count) possible matches. \(coverage)"
                     if let first = self.matches.first { self.show(first) }
                 }
@@ -545,12 +550,15 @@ final class BrowserAssistance {
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(500))
-                try self.requireReady()
-                let response = try await self.service.decide(BrowsingHistory.request(query, visits: candidates))
+                let decision = try await self.intelligence.vaultMatches(
+                    query: query, visits: candidates, allowJev: self.enabled && self.hasJevAccess)
                 guard self.accepts(key, revision), self.workspace?.editing?.text == text else { return }
                 let live = Set(self.history.visits.map(\.id))
-                self.historyResults = BrowsingHistory.ranked(response, visits: candidates).filter { live.contains($0.id) }
-                self.historyStatus = self.historyResults.isEmpty ? "No clear matches in the 24 saved candidates." : "Saved pages matching your description"
+                if let decision {
+                    self.historyResults = decision.value.filter { live.contains($0.id) }
+                    self.lastDecisionStatus = "\(decision.source.rawValue) decision received for Vault"
+                }
+                self.historyStatus = self.historyResults.isEmpty ? "No clear matches in saved pages." : "Saved pages matching your description"
             } catch {
                 guard self.accepts(key, revision) else { return }
                 self.historyStatus = self.errorMessage(error)
@@ -564,16 +572,22 @@ final class BrowserAssistance {
             return ResearchPage(id: String(tab.id.rawValue), title: page.title.isEmpty ? page.host : page.title, detail: page.summary, host: page.host)
         }
         groups = ResearchRelations.groups(pages)
+        guard pages.count >= 2 else { return }
         let allowed = pages.filter { page in workspace.tabs.first { String($0.id.rawValue) == page.id }.map { grants[$0.active] == metadata[$0.active]?.document && grants[$0.active] != nil } ?? false }
-        guard enabled, hasJevAccess, allowed.count >= 2 else { return }
         let key = "groups", revision = token(key)
         tasks[key] = Task { [weak self] in
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
-                let response = try await self.service.decide(ResearchRelations.request(allowed))
+                let decision = try await self.intelligence.relatedPageGroups(
+                    pages: pages,
+                    jevPages: allowed,
+                    allowJev: self.enabled && self.hasJevAccess && allowed.count >= 2)
                 guard self.accepts(key, revision), workspace.overviewOpen else { return }
-                self.groups = ResearchRelations.groups(allowed, response: response)
+                if let decision {
+                    self.groups = decision.value
+                    self.lastDecisionStatus = "\(decision.source.rawValue) decision received for related pages"
+                }
             } catch { /* Local groups remain stable. */ }
         }
     }

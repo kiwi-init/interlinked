@@ -118,13 +118,13 @@ struct AssistanceSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Page labels") {
-                Toggle("Refine public page labels with Jev", isOn: $assistant.automaticLabels)
+                Toggle("Refine public page labels with AI", isOn: $assistant.automaticLabels)
                     .onChange(of: assistant.automaticLabels) { _, _ in assistant.configure() }
-                Text("Sends public page titles, descriptions and locally generated label candidates automatically. Full page text and URL queries are excluded. Keep this off for local labels only.")
+                Text("Apple Intelligence selects from locally generated labels on supported Macs. If it is unavailable and Jev is enabled, Interlinked can use Jev instead. Full page text and URL queries are excluded. Keep this off for deterministic labels only.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Vault") {
-                Text("The Vault button saves a page's URL, title and selected text on this Mac. Pages are saved only when you ask. While you type a search in the address field, Interlinked checks local Vault matches and may send the query with relevant saved excerpts to Jev. Images and form contents are not recorded.")
+                Text("The Vault button saves a page's URL, title and selected text on this Mac. Pages are saved only when you ask. Address-field searches try Apple Intelligence on up to six local candidates first. If it is unavailable and Jev is enabled, Interlinked may send the query with relevant saved excerpts to Jev. Images and form contents are not recorded.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("\(assistant.history.visits.count) saved pages")

@@ -184,7 +184,7 @@ struct PageHandle: View {
                         .padding(.trailing, 14)
                 } else {
                     Button { workspace.editActiveLine() } label: {
-                        JevLabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
+                        AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
                             .lineLimit(1)
                             .padding(.trailing, 16)
                             .frame(height: 44)
@@ -201,7 +201,7 @@ struct PageHandle: View {
         .frame(width: size.width, height: size.height, alignment: .bottomLeading)
         .clipShape(RoundedRectangle(cornerRadius: workspace.overviewOpen ? 20 : 14, style: .continuous))
         .modifier(PageGlass(radius: workspace.overviewOpen ? 20 : 14))
-        .modifier(JevLabelGlow(effect: workspace.assistance.labelEffect, pane: pane,
+        .modifier(AILabelGlow(effect: workspace.assistance.labelEffect, pane: pane,
                                radius: workspace.overviewOpen ? 20 : 14))
         .foregroundStyle(palette.text)
         .onHover { workspace.quickSwitchOpen = $0 }
@@ -244,13 +244,13 @@ struct PageHandle: View {
 
 }
 
-/// Jev's chosen label arrives with a brief spectrum sweep. The ordinary local
+/// An AI-refined label arrives with a brief spectrum sweep. The ordinary local
 /// label and user-authored tab names retain the browser's normal text color.
-private struct JevLabel: View {
+private struct AILabel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var identity: String
     var pane: PaneID?
-    var effect: JevLabelEffect?
+    var effect: AILabelEffect?
     @State private var sweep: CGFloat = -1
     @State private var rainbowOpacity = 0.0
 
@@ -295,10 +295,10 @@ private struct JevLabel: View {
 }
 
 /// A restrained version of the Apple Intelligence spectrum glow. It hugs the
-/// glass handle only while the Jev-authored label is being revealed.
-private struct JevLabelGlow: ViewModifier {
+/// glass handle only while the AI-refined label is being revealed.
+private struct AILabelGlow: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var effect: JevLabelEffect?
+    var effect: AILabelEffect?
     var pane: PaneID?
     var radius: CGFloat
     @State private var glowOpacity = 0.0

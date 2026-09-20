@@ -130,7 +130,7 @@ enum PassageDecisions {
     static let readingBatchSize = 40
     static let readingTextLimit = 1_600
 
-    struct Finding: Identifiable, Equatable {
+    struct Finding: Identifiable, Equatable, Sendable {
         var passage: PagePassage
         var signal: Signal
         var id: String { passage.id }

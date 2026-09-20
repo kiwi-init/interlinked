@@ -1,4 +1,5 @@
 import XCTest
+import WebKit
 
 final class PaneTests: XCTestCase {
     func leaf(_ id: UInt64) -> Pane { .leaf(PaneID(id)) }
@@ -111,6 +112,86 @@ final class IntentTests: XCTestCase {
         }
         XCTAssertNil(Intent.command("what is the weather like"))
         XCTAssertNil(Intent.command("tab zero"))
+    }
+}
+
+final class NavigationSafetyTests: XCTestCase {
+    func testWebKitFraudWarningsAreExplicitlyEnabled() {
+        let preferences = WKPreferences()
+        preferences.isFraudulentWebsiteWarningEnabled = false
+        NavigationSafety.configure(preferences)
+        XCTAssertTrue(preferences.isFraudulentWebsiteWarningEnabled)
+    }
+
+    func testOrdinarySameSiteNavigationIsAllowed() throws {
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://shop.example.com/cart")),
+            source: try XCTUnwrap(URL(string: "https://www.example.com/products")),
+            kind: .link,
+            linkText: "View cart"
+        )
+        XCTAssertEqual(review.disposition, .allow)
+        XCTAssertTrue(review.reasons.isEmpty)
+    }
+
+    func testActiveContentDestinationsAreBlocked() throws {
+        for address in ["javascript:alert(1)", "data:text/html,hello"] {
+            let review = NavigationSafety.review(
+                destination: try XCTUnwrap(URL(string: address)), source: nil, kind: .link)
+            XCTAssertEqual(review.disposition, .block)
+            XCTAssertTrue(review.reasons.contains(.activeContentURL))
+        }
+    }
+
+    func testCredentialsAndPrivateURLPartsNeverReachAdvisoryEvidence() throws {
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://person:secret@example.com/private?token=hidden#account")),
+            source: try XCTUnwrap(URL(string: "https://source.test/start?private=yes")),
+            kind: .link
+        )
+        XCTAssertEqual(review.disposition, .warn)
+        XCTAssertTrue(review.reasons.contains(.embeddedCredentials))
+        XCTAssertTrue(review.advisoryEvidence.contains("https://example.com"))
+        for privateValue in ["person", "secret", "private", "token", "hidden", "account"] {
+            XCTAssertFalse(review.advisoryEvidence.contains(privateValue))
+        }
+    }
+
+    func testDowngradesEncodedHostsAndUnusualPortsWarn() throws {
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "http://xn--paypl-3ve.test:8080/login")),
+            source: try XCTUnwrap(URL(string: "https://bank.test")),
+            kind: .link
+        )
+        XCTAssertEqual(review.disposition, .warn)
+        XCTAssertTrue(review.reasons.contains(.insecureDowngrade))
+        XCTAssertTrue(review.reasons.contains(.encodedHostname))
+        XCTAssertTrue(review.reasons.contains(.unusualPort))
+    }
+
+    func testCrossSiteFormsAndMisleadingHostTextWarn() throws {
+        let source = try XCTUnwrap(URL(string: "https://accounts.example.com/profile"))
+        let crossSite = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://collector.test/submit")),
+            source: source,
+            kind: .form
+        )
+        XCTAssertTrue(crossSite.reasons.contains(.crossOriginForm))
+
+        let sameSite = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://checkout.example.com/submit")),
+            source: source,
+            kind: .form
+        )
+        XCTAssertFalse(sameSite.reasons.contains(.crossOriginForm))
+
+        let misleading = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://paypa1.test/sign-in")),
+            source: source,
+            kind: .link,
+            linkText: "Sign in at paypal.com"
+        )
+        XCTAssertTrue(misleading.reasons.contains(.misleadingLinkText))
     }
 }
 
