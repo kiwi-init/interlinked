@@ -1305,32 +1305,9 @@ struct PageTools: View {
     var body: some View {
         @Bindable var assistant = assistant
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Button {
-                    workspace.downloads.closePanel()
-                    open ? assistant.closePanel() : assistant.openFind()
-                } label: {
-                    if open {
-                        Label("Find for me", systemImage: "magnifyingglass")
-                            .labelStyle(ToolboxLabelStyle())
-                            .padding(.leading, 12)
-                            .frame(width: 124, alignment: .leading)
-                            .frame(minHeight: 40)
-                            .contentShape(Rectangle())
-                    } else {
-                        ToolboxRowLabel(
-                            title: "Find for me",
-                            symbol: "magnifyingglass",
-                            shortcut: workspace.toolboxShortcutLabel(.find)
-                        )
-                    }
-                }
-                .accessibilityLabel("Find for me").help("Find in page · ⌘F").accessibilityIdentifier("page-search-button")
-                .contextMenu {
-                    Toggle("Match by meaning with Jev", isOn: $assistant.byMeaning)
-                    Button("Exact text only") { assistant.byMeaning = false; assistant.findChanged() }
-                }
-                if open {
+            if open {
+                HStack(spacing: 8) {
+                    findButton
                     WorkInput(text: $assistant.query, placeholder: "Find…", identifier: "page-find", fontSize: 12,
                               palette: palette, submit: { assistant.moveMatch(1) }, cancel: assistant.closePanel,
                               moveSelection: assistant.moveMatch)
@@ -1348,11 +1325,12 @@ struct PageTools: View {
                         .accessibilityLabel("Next match")
                     Button(action: assistant.closePanel) { Image(systemName: "xmark").frame(width: 22, height: 30) }
                         .accessibilityLabel("Close find")
-                } else {
-                    Spacer(minLength: 0)
                 }
+                .frame(height: 40)
+            } else {
+                findButton
+                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             }
-            .frame(height: 40)
 
             toolboxButton(assistant.savedInVault ? "Update Vault" : "Save to Vault",
                           symbol: assistant.savedInVault ? "archivebox.fill" : "archivebox", shortcut: .vault,
@@ -1377,6 +1355,38 @@ struct PageTools: View {
         .onChange(of: assistant.byMeaning) { _, _ in assistant.findChanged() }
         .animation(reduceMotion ? nil : Metrics.morph, value: open)
         .animation(reduceMotion ? nil : Metrics.morph, value: assistant.criticalReadingMode)
+    }
+
+    private var findButton: some View {
+        Button {
+            workspace.downloads.closePanel()
+            open ? assistant.closePanel() : assistant.openFind()
+        } label: {
+            if open {
+                Label("Find for me", systemImage: "magnifyingglass")
+                    .labelStyle(ToolboxLabelStyle())
+                    .padding(.leading, 12)
+                    .frame(width: 124, alignment: .leading)
+                    .frame(minHeight: 40)
+                    .contentShape(Rectangle())
+            } else {
+                ToolboxRowLabel(
+                    title: "Find for me",
+                    symbol: "magnifyingglass",
+                    shortcut: workspace.toolboxShortcutLabel(.find)
+                )
+            }
+        }
+        .accessibilityLabel("Find for me")
+        .help("Find in page · ⌘F")
+        .accessibilityIdentifier("page-search-button")
+        .contextMenu {
+            Toggle("Match by meaning with Jev", isOn: Binding(
+                get: { assistant.byMeaning },
+                set: { assistant.byMeaning = $0 }
+            ))
+            Button("Exact text only") { assistant.byMeaning = false; assistant.findChanged() }
+        }
     }
 
     private func toolboxButton(_ title: String, symbol: String, shortcut: ToolboxShortcut,

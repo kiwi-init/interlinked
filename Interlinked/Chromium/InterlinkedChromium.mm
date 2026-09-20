@@ -635,6 +635,11 @@ std::atomic_bool g_running(false);
   _browser = browser;
   _client->ObserveDevTools(browser);
   [self updateBrowserVisibility];
+  NSString *pendingURLString = _pendingURL.absoluteString;
+  NSString *createdURLString = NSStringFromCef(browser->GetMainFrame()->GetURL());
+  if (pendingURLString.length > 0 && ![pendingURLString isEqualToString:createdURLString]) {
+    browser->GetMainFrame()->LoadURL(CefFromNSString(pendingURLString));
+  }
   [self.delegate chromiumViewDidCreateBrowser:self];
 }
 

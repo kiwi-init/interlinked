@@ -43,6 +43,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         LSApplicationCategoryType: public.app-category.productivity
         NSCameraUsageDescription: Interlinked lets websites use the camera only after you approve their request.
+        NSBluetoothAlwaysUsageDescription: Interlinked lets websites use nearby Bluetooth devices only after you approve their request.
         NSHumanReadableCopyright: Copyright © 2026 Jonatas Walker. All rights reserved.
         NSMicrophoneUsageDescription: Interlinked uses the microphone for voice navigation and for websites you authorize.
         NSLocationWhenInUseUsageDescription: Interlinked lets websites use your location only after you approve their request.

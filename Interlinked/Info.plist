@@ -42,6 +42,8 @@
 	<string>public.app-category.productivity</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Interlinked lets websites use the camera only after you approve their request.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Interlinked lets websites use nearby Bluetooth devices only after you approve their request.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Jonatas Walker. All rights reserved.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
