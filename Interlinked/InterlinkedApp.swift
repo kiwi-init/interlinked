@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appearanceObservation: NSKeyValueObservation?
     private var pendingWebURLs: [URL] = []
     private(set) var chromiumStartupError: Error?
+    private var closingChromium = false
+    private var chromiumClosed = false
 
     private func startChromium() {
         guard !ILChromiumRuntime.isRunning else { return }
@@ -105,6 +107,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startChromium()
+        // Every window shares one Workspace and its Chromium views, and an
+        // NSView can live in only one window.
+        NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
@@ -130,6 +135,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateApplicationIcon(for appearance: NSAppearance) {
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         NSApp.applicationIconImage = isDark ? NSImage(named: "AppIconDark") : nil
+    }
+
+    /// Chromium must close every browser and shut down outside its own message
+    /// loop before AppKit exits, so quitting is always a two-step handshake.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard ILChromiumRuntime.isRunning, !chromiumClosed else { return .terminateNow }
+        guard !closingChromium else { return .terminateCancel }
+        closingChromium = true
+        Workspace.shared?.stop()
+        // Command-Q typed into a page reaches the menu from inside Chromium's
+        // message loop. AppKit's terminate-later run loop would starve that
+        // loop, so cancel this request and terminate again once it has unwound.
+        let nested = ILChromiumRuntime.isPumpingMessages
+        ILChromiumRuntime.closeAllBrowsers { [weak self] _ in
+            MainActor.assumeIsolated {
+                ILChromiumRuntime.shutdown()
+                self?.chromiumClosed = true
+                if nested {
+                    NSApp.terminate(nil)
+                } else {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                }
+            }
+        }
+        return nested ? .terminateCancel : .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

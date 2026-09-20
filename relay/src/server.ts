@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Environment, SignedDataVerifier } from "@apple/app-store-server-library";
 import { createRelay } from "./app.js";
 import { SQLiteCache } from "./sqlite.js";
@@ -52,6 +52,16 @@ const relay = createRelay({
 
 const port = Number(process.env.PORT ?? 8080);
 createServer(async (request, response) => {
+  try {
+    await handle(request, response);
+  } catch {
+    // A malformed URL, aborted upload, or upstream failure must not end the process.
+    if (!response.headersSent) response.writeHead(400, { "content-type": "application/json" });
+    response.end('{"error":"bad_request"}');
+  }
+}).listen(port);
+
+async function handle(request: IncomingMessage, response: ServerResponse) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -72,4 +82,4 @@ createServer(async (request, response) => {
   });
   response.writeHead(result.status, result.headers);
   response.end(result.body);
-}).listen(port);
+}

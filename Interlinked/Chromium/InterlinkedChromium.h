@@ -40,6 +40,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ILChromiumRuntime : NSObject
 
 @property(class, nonatomic, readonly, getter=isRunning) BOOL running;
+/// True while the main thread is inside Chromium's message loop work.
+@property(class, nonatomic, readonly, getter=isPumpingMessages) BOOL pumpingMessages;
 @property(class, nonatomic, readonly, copy) NSString *engineVersion;
 @property(class, nonatomic, readonly) BOOL supportsManifestV3Extensions;
 
@@ -49,6 +51,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)prepareManifestV3ExtensionPaths:(NSArray<NSString *> *)paths;
 
 + (BOOL)startWithError:(NSError * _Nullable * _Nullable)error;
+/// Closes every Chromium browser. The completion runs on the main thread,
+/// outside Chromium's message loop, with NO if some browser failed to close.
++ (void)closeAllBrowsersWithCompletion:(void (^)(BOOL closed))completion;
+/// Call only after every browser has closed.
 + (void)shutdown;
 
 @end

@@ -192,7 +192,8 @@ actor BrowserIntelligence {
         let response = try await observed(source: .jev, action: "Meaning search") {
             try await jev.decide(PassageDecisions.findRequest(query: query, passages: passages))
         }
-        let scores = Dictionary(uniqueKeysWithValues: passages.map { ($0.text, response.answers[$0.id]?.score ?? -1) })
+        // Passage text repeats on real pages (two images without alt text).
+        let scores = Dictionary(passages.map { ($0.text, response.answers[$0.id]?.score ?? -1) }, uniquingKeysWith: max)
         return IntelligenceDecision(
             value: MeaningDecision(matches: PassageDecisions.matches(response, passages: passages), scores: scores),
             source: .jev

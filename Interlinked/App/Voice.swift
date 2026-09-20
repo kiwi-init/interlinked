@@ -140,6 +140,12 @@ final class Voice {
     }
 
     func stop() {
+        // Releasing fn before authorization returns must end this session, or
+        // the pending callback starts the microphone with nobody holding it.
+        if case .starting = state {
+            cancel()
+            return
+        }
         guard state.isListening || finishing else { return }
         request?.endAudio()
         engine?.stop()
@@ -201,6 +207,13 @@ final class Voice {
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        // Without an input device the format is empty and installTap raises an
+        // Objective-C exception Swift cannot catch.
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            teardown()
+            state = .failed("No microphone is available.")
+            return
+        }
         let levelMeter = self.levelMeter
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak levelMeter] buffer, _ in
             request.append(buffer)

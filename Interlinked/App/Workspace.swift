@@ -85,6 +85,7 @@ final class Workspace {
 
     @ObservationIgnored private var written: Data?
     @ObservationIgnored private var started = false
+    @ObservationIgnored weak var browserWindow: NSWindow?
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var mouseMonitor: Any?
     @ObservationIgnored private var flagsMonitor: Any?
@@ -443,8 +444,9 @@ final class Workspace {
             finishClosing()
             return true
         }
+        let selected = activeTab?.id
         tabs.remove(at: index)
-        active = min(active, max(0, tabs.count - 1))
+        active = tabs.firstIndex(where: { $0.id == selected }) ?? min(active, max(0, tabs.count - 1))
         if let pane = activePane { assistance.activated(pane) }
         finishClosing()
         return true
@@ -773,6 +775,15 @@ final class Workspace {
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            // Settings, About, and open or save panels keep their own keys.
+            guard event.window === self.browserWindow, NSApp.modalWindow == nil else {
+                if NSApp.modalWindow == nil, event.window !== self.browserWindow,
+                   event.window?.sheetParent == nil, self.closesWindow(event) {
+                    event.window?.performClose(nil)
+                    return nil
+                }
+                return event
+            }
             if event.keyCode == 53,
                self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
                self.editing != nil || self.overviewOpen {
@@ -815,6 +826,11 @@ final class Workspace {
                 }
             },
         ]
+    }
+
+    private func closesWindow(_ event: NSEvent) -> Bool {
+        event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command
+            && event.charactersIgnoringModifiers?.lowercased() == "w"
     }
 
     private func setCommandKeyState(_ state: CommandKeyState) {

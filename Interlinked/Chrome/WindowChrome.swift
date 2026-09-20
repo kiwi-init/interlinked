@@ -4,6 +4,8 @@ import SwiftUI
 /// Transparent native titlebar. The content must extend beyond its safe area
 /// without an outer clip, or SwiftUI leaves a strip behind the traffic lights.
 struct WindowChrome: NSViewRepresentable {
+    @Environment(Workspace.self) private var workspace
+
     final class Coordinator {
         weak var configuredWindow: NSWindow?
     }
@@ -24,10 +26,11 @@ struct WindowChrome: NSViewRepresentable {
     }
 
     private func configureWhenAttached(_ view: NSView, coordinator: Coordinator) {
-        DispatchQueue.main.async { [weak view, weak coordinator] in
+        DispatchQueue.main.async { [weak view, weak coordinator, weak workspace] in
             guard let window = view?.window, coordinator?.configuredWindow !== window else { return }
             Self.configure(window)
             coordinator?.configuredWindow = window
+            workspace?.browserWindow = window
         }
     }
 

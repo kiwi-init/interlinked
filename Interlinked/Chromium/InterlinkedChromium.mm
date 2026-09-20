@@ -31,11 +31,62 @@ CefString CefFromNSString(NSString *value) {
   return CefString(value.UTF8String ?: "");
 }
 
+// Main-queue blocks never run while the main queue is already inside a block,
+// for example a modal or terminate-later run loop started from a Task or a
+// DispatchQueue.main.sync call. Run loop blocks still do, so Chromium keeps
+// pumping there.
+void PerformOnMainRunLoop(void (^block)(void)) {
+  CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
+    // Unlike libdispatch, the run loop gives blocks no autorelease pool, and
+    // a closed browser is only destroyed once its host view is released.
+    @autoreleasepool {
+      block();
+    }
+  });
+  CFRunLoopWakeUp(CFRunLoopGetMain());
+}
+
 NSTimer *g_message_pump_timer;
 bool g_message_pump_active = false;
 bool g_message_pump_reentrant = false;
 bool g_immediate_pump_scheduled = false;
 NSArray<NSString *> *g_startup_extension_paths = @[];
+
+// Browser bookkeeping, touched only on the main (CEF UI) thread.
+std::vector<CefRefPtr<CefBrowser>> g_browsers;
+int g_pending_browser_creations = 0;
+bool g_closing_all_browsers = false;
+bool g_close_all_finished = false;
+void (^g_close_all_completion)(BOOL);
+// Chromium on macOS asks the app to terminate as soon as its last browser
+// closes. Blank tabs own no browser, so this hidden page keeps Chromium alive
+// until Interlinked itself decides to quit.
+ILChromiumView *g_keep_alive_view;
+
+void FinishClosingAllBrowsers(BOOL closed) {
+  if (!g_close_all_completion) {
+    return;
+  }
+  if (g_message_pump_active) {
+    // Never tear Chromium down from inside its own message loop work.
+    PerformOnMainRunLoop(^{
+      FinishClosingAllBrowsers(closed);
+    });
+    return;
+  }
+  void (^completion)(BOOL) = g_close_all_completion;
+  g_close_all_completion = nil;
+  g_close_all_finished = true;
+  completion(closed);
+}
+
+void FinishClosingAllBrowsersIfDone() {
+  if (g_closing_all_browsers && g_browsers.empty() && g_pending_browser_creations == 0) {
+    PerformOnMainRunLoop(^{
+      FinishClosingAllBrowsers(YES);
+    });
+  }
+}
 
 void ScheduleMessagePump(int64_t delay_ms);
 
@@ -78,7 +129,7 @@ void ScheduleMessagePumpOnMain(int64_t delay_ms) {
     CancelMessagePumpTimer();
     if (!g_immediate_pump_scheduled) {
       g_immediate_pump_scheduled = true;
-      dispatch_async(dispatch_get_main_queue(), ^{
+      PerformOnMainRunLoop(^{
         PerformMessagePumpWork();
       });
     }
@@ -110,7 +161,7 @@ void ScheduleMessagePump(int64_t delay_ms) {
   if (NSThread.isMainThread) {
     ScheduleMessagePumpOnMain(delay_ms);
   } else {
-    dispatch_async(dispatch_get_main_queue(), ^{
+    PerformOnMainRunLoop(^{
       ScheduleMessagePumpOnMain(delay_ms);
     });
   }
@@ -154,7 +205,7 @@ class InterlinkedClient final : public CefClient,
                                 public CefLifeSpanHandler,
                                 public CefLoadHandler {
  public:
-  explicit InterlinkedClient(ILChromiumView *view) : view_(view) {}
+  explicit InterlinkedClient(ILChromiumView *view) : view_(view), parent_view_(view) {}
 
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
@@ -198,7 +249,7 @@ class InterlinkedClient final : public CefClient,
                      CefRefPtr<CefDictionaryValue>& extra_info,
                      bool* no_javascript_access) override;
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
-  bool DoClose(CefRefPtr<CefBrowser> browser) override { return false; }
+  bool DoClose(CefRefPtr<CefBrowser> browser) override;
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
   void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser,
                               int message_id,
@@ -229,6 +280,10 @@ class InterlinkedClient final : public CefClient,
 
  private:
   __weak ILChromiumView *view_;
+  // Chromium creates and closes browsers asynchronously and keeps a raw
+  // pointer to the parent view, so the view must outlive the browser even
+  // after the tab that owned it is gone. Released in OnBeforeClose.
+  ILChromiumView *parent_view_;
   CefRefPtr<CefRegistration> devtools_registration_;
   std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> downloads_;
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
@@ -267,6 +322,7 @@ std::atomic_bool g_running(false);
 - (void)didStartDownload:(uint32_t)identifier URLString:(NSString *)URLString suggestedFilename:(NSString *)filename;
 - (void)didUpdateDownload:(uint32_t)identifier fullPath:(NSString *)fullPath receivedBytes:(int64_t)receivedBytes totalBytes:(int64_t)totalBytes percent:(NSInteger)percent complete:(BOOL)complete cancelled:(BOOL)cancelled interrupted:(BOOL)interrupted;
 - (void)didCloseBrowser;
+- (void)failPendingRequests;
 - (void)didReceiveEvaluation:(int)identifier
                      success:(BOOL)success
                         bytes:(const void *)bytes
@@ -307,7 +363,18 @@ std::atomic_bool g_running(false);
     Method original = class_getInstanceMethod(self, @selector(sendEvent:));
     Method replacement = class_getInstanceMethod(self, @selector(il_sendEvent:));
     method_exchangeImplementations(original, replacement);
+    method_exchangeImplementations(class_getInstanceMethod(self, @selector(terminate:)),
+                                   class_getInstanceMethod(self, @selector(il_terminate:)));
   });
+}
+
+- (void)il_terminate:(id)sender {
+  if (g_closing_all_browsers && !g_close_all_finished) {
+    // Chromium requests termination when its last browser closes. Interlinked
+    // is already quitting and terminates once Chromium has shut down.
+    return;
+  }
+  [self il_terminate:sender];
 }
 
 - (BOOL)isHandlingSendEvent {
@@ -330,6 +397,10 @@ std::atomic_bool g_running(false);
 
 + (BOOL)isRunning {
   return g_running.load();
+}
+
++ (BOOL)isPumpingMessages {
+  return g_message_pump_active;
 }
 
 + (NSString *)engineVersion {
@@ -440,14 +511,50 @@ std::atomic_bool g_running(false);
   }
 
   g_running.store(true);
-  CefDoMessageLoopWork();
+  // Requests Chromium made while initializing were dropped because the
+  // runtime was not running yet, and Chromium does not repeat a wake-up it
+  // believes is pending. Pumping through the scheduler starts the timer chain
+  // that keeps the engine alive regardless.
+  PerformMessagePumpWork();
+  g_keep_alive_view = [[ILChromiumView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)
+                                                 initialURL:[NSURL URLWithString:@"about:blank"]];
   return YES;
 }
 
-+ (void)shutdown {
-  if (!g_running.exchange(false)) {
++ (void)closeAllBrowsersWithCompletion:(void (^)(BOOL))completion {
+  if (!g_running.load() || g_closing_all_browsers) {
+    completion(g_browsers.empty() && g_pending_browser_creations == 0);
     return;
   }
+  g_closing_all_browsers = true;
+  g_close_all_completion = [completion copy];
+  [g_keep_alive_view closeBrowser];
+  g_keep_alive_view = nil;
+  const std::vector<CefRefPtr<CefBrowser>> browsers = g_browsers;
+  for (const CefRefPtr<CefBrowser>& browser : browsers) {
+    browser->GetHost()->CloseBrowser(true);
+  }
+  FinishClosingAllBrowsersIfDone();
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC),
+                 dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    PerformOnMainRunLoop(^{
+      FinishClosingAllBrowsers(NO);
+    });
+  });
+}
+
++ (void)shutdown {
+  if (!g_running.load()) {
+    return;
+  }
+  if (g_message_pump_active || !g_browsers.empty() || g_pending_browser_creations > 0) {
+    // CefShutdown aborts when called from inside CefDoMessageLoopWork or while
+    // browsers are still open. Exiting without it is the safer failure.
+    NSLog(@"Interlinked skipped Chromium shutdown: %@.",
+          g_message_pump_active ? @"called from Chromium's message loop" : @"browsers are still open");
+    return;
+  }
+  g_running.store(false);
   CancelMessagePumpTimer();
   g_immediate_pump_scheduled = false;
   g_message_pump_reentrant = false;
@@ -514,7 +621,7 @@ std::atomic_bool g_running(false);
 }
 
 - (void)createBrowserIfPossible {
-  if (_browser || _client || !ILChromiumRuntime.running) {
+  if (_browser || _client || _closing || g_closing_all_browsers || !ILChromiumRuntime.running) {
     return;
   }
   _client = new InterlinkedClient(self);
@@ -525,8 +632,10 @@ std::atomic_bool g_running(false);
   window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
   CefBrowserSettings browser_settings;
   NSString *URLString = _pendingURL.absoluteString ?: @"about:blank";
-  if (!CefBrowserHost::CreateBrowser(window_info, _client, CefFromNSString(URLString),
+  if (CefBrowserHost::CreateBrowser(window_info, _client, CefFromNSString(URLString),
                                      browser_settings, nullptr, nullptr)) {
+    g_pending_browser_creations++;
+  } else {
     _client = nullptr;
     [self didFailNavigation:@"Chromium could not create the page view."];
   }
@@ -637,11 +746,29 @@ std::atomic_bool g_running(false);
   if (_client) {
     _client->Detach();
   }
-  if (_browser) {
-    _browser->GetHost()->CloseBrowser(true);
-  } else {
-    _client = nullptr;
+  // Chromium destroys the host view as the close completes, while SwiftUI may
+  // still move this view between windows. Drop the references now so no later
+  // AppKit callback can reach the dead browser. A browser still being created
+  // is closed by the detached client in OnAfterCreated.
+  CefRefPtr<CefBrowser> browser = _browser;
+  _browser = nullptr;
+  _client = nullptr;
+  [self failPendingRequests];
+  if (browser) {
+    browser->GetHost()->CloseBrowser(true);
   }
+}
+
+- (void)failPendingRequests {
+  NSError *error = [NSError errorWithDomain:@"computer.interlinked.chromium"
+                                        code:12
+                                    userInfo:@{NSLocalizedDescriptionKey: @"The page was closed."}];
+  NSArray<void (^)(id, NSError *)> *completions = _evaluations.allValues;
+  [_evaluations removeAllObjects];
+  for (void (^completion)(id, NSError *) in completions) {
+    completion(nil, error);
+  }
+  _findCompletion = nil;
 }
 
 - (void)dealloc {
@@ -713,14 +840,7 @@ std::atomic_bool g_running(false);
 }
 
 - (void)didCloseBrowser {
-  NSError *error = [NSError errorWithDomain:@"computer.interlinked.chromium"
-                                        code:12
-                                    userInfo:@{NSLocalizedDescriptionKey: @"The page was closed."}];
-  for (void (^completion)(id, NSError *) in _evaluations.allValues) {
-    completion(nil, error);
-  }
-  [_evaluations removeAllObjects];
-  _findCompletion = nil;
+  [self failPendingRequests];
   _browser = nullptr;
   _client = nullptr;
   [self.delegate chromiumViewDidClose:self];
@@ -851,12 +971,42 @@ bool InterlinkedClient::OnBeforePopup(
 
 void InterlinkedClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
-  [view_ didCreateBrowser:browser];
+  g_pending_browser_creations = std::max(0, g_pending_browser_creations - 1);
+  g_browsers.push_back(browser);
+  ILChromiumView *view = view_;
+  if (!view || g_closing_all_browsers) {
+    // The tab was closed while Chromium was still creating its browser.
+    browser->GetHost()->CloseBrowser(true);
+    return;
+  }
+  [view didCreateBrowser:browser];
+}
+
+bool InterlinkedClient::DoClose(CefRefPtr<CefBrowser> browser) {
+  CEF_REQUIRE_UI_THREAD();
+  // Returning false would make CEF send performClose: to the top-level window,
+  // closing all of Interlinked for one tab. Tearing down the browser's own
+  // view completes the close instead and leads to OnBeforeClose.
+  NSView *browserView = (__bridge NSView *)browser->GetHost()->GetWindowHandle();
+  PerformOnMainRunLoop(^{
+    [browserView removeFromSuperview];
+  });
+  return true;
 }
 
 void InterlinkedClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
+  for (auto it = g_browsers.begin(); it != g_browsers.end(); ++it) {
+    if ((*it)->IsSame(browser)) {
+      g_browsers.erase(it);
+      break;
+    }
+  }
+  devtools_registration_ = nullptr;
+  downloads_.clear();
   [view_ didCloseBrowser];
+  parent_view_ = nil;
+  FinishClosingAllBrowsersIfDone();
 }
 
 void InterlinkedClient::OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser,

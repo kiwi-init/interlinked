@@ -202,6 +202,10 @@ final class PaneHosts {
         var discarded = 0
         for pane in TabMemoryPolicy.orderedDiscardCandidates(candidates) where discarded < goal {
             guard let page = browsers[pane], let probe = await discardProbe(page), probe.safe else { continue }
+            // The probe suspends, so the tab may have become active, started a
+            // transfer, or been replaced in the meantime.
+            guard browsers[pane] === page, pane != workspace.activePane, !uploadPanes.contains(pane),
+                  !workspace.downloads.hasActiveDownload(for: page) else { continue }
             let url = page.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
             lifecycle.suspend(pane, recovery: BrowserRecovery(cause: .memoryPressure, url: url,
                                                                scrollY: probe.scrollY, occurredAt: Date()))
@@ -274,7 +278,8 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     func chromiumPage(_ page: ChromiumPage, didFail message: String) { update(page) }
 
     func chromiumPage(_ page: ChromiumPage, requestedPopup url: URL, userGesture: Bool) {
-        guard userGesture else { return }
+        // Pages must not open file:, data:, or custom-scheme tabs on their own.
+        guard userGesture, let url = ExternalURLRouting.webURL(url) else { return }
         workspace?.openAddress(url.absoluteString)
     }
 

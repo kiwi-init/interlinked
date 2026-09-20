@@ -404,7 +404,12 @@ protocol PageJavaScriptEvaluating: AnyObject {
         } catch {
             result = try await execute(view, body: install + call)
         }
-        let data = try JSONSerialization.data(withJSONObject: result as Any)
+        // The page shares this JavaScript world and can replace the bridge, and
+        // JSONSerialization raises an uncatchable exception for non-containers.
+        guard let result, JSONSerialization.isValidJSONObject(result) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let data = try JSONSerialization.data(withJSONObject: result)
         return try JSONDecoder().decode(T.self, from: data)
     }
     static func highlight<View: PageJavaScriptEvaluating>(
