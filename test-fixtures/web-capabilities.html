@@ -97,7 +97,7 @@
     );
   };
   document.querySelector('#notifications').onclick = async () => {
-    if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this WebKit build.'; return; }
+    if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this Chromium build.'; return; }
     try { permissions.textContent = `Notification permission: ${await Notification.requestPermission()}`; }
     catch (error) { permissions.textContent = `Notifications failed: ${error.name}: ${error.message}`; }
   };

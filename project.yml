@@ -63,6 +63,11 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal"
+        LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project-out/libcef_dll_wrapper"
+        OTHER_LDFLAGS: "$(inherited) -lcef_dll_wrapper -framework Cocoa -framework IOSurface"
+        CLANG_CXX_LANGUAGE_STANDARD: c++20
+        SWIFT_OBJC_BRIDGING_HEADER: Interlinked/Chromium/Interlinked-Bridging-Header.h
         ENABLE_TESTABILITY: YES
         DEFINES_MODULE: YES
         ENABLE_DEBUG_DYLIB: NO
@@ -73,6 +78,10 @@ targets:
           ENABLE_APP_SANDBOX: YES
           INTERLINKED_JEV_RELAY_URL: "https://interlinked-jev.187-77-224-188.sslip.io/v1/jev"
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) TESTFLIGHT"
+    postBuildScripts:
+      - name: Stage Chromium Runtime
+        script: '"$SRCROOT/script/stage-chromium"'
+        basedOnDependencyAnalysis: false
   interlinked-ctl:
     type: tool
     platform: macOS
@@ -99,17 +108,6 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.tests
         GENERATE_INFOPLIST_FILE: YES
-  InterlinkedUITests:
-    type: bundle.ui-testing
-    platform: macOS
-    sources:
-      - path: InterlinkedUITests
-    dependencies:
-      - target: Interlinked
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.ui-tests
-        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Interlinked:
     build:
@@ -125,12 +123,3 @@ schemes:
         - InterlinkedTests
     archive:
       config: TestFlight
-  Interlinked UI Tests:
-    build:
-      targets:
-        Interlinked: all
-        InterlinkedUITests: [test]
-    test:
-      config: Debug
-      targets:
-        - InterlinkedUITests

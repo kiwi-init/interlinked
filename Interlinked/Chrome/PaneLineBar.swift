@@ -62,8 +62,12 @@ struct WorkInput: NSViewRepresentable {
     func updateNSView(_ field: InputField, context: Context) {
         context.coordinator.input = self
         if field.stringValue != text { field.stringValue = text }
-        field.placeholderString = placeholder
-        field.font = .systemFont(ofSize: fontSize)
+        let font = NSFont.systemFont(ofSize: fontSize)
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [.foregroundColor: palette.text.nsColor, .font: font]
+        )
+        field.font = font
         field.textColor = palette.text.nsColor
         field.beginEditing = beginEditing
         let shouldFocus = autofocus && !field.autofocus

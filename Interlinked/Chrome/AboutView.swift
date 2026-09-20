@@ -35,12 +35,12 @@ struct AboutView: View {
                     .symbolRenderingMode(.hierarchical)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Interlinked").font(.title.bold())
-                    Text(version).foregroundStyle(.secondary)
+                    Text(version).foregroundStyle(.primary)
                 }
             }
             Text("A browser that uses AI for reading assistance, useful page labels, search, and safer decisions. You stay in control of when those tools run and what they can read.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
         }
     }
 
@@ -58,9 +58,9 @@ struct AboutView: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(signal.label).fontWeight(.semibold)
                             Spacer()
-                            Text(signal.rawValue).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(signal.rawValue).font(.caption.monospaced()).foregroundStyle(.primary)
                         }
-                        Text(signal.explanation).foregroundStyle(.secondary)
+                        Text(signal.explanation).foregroundStyle(.primary)
                     }
                     if signal != PassageDecisions.Signal.allCases.last { Divider() }
                 }
@@ -83,7 +83,7 @@ struct AboutView: View {
                 ? "Apple Intelligence requests use Apple's on-device Foundation Models framework and do not go through Interlinked's relay. Jev requests go to the relay, which verifies the App Store-signed copy of the app before forwarding cache misses to OpenRouter for TypeSafe's Jev 1.13 model. Interlinked does not put its OpenRouter key in the app."
                 : "Apple Intelligence requests use Apple's on-device Foundation Models framework. Jev requests go directly to OpenRouter for TypeSafe's Jev 1.13 model using the key you supplied. Every Jev request sets OpenRouter's data_collection field to deny.")
 
-            statement("Safer navigation", "WebKit's fraudulent-site warning stays enabled. Before suspicious navigation, deterministic checks can block active-content URLs or warn about credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, and misleading link text. Apple Intelligence may add a short explanation using only sanitized source and destination origins, visible link text, and those warning facts. It cannot override an allow, warning, or block decision. URL paths, queries, fragments, and credentials are omitted.")
+            statement("Safer navigation", "Deterministic checks can block active-content URLs or warn about credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, and misleading link text. Apple Intelligence may add a short explanation using only sanitized source and destination origins, visible link text, and those warning facts. It cannot override an allow, warning, or block decision. URL paths, queries, fragments, and credentials are omitted.")
 
             statement("Five-day AI cache", "Interlinked stores a hash of each exact Jev request and its response on this Mac for up to five days. It does not store page text, queries, URLs, or credentials in this cache. Changed page text, model versions, and classification rules produce a different hash and cannot reuse an older result.")
 
@@ -107,7 +107,7 @@ struct AboutView: View {
     private func statement(_ title: String, _ detail: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).fontWeight(.semibold)
-            Text(detail).foregroundStyle(.secondary)
+            Text(detail).foregroundStyle(.primary)
         }
     }
 

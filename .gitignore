@@ -1,4 +1,5 @@
 /build
+/build-*
 /.build
 /relay/node_modules
 /relay/dist

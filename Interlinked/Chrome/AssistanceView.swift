@@ -1,5 +1,6 @@
+import AppKit
 import SwiftUI
-import WebKit
+import UniformTypeIdentifiers
 
 /// Temporary tools grow inside the existing page handle.
 struct AssistanceView: View {
@@ -16,7 +17,7 @@ struct AssistanceView: View {
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button { assistant.closePanel() } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).accessibilityLabel("Close page tool")
+                    .buttonStyle(.pointing).accessibilityLabel("Close page tool")
             }
             switch assistant.panel {
             case .find:
@@ -28,36 +29,42 @@ struct AssistanceView: View {
                     .onChange(of: assistant.query) { _, _ in assistant.findChanged() }
                 HStack {
                     Toggle("By meaning", isOn: $assistant.byMeaning).toggleStyle(.checkbox)
+                        .pointingHandCursor()
                         .onChange(of: assistant.byMeaning) { _, _ in assistant.findChanged() }
                     Spacer()
                     Button { assistant.moveMatch(-1) } label: { Image(systemName: "chevron.up") }
                         .accessibilityLabel("Previous match")
+                        .pointingHandCursor()
                     Button { assistant.moveMatch(1) } label: { Image(systemName: "chevron.down") }
                         .accessibilityLabel("Next match")
+                        .pointingHandCursor()
                 }
                 if assistant.byMeaning {
                     Text("Jev searches page text. Matches are highlighted in yellow.")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .font(.system(size: 10)).foregroundStyle(.primary)
                 }
-                Text(assistant.status).foregroundStyle(.secondary).lineLimit(3)
+                Text(assistant.status).foregroundStyle(.primary).lineLimit(3)
             case .reading: EmptyView()
             case .permission:
                 Text(assistant.origin.isEmpty ? "Page unavailable" : assistant.origin).lineLimit(1).fontWeight(.medium)
                 Text("Jev uses OpenRouter and TypeSafe to evaluate this page's title, description, labels, and readable page text for each search or reading check. Forms and passwords are excluded. Sharing ends on navigation or reload.")
-                Text("Only share content you are comfortable sending. This does not enable sharing for other tabs.").foregroundStyle(.secondary)
+                Text("Only share content you are comfortable sending. This does not enable sharing for other tabs.").foregroundStyle(.primary)
                 if !assistant.enabled || !assistant.hasJevAccess {
                     SettingsLink { Text("Configure Jev in Settings…") }
+                        .pointingHandCursor()
                 }
                 if !assistant.canShare {
-                    Text("Local, editable, and password pages cannot be shared.").foregroundStyle(.secondary)
+                    Text("Local, editable, and password pages cannot be shared.").foregroundStyle(.primary)
                 }
-                Text(assistant.status).foregroundStyle(.secondary)
+                Text(assistant.status).foregroundStyle(.primary)
                 HStack {
                     Button("Cancel", action: assistant.closePanel)
+                        .pointingHandCursor()
                     Spacer()
                     Button("Share this page", action: assistant.allowPage)
                         .disabled(!assistant.canShare || !assistant.enabled || !assistant.hasJevAccess)
                         .accessibilityIdentifier("allow-page-sharing")
+                        .pointingHandCursor()
                 }
             case nil: EmptyView()
             }
@@ -70,68 +77,192 @@ struct AssistanceView: View {
     }
 }
 
+private extension SettingsDestination {
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .intelligence: "sparkles"
+        case .extensions: "puzzlepiece.extension"
+        case .data: "externaldrive"
+        case .sites: "globe"
+        case .about: "info.circle"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .general: .gray
+        case .intelligence: .purple
+        case .extensions: .green
+        case .data: .orange
+        case .sites: .blue
+        case .about: .gray
+        }
+    }
+}
+
 struct AssistanceSettings: View {
     @Environment(Workspace.self) private var workspace
     @State private var key = ""
-    @State private var message = ""
+    @State private var keyMessage = ""
+    @State private var exportMessage = ""
+    @State private var confirmClearActivity = false
+    @State private var extensionToRemove: BrowserExtensionRecord?
+    @State private var settingsSearch = ""
+    @State private var promptDrafts = Dictionary(
+        uniqueKeysWithValues: IntelligencePromptFeature.allCases.map {
+            ($0, IntelligencePromptPreferences.text(for: $0))
+        }
+    )
+    @State private var promptMessages: [IntelligencePromptFeature: String] = [:]
+
+    private var visibleSections: [SettingsDestination] {
+        let query = settingsSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return SettingsDestination.allCases }
+        return SettingsDestination.allCases.filter {
+            $0.rawValue.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     var body: some View {
-        @Bindable var assistant = workspace.assistance
-        TabView {
-            generalSettings(assistant)
-                .tabItem { Label("General", systemImage: "gearshape") }
-            accessSettings(assistant)
-                .tabItem { Label("Jev Access", systemImage: "key") }
-            dataSettings(assistant)
-                .tabItem { Label("Data", systemImage: "externaldrive") }
-            siteSettings
-                .tabItem { Label("Sites", systemImage: "globe") }
+        @Bindable var workspace = workspace
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                TextField(
+                    "",
+                    text: $settingsSearch,
+                    prompt: Text("Search Settings").foregroundStyle(.primary)
+                )
+                    .textFieldStyle(.roundedBorder)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 48)
+                    .padding(.bottom, 10)
+
+                List(visibleSections, selection: $workspace.settingsDestination) { section in
+                    SettingsSidebarRow(section: section)
+                        .tag(section)
+                        .pointingHandCursor()
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+            }
+            .frame(width: 218)
+            .background(.regularMaterial)
+
+            Divider()
+
+            settingsDetail(workspace.settingsDestination)
         }
-        .padding(.top, 8)
-        .frame(width: 620, height: 500)
+        .frame(minWidth: 780, idealWidth: 840, minHeight: 560, idealHeight: 620)
+        .confirmationDialog(
+            "Clear intelligence activity?",
+            isPresented: $confirmClearActivity,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All Activity", role: .destructive) {
+                workspace.intelligenceAudit.clear()
+                exportMessage = "Activity cleared."
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the complete local intelligence audit log.")
+        }
+        .confirmationDialog(
+            "Remove \(extensionToRemove?.name ?? "extension")?",
+            isPresented: Binding(
+                get: { extensionToRemove != nil },
+                set: { if !$0 { extensionToRemove = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove Extension", role: .destructive) {
+                if let id = extensionToRemove?.id { workspace.extensions.uninstall(id) }
+                extensionToRemove = nil
+            }
+            Button("Cancel", role: .cancel) { extensionToRemove = nil }
+        } message: {
+            Text("Its managed files, local extension data, and saved permissions will be removed from Interlinked.")
+        }
     }
 
-    private func generalSettings(_ assistant: BrowserAssistance) -> some View {
-        @Bindable var assistant = assistant
+    @ViewBuilder
+    private func settingsDetail(_ section: SettingsDestination) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(section.rawValue)
+                    .font(.system(size: 20, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 28)
+            .frame(height: 52)
+
+            Divider()
+
+            switch section {
+            case .general: generalSettings
+            case .intelligence: intelligenceSettings
+            case .extensions: extensionSettings
+            case .data: dataSettings
+            case .sites: siteSettings
+            case .about: aboutSettings
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var generalSettings: some View {
+        Form {
+            Section("Downloads") {
+                LabeledContent("System notifications") {
+                    Text(workspace.downloads.notificationStatus)
+                        .foregroundStyle(.primary)
+                }
+                if workspace.downloads.notificationStatus == "Off" {
+                    Button("Allow Notifications", action: workspace.downloads.requestNotificationPermission)
+                        .pointingHandCursor()
+                }
+            }
+
+            Section("Browser support") {
+                SettingsNote("Location permission prompts require macOS 27 or later.")
+                SettingsNote("Website notification permission is not available to embedded macOS browsers. Download alerts use app notifications.")
+            }
+        }
+        .settingsForm()
+    }
+
+    private var intelligenceSettings: some View {
+        @Bindable var assistant = workspace.assistance
+        let audit = workspace.intelligenceAudit
         return Form {
+            Section("Apple Intelligence") {
+                Label(
+                    LocalIntelligenceRuntime.isAvailable ? "Available on this Mac" : "Unavailable on this Mac",
+                    systemImage: LocalIntelligenceRuntime.isAvailable ? "checkmark.circle.fill" : "xmark.circle"
+                )
+                .foregroundStyle(.primary)
+                SettingsNote("Runs locally and is tried first for page labels, Vault search, related pages, and navigation advice.")
+            }
+
             Section("Jev") {
                 Toggle("Enable Jev", isOn: $assistant.enabled)
+                    .pointingHandCursor()
                     .onChange(of: assistant.enabled) { _, _ in assistant.configure() }
-                SettingsNote("Jev powers meaning search and Critical Reading, and backs up Apple Intelligence where available.")
-            }
 
-            Section("Critical Reading") {
-                Picker("Run", selection: $assistant.criticalReadingMode) {
-                    ForEach(CriticalReadingMode.allCases) { mode in Text(mode.label).tag(mode) }
-                }
-                .pickerStyle(.menu)
-                .onChange(of: assistant.criticalReadingMode) { _, _ in assistant.configure() }
-                SettingsNote(assistant.criticalReadingMode == .automatic
-                    ? "Checks public pages after they load. Private and editable pages stay on this Mac."
-                    : "Runs only when you choose Critical Reading from the Toolbox or Page menu.")
-            }
-
-            Section("Page labels") {
-                Toggle("Refine public page labels with AI", isOn: $assistant.automaticLabels)
-                    .onChange(of: assistant.automaticLabels) { _, _ in assistant.configure() }
-                SettingsNote("Uses Apple Intelligence when available, then Jev as a fallback. Full page text is not included.")
-            }
-        }
-        .formStyle(.grouped)
-        .padding(.horizontal, 8)
-    }
-
-    private func accessSettings(_ assistant: BrowserAssistance) -> some View {
-        Form {
-            Section("OpenRouter") {
                 if assistant.usesIncludedJev {
-                    Label("Jev access is included with this build", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                    Label("Access included", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.primary)
                 } else {
-                    LabeledContent("API key") {
-                        SecureField("Paste key", text: $key)
+                    LabeledContent("OpenRouter API key") {
+                        SecureField(
+                            "",
+                            text: $key,
+                            prompt: Text("Paste key").foregroundStyle(.primary)
+                        )
                             .textContentType(.password)
-                            .frame(width: 300)
+                            .foregroundStyle(.primary)
+                            .frame(width: 280)
                             .accessibilityIdentifier("openrouter-key")
                     }
                     HStack {
@@ -139,69 +270,240 @@ struct AssistanceSettings: View {
                         Button("Remove Key", role: .destructive) {
                             JevCredential.remove()
                             assistant.configure()
-                            message = "Key removed."
+                            keyMessage = "Key removed."
                         }
                         .disabled(!assistant.hasKey)
+                        .pointingHandCursor()
                         Button("Save Key") { saveKey(assistant) }
                             .keyboardShortcut(.defaultAction)
                             .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .pointingHandCursor()
                     }
                     Label(keyStatus(assistant), systemImage: assistant.hasKey ? "checkmark.circle.fill" : "circle.dashed")
-                        .font(.callout)
-                        .foregroundStyle(assistant.hasKey ? .green : .secondary)
+                        .foregroundStyle(.primary)
                 }
+                SettingsNote("Jev handles meaning search, Critical Reading, and personal filters, and backs up supported Apple Intelligence actions.")
             }
 
-            Section("Used for") {
-                SettingsFeature(icon: "text.magnifyingglass", title: "Meaning search", detail: "Find passages by intent, not only exact words.")
-                SettingsFeature(icon: "checkmark.shield", title: "Critical Reading", detail: "Review wording and surface passages worth a second look.")
-                SettingsFeature(icon: "tag", title: "Page labels", detail: "Create clearer labels from public page metadata.")
+            Section("Behavior") {
+                Picker("Critical Reading", selection: $assistant.criticalReadingMode) {
+                    ForEach(CriticalReadingMode.allCases) { mode in Text(mode.label).tag(mode) }
+                }
+                .pickerStyle(.menu)
+                .pointingHandCursor()
+                .onChange(of: assistant.criticalReadingMode) { _, _ in assistant.configure() }
+
+                Toggle("Refine public page labels", isOn: $assistant.automaticLabels)
+                    .pointingHandCursor()
+                    .onChange(of: assistant.automaticLabels) { _, _ in assistant.configure() }
             }
 
-            SettingsNote("The key is stored in macOS Keychain and is never written to app preferences.")
+            promptSettings(for: .appleIntelligence)
+            promptSettings(for: .jev)
+            criticalReadingDefinitions
+
+            Section {
+                SettingsNote("Metadata only. Page text, URLs, queries, prompts, responses, credentials, and error messages are never recorded.")
+                LabeledContent("Recorded actions") {
+                    Text("\(audit.events.count)")
+                        .foregroundStyle(.primary)
+                }
+
+                if audit.recent.isEmpty {
+                    Text("No intelligence activity yet.")
+                        .foregroundStyle(.primary)
+                } else {
+                    ForEach(audit.recent) { event in
+                        IntelligenceActivityRow(event: event)
+                    }
+                }
+
+                HStack {
+                    Button("Export All as JSON…", action: exportActivity)
+                        .disabled(audit.isEmpty)
+                        .pointingHandCursor()
+                    Spacer()
+                    Button("Clear Activity…", role: .destructive) {
+                        confirmClearActivity = true
+                    }
+                    .disabled(audit.isEmpty)
+                    .pointingHandCursor()
+                }
+                if !exportMessage.isEmpty {
+                    Text(exportMessage)
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                }
+            } header: {
+                Text("Last 20 Intelligence Actions")
+            }
         }
-        .formStyle(.grouped)
-        .padding(.horizontal, 8)
+        .settingsForm()
     }
 
-    private func dataSettings(_ assistant: BrowserAssistance) -> some View {
-        Form {
-            Section("AI cache") {
-                LabeledContent("Recent decisions") {
-                    Button("Clear Cache", action: assistant.clearDecisionCache)
+    private func promptSettings(for provider: IntelligencePromptProvider) -> some View {
+        Section("\(provider.rawValue) Prompts") {
+            ForEach(IntelligencePromptFeature.features(for: provider)) { feature in
+                IntelligencePromptEditor(
+                    feature: feature,
+                    text: promptBinding(for: feature),
+                    isCustomized: IntelligencePromptPreferences.isCustomized(feature),
+                    message: promptMessages[feature] ?? "",
+                    save: { savePrompt(feature) },
+                    restoreDefault: { restoreDefaultPrompt(feature) }
+                )
+            }
+        }
+    }
+
+    private var criticalReadingDefinitions: some View {
+        Section("Critical Reading Definitions") {
+            DisclosureGroup("View Definitions") {
+                ForEach(PassageDecisions.Signal.allCases, id: \.rawValue) { signal in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(signal.label)
+                            .fontWeight(.semibold)
+                        Text(signal.explanation)
+                            .font(.callout)
+                    }
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(.vertical, 3)
                 }
-                SettingsNote("Interlinked keeps identical Jev decisions on this Mac for five days.")
+            }
+            SettingsNote("These fixed definitions are used for every Critical Reading decision.")
+        }
+    }
+
+    private var dataSettings: some View {
+        let assistant = workspace.assistance
+        return Form {
+            Section("Intelligence cache") {
+                LabeledContent("Recent Jev decisions") {
+                    Button("Clear Cache", action: assistant.clearDecisionCache)
+                        .pointingHandCursor()
+                }
+                SettingsNote("Identical Jev decisions stay on this Mac for five days.")
                 if !assistant.cacheStatus.isEmpty {
-                    Text(assistant.cacheStatus).font(.callout).foregroundStyle(.secondary)
+                    Text(assistant.cacheStatus).foregroundStyle(.primary)
                 }
             }
 
             Section("Vault") {
-                LabeledContent("Saved pages", value: "\(assistant.history.visits.count)")
-                HStack {
-                    SettingsNote("Pages enter the Vault only when you save them.")
-                    Spacer()
-                    Button("Clear Vault", role: .destructive, action: assistant.clearHistory)
-                        .disabled(assistant.history.visits.isEmpty)
+                LabeledContent("Saved pages") {
+                    Text("\(assistant.history.visits.count)")
+                        .foregroundStyle(.primary)
                 }
-                SettingsNote("Address searches try Apple Intelligence locally first. If it is unavailable, Jev may receive relevant saved excerpts.")
+                Button("Clear Vault", role: .destructive, action: assistant.clearHistory)
+                    .disabled(assistant.history.visits.isEmpty)
+                    .pointingHandCursor()
             }
 
             Section("Privacy") {
                 SettingsFeature(icon: "lock", title: "Sensitive pages stay local", detail: "Passwords, forms, local files, and editable pages are not shared.")
-                SettingsFeature(icon: "eye", title: "You stay in control", detail: "Meaning results and reading checks are suggestions. Review the source before relying on them.")
+                SettingsFeature(icon: "eye", title: "You stay in control", detail: "Intelligence results are suggestions. Review the source before relying on them.")
             }
         }
-        .formStyle(.grouped)
-        .padding(.horizontal, 8)
+        .settingsForm()
+    }
+
+    private var extensionSettings: some View {
+        let extensions = workspace.extensions
+        return Form {
+            Section("Manifest V3") {
+                LabeledContent("Runtime") {
+                    Label(
+                        extensions.isAvailable ? "Chromium" : "Unavailable",
+                        systemImage: extensions.isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill"
+                    )
+                    .foregroundStyle(.primary)
+                }
+                LabeledContent("Install from") {
+                    Text("Unpacked folder").foregroundStyle(.primary)
+                }
+                LabeledContent("Chrome Web Store") {
+                    Text(extensions.supportsChromeWebStore ? "Available" : "Unavailable in embedded mode")
+                        .foregroundStyle(.primary)
+                }
+                Button("Add Extension…", action: extensions.installFromPanel)
+                    .disabled(!extensions.isAvailable || extensions.busy)
+                    .pointingHandCursor()
+                if extensions.busy { ProgressView().controlSize(.small) }
+                if extensions.requiresRestart {
+                    Label("Restart required", systemImage: "arrow.clockwise")
+                        .foregroundStyle(.primary)
+                }
+                if !extensions.message.isEmpty {
+                    Text(extensions.message).foregroundStyle(.primary)
+                }
+            }
+
+            if extensions.records.isEmpty {
+                Section("Extensions") {
+                    Text("No extensions installed.").foregroundStyle(.primary)
+                }
+            } else {
+                ForEach(extensions.records) { record in
+                    Section(record.name) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "puzzlepiece.extension.fill")
+                                .font(.system(size: 24))
+                                .frame(width: 30)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(record.name).fontWeight(.semibold)
+                                if !record.version.isEmpty { Text("Version \(record.version)") }
+                            }
+                            .foregroundStyle(.primary)
+                            Spacer()
+                            Toggle("Enabled", isOn: Binding(
+                                get: { record.enabled },
+                                set: { extensions.setEnabled($0, for: record.id) }
+                            ))
+                            .labelsHidden()
+                            .pointingHandCursor()
+                        }
+
+                        if !record.requestedPermissions.isEmpty || !record.optionalPermissions.isEmpty {
+                            DisclosureGroup("Permissions") {
+                                ForEach(Array(Set(record.requestedPermissions + record.optionalPermissions)).sorted(), id: \.self) { permission in
+                                    Text(permission).foregroundStyle(.primary)
+                                }
+                            }
+                        }
+
+                        if !record.requestedHosts.isEmpty || !record.optionalHosts.isEmpty {
+                            DisclosureGroup("Website Access") {
+                                ForEach(Array(Set(record.requestedHosts + record.optionalHosts)).sorted(), id: \.self) { host in
+                                    Text(host).foregroundStyle(.primary)
+                                }
+                            }
+                        }
+
+                        if !record.errors.isEmpty {
+                            DisclosureGroup("Errors (\(record.errors.count))") {
+                                ForEach(record.errors, id: \.self) { error in
+                                    Text(error).foregroundStyle(.primary).textSelection(.enabled)
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Spacer()
+                            Button("Remove", role: .destructive) { extensionToRemove = record }
+                                .pointingHandCursor()
+                        }
+                    }
+                }
+            }
+        }
+        .settingsForm()
     }
 
     private var siteSettings: some View {
         Form {
             Section("Navigation exceptions") {
                 if workspace.navigationExceptions.records.isEmpty {
-                    Text("No saved navigation exceptions.")
-                        .foregroundStyle(.secondary)
+                    Text("No saved navigation exceptions.").foregroundStyle(.primary)
                 } else {
                     ForEach(workspace.navigationExceptions.records) { record in
                         HStack {
@@ -209,24 +511,22 @@ struct AssistanceSettings: View {
                                 Text(record.key.origin)
                                 Text(record.key.reasons.joined(separator: " "))
                                     .font(.callout)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.primary)
                                     .lineLimit(2)
                             }
                             Spacer()
                             Button("Revoke") { workspace.navigationExceptions.revoke(record.key) }
+                                .pointingHandCursor()
                         }
                     }
-                    HStack {
-                        Spacer()
-                        Button("Revoke All", role: .destructive, action: workspace.navigationExceptions.revokeAll)
-                    }
+                    Button("Revoke All", role: .destructive, action: workspace.navigationExceptions.revokeAll)
+                        .pointingHandCursor()
                 }
-                SettingsNote("Saved exceptions apply only to the exact destination origin and the warning reasons you approved. Deterministic blocks and WebKit warnings cannot be bypassed here.")
             }
+
             Section("Website permissions") {
                 if workspace.permissions.records.isEmpty {
-                    Text("No saved website permissions.")
-                        .foregroundStyle(.secondary)
+                    Text("No saved website permissions.").foregroundStyle(.primary)
                 } else {
                     ForEach(workspace.permissions.records) { record in
                         HStack {
@@ -234,38 +534,32 @@ struct AssistanceSettings: View {
                                 Text(record.key.origin)
                                 Text("\(record.key.kind.label): \(record.decision == .allow ? "Allowed" : "Denied")")
                                     .font(.callout)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.primary)
                             }
                             Spacer()
                             Button("Revoke") { workspace.permissions.revoke(record.key) }
+                                .pointingHandCursor()
                         }
                     }
-                    HStack {
-                        Spacer()
-                        Button("Revoke All", role: .destructive, action: workspace.permissions.revokeAll)
-                    }
-                }
-                SettingsNote("Camera, microphone, and location choices belong to the exact requesting origin. Revoking a choice makes that origin ask again.")
-            }
-            Section("Browser support") {
-                SettingsNote("Location permission prompts require macOS 27 or later. On earlier macOS versions, WebKit does not expose a permission delegate to Interlinked.")
-                SettingsNote("WebKit does not expose website notification permission to embedded macOS browsers. Interlinked cannot grant those requests; download completion notifications are app notifications instead.")
-            }
-            Section("Download notifications") {
-                LabeledContent("System notifications", value: workspace.downloads.notificationStatus)
-                if workspace.downloads.notificationStatus == "Off" {
-                    HStack {
-                        SettingsNote("Interlinked also marks finished and failed downloads in the page actions without interrupting the page.")
-                        Spacer()
-                        Button("Allow Notifications", action: workspace.downloads.requestNotificationPermission)
-                    }
-                } else {
-                    SettingsNote("Finished and failed downloads stay in the page actions. System notifications appear only when macOS allows them.")
+                    Button("Revoke All", role: .destructive, action: workspace.permissions.revokeAll)
+                        .pointingHandCursor()
                 }
             }
         }
-        .formStyle(.grouped)
-        .padding(.horizontal, 8)
+        .settingsForm()
+    }
+
+    private var aboutSettings: some View {
+        Form {
+            Section("Interlinked") {
+                LabeledContent("Version") {
+                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Development")
+                        .foregroundStyle(.primary)
+                }
+                SettingsNote("A focused browser with transparent, user-controlled intelligence.")
+            }
+        }
+        .settingsForm()
     }
 
     private func saveKey(_ assistant: BrowserAssistance) {
@@ -273,15 +567,166 @@ struct AssistanceSettings: View {
             try JevCredential.save(key)
             key = ""
             assistant.configure()
-            message = "Saved in macOS Keychain."
+            keyMessage = "Saved in macOS Keychain."
         } catch {
-            message = "Couldn’t save the key."
+            keyMessage = "Couldn’t save the key."
         }
     }
 
     private func keyStatus(_ assistant: BrowserAssistance) -> String {
-        if !message.isEmpty { return message }
+        if !keyMessage.isEmpty { return keyMessage }
         return assistant.hasKey ? "Saved in macOS Keychain" : "No key saved"
+    }
+
+    private func promptBinding(for feature: IntelligencePromptFeature) -> Binding<String> {
+        Binding(
+            get: { promptDrafts[feature] ?? IntelligencePromptPreferences.text(for: feature) },
+            set: {
+                promptDrafts[feature] = $0
+                promptMessages[feature] = ""
+            }
+        )
+    }
+
+    private func savePrompt(_ feature: IntelligencePromptFeature) {
+        let text = promptDrafts[feature] ?? ""
+        IntelligencePromptPreferences.set(text, for: feature)
+        promptDrafts[feature] = IntelligencePromptPreferences.text(for: feature)
+        promptMessages[feature] = "Saved."
+    }
+
+    private func restoreDefaultPrompt(_ feature: IntelligencePromptFeature) {
+        IntelligencePromptPreferences.reset(feature)
+        promptDrafts[feature] = feature.defaultText
+        promptMessages[feature] = "Default restored."
+    }
+
+    private func exportActivity() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "Interlinked Intelligence Activity.json"
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do {
+            try workspace.intelligenceAudit.export(to: destination)
+            exportMessage = "Exported."
+        } catch {
+            exportMessage = "Couldn’t export the activity file."
+        }
+    }
+}
+
+private struct SettingsSidebarRow: View {
+    var section: SettingsDestination
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: section.symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(section.color.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            Text(section.rawValue)
+                .foregroundStyle(.primary)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct IntelligenceActivityRow: View {
+    var event: IntelligenceAuditEvent
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: event.source == .appleIntelligence ? "apple.logo" : "sparkles")
+                .frame(width: 20)
+                .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.action)
+                    .fontWeight(.medium)
+                Text(event.source.rawValue)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(event.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Label(event.outcome.label, systemImage: event.outcome.symbol)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct IntelligencePromptEditor: View {
+    var feature: IntelligencePromptFeature
+    @Binding var text: String
+    var isCustomized: Bool
+    var message: String
+    var save: () -> Void
+    var restoreDefault: () -> Void
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                TextEditor(text: $text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .frame(minHeight: 116)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(.primary.opacity(0.28), lineWidth: 1)
+                    )
+                    .accessibilityIdentifier("prompt-\(feature.rawValue)")
+
+                if !feature.variables.isEmpty {
+                    Text("Variables: " + feature.variables.map { "{\($0)}" }.joined(separator: ", "))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                }
+
+                HStack {
+                    Button("Restore Default", action: restoreDefault)
+                        .disabled(!isCustomized && text == feature.defaultText)
+                        .pointingHandCursor()
+                    Spacer()
+                    if !message.isEmpty {
+                        Text(message)
+                            .font(.callout)
+                            .foregroundStyle(.primary)
+                    }
+                    Button("Save Prompt", action: save)
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .pointingHandCursor()
+                }
+            }
+            .padding(.vertical, 8)
+        } label: {
+            HStack {
+                Text(feature.title)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if isCustomized {
+                    Text("Edited")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                }
+            }
+            .pointingHandCursor()
+        }
+    }
+}
+
+private extension View {
+    func settingsForm() -> some View {
+        formStyle(.grouped)
+            .padding(.horizontal, 8)
     }
 }
 
@@ -293,7 +738,7 @@ private struct SettingsNote: View {
     var body: some View {
         Text(text)
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -307,11 +752,11 @@ private struct SettingsFeature: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                Text(detail).font(.callout).foregroundStyle(.secondary)
+                Text(detail).font(.callout).foregroundStyle(.primary)
             }
         }
         .padding(.vertical, 2)
@@ -320,15 +765,18 @@ private struct SettingsFeature: View {
 
 struct Toolbox: View {
     @Environment(Workspace.self) private var workspace
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     var palette: Palette
     private var assistant: BrowserAssistance { workspace.assistance }
     private var expanded: Bool {
-        hovering || workspace.commandKeyHeld || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
+        hovering || workspace.rightCommandKeyHeld || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
     }
     private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 190 }
-    private var menuRows: CGFloat { assistant.criticalReadingMode == .onRequest ? 4 : 3 }
+    private var menuRows: CGFloat {
+        CGFloat(assistant.criticalReadingMode == .onRequest ? 5 : 4)
+    }
     private var width: CGFloat {
         if assistant.filterPanelOpen || assistant.readingPanelOpen { return 340 }
         return expanded ? menuWidth : 108
@@ -352,6 +800,15 @@ struct Toolbox: View {
                     VStack(spacing: 0) {
                         PersonalFilterButton(palette: palette)
                         PageTools(palette: palette)
+                        Button {
+                            workspace.settingsDestination = .extensions
+                            openSettings()
+                        } label: {
+                            ToolboxRowLabel(title: "Extensions", symbol: "puzzlepiece.extension", shortcut: "")
+                        }
+                        .buttonStyle(.pointing)
+                        .font(.system(size: 12, weight: .medium))
+                        .accessibilityIdentifier("toolbox-extensions-button")
                     }
                     .frame(width: menuWidth)
                     .padding(.bottom, 44)
@@ -359,14 +816,18 @@ struct Toolbox: View {
                 }
 
                 if expanded {
-                    SettingsLink {
-                        Label("Settings", systemImage: "gearshape")
-                            .labelStyle(ToolboxLabelStyle())
-                            .padding(.horizontal, 12)
-                            .frame(width: menuWidth, height: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                    Button {
+                        workspace.settingsDestination = .general
+                        openSettings()
+                    } label: {
+                        ToolboxRowLabel(
+                            title: "Settings",
+                            symbol: "gearshape",
+                            shortcut: workspace.toolboxShortcutLabel(.settings)
+                        )
+                        .frame(width: menuWidth, height: 44, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pointing)
                     .font(.system(size: 12, weight: .medium))
                     .accessibilityIdentifier("toolbox-settings-button")
                 } else {
@@ -381,7 +842,7 @@ struct Toolbox: View {
                     .contentShape(Rectangle())
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Toolbox")
-                    .accessibilityHint("Hover or hold Command to show page tools")
+                    .accessibilityHint("Hover or hold right Command to show page tools")
                 }
             }
         }
@@ -412,11 +873,8 @@ struct PageActions: View {
     private var downloads: DownloadCenter { workspace.downloads }
     private var sharing: Bool { assistant.panel == .permission }
     private var historyOpen: Bool { workspace.pageHistoryOpen }
-    private var browser: WKWebView? { workspace.activePane.flatMap(workspace.hosts.existingBrowser) }
-    private var historyCount: Int {
-        guard let browser else { return 0 }
-        return browser.backForwardList.backList.count + browser.backForwardList.forwardList.count + (browser.backForwardList.currentItem == nil ? 0 : 1)
-    }
+    private var browser: ChromiumPage? { workspace.activePane.flatMap(workspace.hosts.existingBrowser) }
+    private var historyCount: Int { workspace.browserHistory.visits.count }
     private var width: CGFloat {
         if historyOpen { return min(330, available.width - 36) }
         if downloads.panelOpen { return min(390, available.width - 36) }
@@ -443,13 +901,13 @@ struct PageActions: View {
                     .transition(.opacity)
             } else {
                 HStack(spacing: 0) {
-                    pageAction("History", symbol: "clock.arrow.circlepath") {
+                    pageAction("Browser history", symbol: "clock.arrow.circlepath") {
                         downloads.closePanel()
                         if assistant.panel != nil { assistant.closePanel() }
                         workspace.pageHistoryOpen.toggle()
                     }
                     .accessibilityIdentifier("page-history-button")
-                    .help("Page history")
+                    .help("Browser history")
 
                     pageAction("Downloads", symbol: downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle") {
                         workspace.pageHistoryOpen = false
@@ -466,13 +924,7 @@ struct PageActions: View {
                     .accessibilityIdentifier("downloads-button")
                     .help("Downloads · ⌘J")
 
-                    pageAction("Share page", symbol: assistant.shared ? "square.and.arrow.up.fill" : "square.and.arrow.up") {
-                        workspace.pageHistoryOpen = false
-                        downloads.closePanel()
-                        assistant.requestSharing()
-                    }
-                    .accessibilityIdentifier("share-page-button")
-                    .help(assistant.shared ? "Page shared with Jev" : "Share this page with Jev")
+                    nativeShareAction
                 }
                 .padding(.horizontal, 0)
                 .transition(.opacity)
@@ -496,8 +948,29 @@ struct PageActions: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .accessibilityLabel(label)
+    }
+
+    @ViewBuilder
+    private var nativeShareAction: some View {
+        if let url = browser?.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            ShareLink(item: url) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.pointing)
+            .accessibilityLabel("Share page")
+            .accessibilityIdentifier("share-page-button")
+            .help("Share this page")
+        } else {
+            pageAction("Share page", symbol: "square.and.arrow.up") { }
+                .disabled(true)
+                .accessibilityIdentifier("share-page-button")
+                .help("This page cannot be shared")
+        }
     }
 
     private func closePanel() {
@@ -511,63 +984,42 @@ private struct PageHistoryPanel: View {
     @Environment(Workspace.self) private var workspace
     var palette: Palette
     var close: () -> Void
-    private var browser: WKWebView? { workspace.activePane.flatMap(workspace.hosts.existingBrowser) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ToolboxPanelHeader(title: "History", close: close)
-            if let browser {
-                let back = browser.backForwardList.backList
-                let current = browser.backForwardList.currentItem
-                let forward = browser.backForwardList.forwardList
-                if back.isEmpty && forward.isEmpty {
-                    Text("No other pages in this tab yet.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(palette.textDim)
-                    Spacer()
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(Array(back.enumerated()), id: \.offset) { _, item in
-                                historyRow(item, browser: browser)
-                            }
-                            if let current {
-                                historyRow(current, browser: browser, current: true)
-                            }
-                            ForEach(Array(forward.enumerated()), id: \.offset) { _, item in
-                                historyRow(item, browser: browser)
-                            }
-                        }
-                    }
-                }
-            } else {
-                Text("Open a page to see its history.")
+            if workspace.browserHistory.visits.isEmpty {
+                Text("No history")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.textDim)
                 Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(workspace.browserHistory.visits) { visit in
+                            historyRow(visit)
+                        }
+                    }
+                }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func historyRow(_ item: WKBackForwardListItem, browser: WKWebView, current: Bool = false) -> some View {
-        Button {
-            guard !current else { return }
-            browser.go(to: item)
-            close()
-        } label: {
+    private func historyRow(_ visit: BrowserHistoryVisit) -> some View {
+        Button { workspace.openHistoryVisit(visit) } label: {
             HStack(spacing: 10) {
-                Image(systemName: current ? "circle.fill" : "clock")
-                    .font(.system(size: current ? 6 : 12))
-                    .foregroundStyle(current ? palette.accent : palette.textDim)
+                Image(systemName: "clock")
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.textDim)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title ?? CompactLine.host(item.url.absoluteString))
-                        .font(.system(size: 11, weight: current ? .semibold : .medium))
+                    Text(visit.title)
+                        .font(.system(size: 11, weight: .medium))
                         .lineLimit(1)
-                    Text(CompactLine.host(item.url.absoluteString))
+                    Text(visit.host)
                         .font(.system(size: 9))
                         .foregroundStyle(palette.textDim)
                         .lineLimit(1)
@@ -577,10 +1029,11 @@ private struct PageHistoryPanel: View {
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             .contentShape(Rectangle())
-            .background(current ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: 9))
         }
-        .disabled(current)
-        .accessibilityLabel(current ? "Current page, \(item.title ?? item.url.absoluteString)" : item.title ?? item.url.absoluteString)
+        .accessibilityLabel("Open \(visit.title), \(visit.host)")
+        .contextMenu {
+            Button("Remove from History") { workspace.browserHistory.remove(visit.id) }
+        }
     }
 }
 
@@ -605,7 +1058,7 @@ private struct DownloadsPanel: View {
             }
 
             if downloads.records.isEmpty {
-                Text("Downloaded files will appear here.")
+                Text("No downloads")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.textDim)
                 Spacer()
@@ -618,12 +1071,8 @@ private struct DownloadsPanel: View {
                     }
                 }
             }
-            Text("Downloads keep running when their tab closes. Quitting interrupts them; resumable servers can continue later.")
-                .font(.system(size: 9))
-                .foregroundStyle(palette.textDim)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .foregroundStyle(palette.text)
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -660,7 +1109,7 @@ private struct DownloadRow: View {
                 } else if let message = record.message {
                     Text(message)
                         .font(.system(size: 9))
-                        .foregroundStyle(record.state == .failed ? .red : palette.textDim)
+                        .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
                 if let destination = record.destination {
@@ -681,11 +1130,6 @@ private struct DownloadRow: View {
                     Image(systemName: "folder").frame(width: 24, height: 24)
                 }
                 .accessibilityLabel("Reveal \(record.filename) in Finder")
-            } else if record.canResume {
-                Button { workspace.resumeDownload(record.id) } label: {
-                    Image(systemName: "arrow.clockwise").frame(width: 24, height: 24)
-                }
-                .accessibilityLabel("Resume \(record.filename)")
             }
         }
         .padding(8)
@@ -732,7 +1176,7 @@ private struct ToolboxReadingPanel: View {
                     .lineLimit(3)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -764,27 +1208,15 @@ private struct PersonalFilterButton: View {
             workspace.downloads.closePanel()
             assistant.filterPanelOpen ? assistant.closeFilters() : assistant.openFilters()
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .frame(width: 24)
-                    .overlay(alignment: .topTrailing) {
-                        if assistant.appliedFilterCount > 0 {
-                            Circle().fill(palette.accent).frame(width: 7, height: 7).offset(x: 3, y: -3)
-                        }
-                    }
-                Text("Personal Filters")
-                Spacer(minLength: 0)
-                if assistant.appliedFilterCount > 0 {
-                    Text("\(assistant.appliedFilterCount)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(palette.textDim)
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-            .contentShape(Rectangle())
+            ToolboxRowLabel(
+                title: "Personal Filters",
+                symbol: "line.3.horizontal.decrease",
+                shortcut: workspace.toolboxShortcutLabel(.filters),
+                count: assistant.appliedFilterCount,
+                accent: palette.accent
+            )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .font(.system(size: 12, weight: .medium))
         .foregroundStyle(palette.text)
         .accessibilityLabel("Personal Filters")
@@ -803,11 +1235,7 @@ private struct PersonalFilterPanel: View {
         @Bindable var assistant = assistant
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Personal Filters").font(.system(size: 13, weight: .semibold))
-                    Text(assistant.currentFilterHost.isEmpty ? "Open a website" : assistant.currentFilterHost)
-                        .font(.system(size: 10)).foregroundStyle(palette.textDim)
-                }
+                Text("Personal Filters").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if assistant.filterBusy { ProgressView().controlSize(.mini) }
                 Button(action: assistant.closeFilters) {
@@ -815,10 +1243,7 @@ private struct PersonalFilterPanel: View {
                 }.accessibilityLabel("Close Personal Filters")
             }
 
-            if assistant.currentFilters.isEmpty {
-                Text("No filters on this site.")
-                    .font(.system(size: 11)).foregroundStyle(palette.textDim)
-            } else {
+            if !assistant.currentFilters.isEmpty {
                 ScrollView {
                     VStack(spacing: 6) {
                         ForEach(assistant.currentFilters) { rule in
@@ -847,7 +1272,7 @@ private struct PersonalFilterPanel: View {
             }
 
             HStack(spacing: 6) {
-                WorkInput(text: $assistant.filterDraft, placeholder: "Describe something to hide…",
+                WorkInput(text: $assistant.filterDraft, placeholder: "Hide on this site…",
                           identifier: "personal-filter-input", fontSize: 11, palette: palette,
                           submit: assistant.addPersonalFilter, cancel: assistant.closeFilters)
                     .frame(height: 25)
@@ -858,10 +1283,12 @@ private struct PersonalFilterPanel: View {
                 .disabled(assistant.filterDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Add Personal Filter")
             }
-            Text(assistant.filterStatus.isEmpty ? "Saved on this Mac and applied only to this site." : assistant.filterStatus)
-                .font(.system(size: 9)).foregroundStyle(palette.textDim).lineLimit(2)
+            if !assistant.filterStatus.isEmpty {
+                Text(assistant.filterStatus)
+                    .font(.system(size: 9)).foregroundStyle(palette.textDim).lineLimit(2)
+            }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .foregroundStyle(palette.text)
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -883,11 +1310,20 @@ struct PageTools: View {
                     workspace.downloads.closePanel()
                     open ? assistant.closePanel() : assistant.openFind()
                 } label: {
-                    Label("Find for me", systemImage: "magnifyingglass")
-                        .labelStyle(ToolboxLabelStyle())
-                        .padding(.leading, 12)
-                        .frame(width: 124, height: 40, alignment: .leading)
-                        .contentShape(Rectangle())
+                    if open {
+                        Label("Find for me", systemImage: "magnifyingglass")
+                            .labelStyle(ToolboxLabelStyle())
+                            .padding(.leading, 12)
+                            .frame(width: 124, alignment: .leading)
+                            .frame(minHeight: 40)
+                            .contentShape(Rectangle())
+                    } else {
+                        ToolboxRowLabel(
+                            title: "Find for me",
+                            symbol: "magnifyingglass",
+                            shortcut: workspace.toolboxShortcutLabel(.find)
+                        )
+                    }
                 }
                 .accessibilityLabel("Find for me").help("Find in page · ⌘F").accessibilityIdentifier("page-search-button")
                 .contextMenu {
@@ -919,13 +1355,13 @@ struct PageTools: View {
             .frame(height: 40)
 
             toolboxButton(assistant.savedInVault ? "Update Vault" : "Save to Vault",
-                          symbol: assistant.savedInVault ? "archivebox.fill" : "archivebox",
+                          symbol: assistant.savedInVault ? "archivebox.fill" : "archivebox", shortcut: .vault,
                           action: assistant.saveToVault)
                 .accessibilityLabel(assistant.savedInVault ? "Update saved page in Vault" : "Save page to Vault")
                 .help(assistant.vaultStatus.isEmpty ? "Save page to Vault" : assistant.vaultStatus)
                 .accessibilityIdentifier("page-vault-button")
             if assistant.criticalReadingMode == .onRequest {
-                toolboxButton("Critical Reading", symbol: "text.magnifyingglass") {
+                toolboxButton("Critical Reading", symbol: "text.magnifyingglass", shortcut: .reading) {
                     workspace.downloads.closePanel()
                     assistant.panel == .reading ? assistant.closePanel() : assistant.openReading()
                 }
@@ -934,7 +1370,7 @@ struct PageTools: View {
                 .help(assistant.panel == .reading ? assistant.status : "Review wording in this page")
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .font(.system(size: 12, weight: .medium))
         .frame(maxWidth: .infinity)
         .foregroundStyle(palette.text)
@@ -943,14 +1379,63 @@ struct PageTools: View {
         .animation(reduceMotion ? nil : Metrics.morph, value: assistant.criticalReadingMode)
     }
 
-    private func toolboxButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func toolboxButton(_ title: String, symbol: String, shortcut: ToolboxShortcut,
+                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: symbol)
-                .labelStyle(ToolboxLabelStyle())
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                .contentShape(Rectangle())
+            ToolboxRowLabel(
+                title: title,
+                symbol: symbol,
+                shortcut: workspace.toolboxShortcutLabel(shortcut)
+            )
         }
+    }
+}
+
+private struct ToolboxRowLabel: View {
+    var title: String
+    var symbol: String
+    var shortcut: String
+    var count = 0
+    var accent: Color = .clear
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Image(systemName: symbol)
+                .frame(width: 24)
+                .overlay(alignment: .topTrailing) {
+                    if count > 0 {
+                        Circle().fill(accent).frame(width: 7, height: 7).offset(x: 3, y: -3)
+                    }
+                }
+            Text(title)
+                .padding(.leading, 10)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.trailing, 8)
+            }
+            ToolboxShortcutLabel(shortcut)
+                .frame(width: 28, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ToolboxShortcutLabel: View {
+    var shortcut: String
+
+    init(_ shortcut: String) {
+        self.shortcut = shortcut
+    }
+
+    var body: some View {
+        Text(shortcut)
+            .font(.system(size: 10, weight: .medium, design: .rounded))
+            .monospacedDigit()
     }
 }
 

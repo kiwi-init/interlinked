@@ -1,6 +1,5 @@
 import AppKit
 import Observation
-import WebKit
 
 struct AILabelEffect: Equatable {
     var id = UUID()
@@ -56,8 +55,8 @@ final class BrowserAssistance {
     @ObservationIgnored private var readingInFlight: [PaneID: String] = [:]
     @ObservationIgnored private var filterResults: [PaneID: [UUID: Int]] = [:]
 
-    init(intelligence: BrowserIntelligence = BrowserIntelligence()) {
-        self.intelligence = intelligence
+    init(intelligence: BrowserIntelligence? = nil) {
+        self.intelligence = intelligence ?? BrowserIntelligence(audit: IntelligenceAuditStore.shared)
         refreshCredentialStatus()
     }
     var current: PageMetadata? { workspace?.activePane.flatMap { metadata[$0] } }
@@ -98,7 +97,7 @@ final class BrowserAssistance {
     func label(_ pane: PaneID, url: String) -> String {
         if let value = labels[pane] { return value }
         let page = metadata[pane] ?? PageMetadata(document: "", url: url, title: "", heading: "", summary: "", breadcrumbs: [])
-        return ContextLabels.candidates(page).first?.text ?? CompactLine.host(url)
+        return PageLabels.fallback(page)
     }
 
     private func cancel(_ key: String) {
@@ -122,7 +121,7 @@ final class BrowserAssistance {
         cancel("groups"); groups = []
         if workspace?.activePane == pane { closePanel(); closeFilters() }
     }
-    func loaded(_ pane: PaneID, view: WKWebView) {
+    func loaded(_ pane: PaneID, page view: ChromiumPage) {
         let key = "metadata-\(pane.rawValue)", revision = token("metadata-\(pane.rawValue)"), url = view.url
         tasks[key] = Task { [weak self, weak view] in
             do {
@@ -133,7 +132,7 @@ final class BrowserAssistance {
                       page.url == view.url?.absoluteString else { return }
                 if self.metadata[pane]?.document != page.document { self.grants.removeValue(forKey: pane) }
                 self.metadata[pane] = page
-                self.labels[pane] = ContextLabels.candidates(page).first?.text
+                self.labels[pane] = PageLabels.fallback(page)
                 if self.automaticLabels && page.publicWebPage {
                     self.selectLabel(pane, page: page)
                 }
@@ -186,7 +185,7 @@ final class BrowserAssistance {
         grants.removeAll(); busy = false
         matches = []; findings = []; groups = []
         labelEffect = nil
-        labels = metadata.mapValues { ContextLabels.candidates($0).first?.text ?? $0.host }
+        labels = metadata.mapValues(PageLabels.fallback)
         Task { await intelligence.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
         if let pane = workspace?.activePane, let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) {
@@ -234,18 +233,13 @@ final class BrowserAssistance {
         Task { await intelligence.reset() }
     }
     private func selectLabel(_ pane: PaneID, page: PageMetadata) {
-        let candidates = ContextLabels.candidates(page)
-        guard !candidates.isEmpty else { return }
-        let allowJev = enabled && hasJevAccess && (automaticLabels || grants[pane] == page.document)
         let key = "label-\(pane.rawValue)", revision = token("label-\(pane.rawValue)")
         tasks[key] = Task { [weak self] in
             guard let self else { return }
             do {
-                let decision = try await self.intelligence.refinePageLabel(
-                    page: page, candidates: candidates, allowJev: allowJev)
+                let decision = try await self.intelligence.refinePageLabel(page: page)
                 guard self.accepts(key, revision), self.metadata[pane]?.document == page.document,
                       let decision else { return }
-                if decision.source == .jev { self.grants[pane] = page.document }
                 if decision.value != self.labels[pane] {
                     self.labels[pane] = decision.value
                     self.labelEffect = AILabelEffect(pane: pane)
@@ -297,7 +291,7 @@ final class BrowserAssistance {
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
         if panel != nil { closePanel() }
         filterPanelOpen = true
-        filterStatus = appliedFilterCount > 0 ? hiddenFilterSummary : "Filters run only on \(currentFilterHost)."
+        filterStatus = appliedFilterCount > 0 ? hiddenFilterSummary : ""
     }
 
     func closeFilters() {
@@ -334,7 +328,7 @@ final class BrowserAssistance {
         applyPersonalFilters(pane: pane, page: page, view: view)
     }
 
-    private func applyPersonalFilters(pane: PaneID, page: PageMetadata, view: WKWebView) {
+    private func applyPersonalFilters(pane: PaneID, page: PageMetadata, view: ChromiumPage) {
         let rules = personalFilters.rules(for: page.host).filter(\.isEnabled)
         let key = "filters-\(pane.rawValue)", revision = token(key)
         if workspace?.activePane == pane { filterBusy = !rules.isEmpty }
@@ -346,7 +340,7 @@ final class BrowserAssistance {
                 self.filterResults[pane] = [:]
                 if self.workspace?.activePane == pane {
                     self.filterBusy = false
-                    self.filterStatus = rules.isEmpty ? "No filters on this site." : "Filters are unavailable on this page."
+                    self.filterStatus = rules.isEmpty ? "" : "Filters are unavailable on this page."
                 }
                 return
             }
@@ -407,11 +401,10 @@ final class BrowserAssistance {
     func exactFind(backwards: Bool) {
         guard !query.isEmpty, let pane = workspace?.activePane, let view = workspace?.hosts.existingBrowser(pane) else { return }
         let key = "exact", revision = token(key), query = query
-        let config = WKFindConfiguration(); config.backwards = backwards; config.wraps = true
-        view.find(query, configuration: config) { [weak self, weak view] result in
+        view.find(query, backwards: backwards) { [weak self, weak view] found in
             guard let self, self.accepts(key, revision), self.workspace?.activePane == pane, view != nil else { return }
-            self.exactMatched = result.matchFound
-            if !self.busy && self.matches.isEmpty { self.status = result.matchFound ? "Exact match" : "No exact match" }
+            self.exactMatched = found
+            if !self.busy && self.matches.isEmpty { self.status = found ? "Exact match" : "No exact match" }
         }
     }
     func moveMatch(_ step: Int) {
@@ -439,7 +432,7 @@ final class BrowserAssistance {
               let view = workspace?.hosts.existingBrowser(pane) else { return }
         startAutomaticReading(pane: pane, page: page, view: view)
     }
-    private func startAutomaticReading(pane: PaneID, page: PageMetadata, view: WKWebView) {
+    private func startAutomaticReading(pane: PaneID, page: PageMetadata, view: ChromiumPage) {
         guard enabled, hasJevAccess, criticalReadingMode == .automatic, page.publicWebPage,
               workspace?.activePane == pane, workspace?.hosts.existingBrowser(pane) === view,
               panel == nil || panel == .reading else { return }

@@ -18,8 +18,13 @@ struct InterlinkedApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Page") { workspace.newPage() }
                     .keyboardShortcut("t", modifiers: .command)
+                Button("Close Tab") { workspace.closeActive() }
+                    .keyboardShortcut("w", modifiers: .command)
             }
-            CommandGroup(replacing: .saveItem) {}
+            CommandGroup(replacing: .saveItem) {
+                Button("Save to Vault") { workspace.assistance.saveToVault() }
+                    .keyboardShortcut("s", modifiers: .command)
+            }
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .sidebar) {
                 Button("All Tabs") { workspace.toggleOverview() }
@@ -36,6 +41,8 @@ struct InterlinkedApp: App {
                     .keyboardShortcut(.tab, modifiers: [.control, .shift])
             }
             CommandMenu("Page") {
+                Button("Personal Filters") { workspace.togglePersonalFilters() }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
                 Button("Find in Page") { workspace.assistance.openFind() }
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Find Next") { workspace.assistance.moveMatch(1) }
@@ -53,14 +60,15 @@ struct InterlinkedApp: App {
                 }
                 .keyboardShortcut("j", modifiers: .command)
                 Divider()
-                Button("Close Tab") { workspace.closeActive() }
-                    .keyboardShortcut("w", modifiers: .command)
                 Button("Edit Address") { workspace.editActiveLine() }
                     .keyboardShortcut("l", modifiers: .command)
                 Button("Reload Page") {
                     workspace.reloadActivePage()
                 }
                 .keyboardShortcut("r", modifiers: .command)
+                Button("Copy Page URL") { workspace.copyCurrentPageURL() }
+                    .disabled(workspace.currentPageURL == nil)
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
             }
         }
         Window("About Interlinked", id: "about") {
@@ -68,7 +76,9 @@ struct InterlinkedApp: App {
         }
         .windowResizability(.contentSize)
         Settings { AssistanceSettings().environment(workspace) }
-            .windowResizability(.contentSize)
+            .windowStyle(.hiddenTitleBar)
+            .defaultSize(width: 840, height: 620)
+            .windowResizability(.contentMinSize)
     }
 }
 
@@ -76,12 +86,25 @@ struct InterlinkedApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appearanceObservation: NSKeyValueObservation?
     private var pendingWebURLs: [URL] = []
+    private(set) var chromiumStartupError: Error?
+
+    private func startChromium() {
+        guard !ILChromiumRuntime.isRunning else { return }
+        do {
+            ILChromiumRuntime.prepareManifestV3ExtensionPaths(BrowserExtensionCatalog.startupExtensionPaths())
+            try ILChromiumRuntime.start()
+        } catch {
+            chromiumStartupError = error
+            NSLog("Interlinked Chromium startup failed: %@", error.localizedDescription)
+        }
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        startChromium()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
@@ -111,5 +134,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         Workspace.shared?.stop()
+        ILChromiumRuntime.shutdown()
     }
 }

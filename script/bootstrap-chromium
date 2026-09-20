@@ -1,0 +1,41 @@
+#!/bin/sh
+# Download the pinned CEF SDK and build the wrapper/helper apps used by Xcode.
+set -eu
+cd "$(dirname "$0")/.."
+
+version=152.0.8+g1ce985c+chromium-152.0.7977.134
+platform=macosarm64
+root="$PWD/build/cef"
+project="$root/cef-project"
+output="$root/cef-project-out"
+wrapper="$output/libcef_dll_wrapper/libcef_dll_wrapper.a"
+helper="$output/Release/minimal.app/Contents/Frameworks/minimal Helper.app"
+
+if [ "$(uname -m)" != "arm64" ]; then
+  echo "error: The pinned Chromium SDK currently supports Apple silicon only." >&2
+  exit 1
+fi
+
+if [ -f "$wrapper" ] && [ -d "$helper" ]; then
+  echo "Chromium runtime is ready."
+  exit 0
+fi
+
+command -v cmake >/dev/null 2>&1 || { echo "error: Install CMake first." >&2; exit 1; }
+command -v ninja >/dev/null 2>&1 || { echo "error: Install Ninja first." >&2; exit 1; }
+/bin/mkdir -p "$root"
+
+if [ ! -d "$project/.git" ]; then
+  git clone --depth 1 https://github.com/chromiumembedded/cef-project.git "$project"
+fi
+
+cmake -S "$project" -B "$output" -G Ninja \
+  -DCEF_VERSION="$version" \
+  -DCEF_PLATFORM="$platform" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DUSE_SANDBOX=OFF
+cmake --build "$output" --target minimal --parallel
+
+test -f "$wrapper"
+test -d "$helper"
+echo "Chromium runtime is ready."

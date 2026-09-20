@@ -1,7 +1,6 @@
 import Darwin
 import Foundation
 import AppKit
-import WebKit
 
 enum Control {
     static let writeCommands = [
@@ -28,6 +27,7 @@ enum Control {
         "sidebar [width|collapse|expand|toggle]",
         "overview [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
+        "extension [list|enable UUID|disable UUID|remove UUID]",
         "quit",
     ]
 
@@ -55,6 +55,14 @@ enum Control {
 
         case "state":
             return json(snapshot(workspace))
+
+        case "engine-state":
+            return json([
+                "engine": ILChromiumRuntime.engineVersion,
+                "running": ILChromiumRuntime.isRunning,
+                "application_class": NSStringFromClass(type(of: NSApp)),
+                "active_pages": workspace.tabs.filter { workspace.hosts.existingBrowser($0.active) != nil }.count,
+            ])
 
         case "assistance-state":
             let a = workspace.assistance
@@ -98,8 +106,8 @@ enum Control {
                   let view = workspace.hosts.existingBrowser(pane) else { return error("no loaded web page") }
             Task { @MainActor in
                 do {
-                    let metrics = try await view.callAsyncJavaScript("""
-                return await new Promise(resolve => {
+                    let metrics = try await view.evaluateJavaScript("""
+                (async()=> await new Promise(resolve => {
                   const intervals = []; let previous, ticket;
                   function frame(now) {
                     if (previous !== undefined) intervals.push(now - previous);
@@ -117,8 +125,8 @@ enum Control {
                       over_25ms: intervals.filter(t => t > 25).length,
                       visibility: document.visibilityState});
                   }, 5000);
-                });
-                """, arguments: [:], in: nil, contentWorld: .defaultClient)
+                }))()
+                """)
                     let value: [String: Any] = ["pane": pane.rawValue, "web": metrics as Any, "display_hz": view.window?.screen?.maximumFramesPerSecond ?? 0]
                     let output = ProcessInfo.processInfo.environment["INTERLINKED_FRAME_REPORT"] ?? "/tmp/interlinked-frame-report.json"
                     try? json(value).write(toFile: output, atomically: true, encoding: .utf8)
@@ -327,7 +335,27 @@ enum Control {
             return ok()
 
         case "extension":
-            return error("chrome extensions are not in this build")
+            let records = workspace.extensions.records
+            switch words.first ?? "list" {
+            case "list":
+                return json(["available": workspace.extensions.isAvailable, "extensions": records.map {
+                    [
+                        "id": $0.id.uuidString,
+                        "name": $0.name,
+                        "version": $0.version,
+                        "enabled": $0.enabled,
+                        "errors": $0.errors,
+                    ] as [String: Any]
+                }])
+            case "enable", "disable", "remove":
+                guard words.count == 2, let id = UUID(uuidString: words[1]),
+                      records.contains(where: { $0.id == id }) else { return error("extension UUID not found") }
+                if words[0] == "remove" { workspace.extensions.uninstall(id) }
+                else { workspace.extensions.setEnabled(words[0] == "enable", for: id) }
+                return ok()
+            default:
+                return error("extension takes list, enable UUID, disable UUID, or remove UUID")
+            }
 
         case "quit":
             workspace.quit()

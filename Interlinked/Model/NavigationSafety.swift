@@ -1,5 +1,4 @@
 import Foundation
-import WebKit
 
 enum NavigationKind: Sendable {
     case link, form, popup, download, redirect, reload, history, other
@@ -51,10 +50,6 @@ struct NavigationReview: Equatable, Sendable {
 }
 
 enum NavigationSafety {
-    static func configure(_ preferences: WKPreferences) {
-        preferences.isFraudulentWebsiteWarningEnabled = true
-    }
-
     static func review(
         destination: URL,
         source: URL?,
@@ -195,14 +190,5 @@ enum NavigationSafety {
     private static func cleanText(_ text: String) -> String {
         text.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) ? " " : String($0) }
             .joined().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-    }
-}
-
-enum PopupPolicy {
-    static func configure(_ preferences: WKPreferences) {
-        // WebKit retains user-gesture state for script-created windows. Keeping
-        // this false blocks delayed and unsolicited window.open calls before the
-        // UI delegate is asked to create a tab.
-        preferences.javaScriptCanOpenWindowsAutomatically = false
     }
 }

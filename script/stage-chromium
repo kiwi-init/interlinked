@@ -1,0 +1,59 @@
+#!/bin/sh
+# Stage the pinned CEF runtime and helper apps inside Interlinked.app.
+set -eu
+
+cef_version=152.0.8+g1ce985c+chromium-152.0.7977.134
+cef_root="$SRCROOT/build/cef/cef_binary_${cef_version}_macosarm64_minimal"
+sample="$SRCROOT/build/cef/cef-project-out/Release/minimal.app/Contents/Frameworks"
+destination="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
+
+if [ ! -d "$sample/Chromium Embedded Framework.framework" ] || \
+   [ ! -d "$sample/minimal Helper.app" ]; then
+  echo "error: Chromium runtime is missing. Run script/bootstrap-chromium first." >&2
+  exit 1
+fi
+
+/bin/mkdir -p "$destination"
+/bin/rm -rf "$destination/Chromium Embedded Framework.framework"
+/usr/bin/ditto "$sample/Chromium Embedded Framework.framework" \
+  "$destination/Chromium Embedded Framework.framework"
+
+for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
+  source_app="$sample/minimal Helper${suffix}.app"
+  target_app="$destination/Interlinked Helper${suffix}.app"
+  source_binary="$target_app/Contents/MacOS/minimal Helper${suffix}"
+  target_binary="$target_app/Contents/MacOS/Interlinked Helper${suffix}"
+  /bin/rm -rf "$target_app"
+  /usr/bin/ditto "$source_app" "$target_app"
+  /bin/mv "$source_binary" "$target_binary"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Interlinked Helper${suffix}" \
+    "$target_app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName Interlinked Helper${suffix}" \
+    "$target_app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Interlinked Helper${suffix}" \
+    "$target_app/Contents/Info.plist"
+  identifier_suffix=$(/usr/bin/printf '%s' "$suffix" | /usr/bin/tr -cd '[:alnum:]')
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier computer.interlinked.helper${identifier_suffix}" \
+    "$target_app/Contents/Info.plist"
+done
+
+if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+  # macOS library validation requires every nested Mach-O image to carry the
+  # same team identity as the helper loading it. Sign inside-out so signing the
+  # framework seals the already-signed Chromium support libraries.
+  for library in \
+    "$destination/Chromium Embedded Framework.framework/Versions/A/Libraries/libcef_sandbox.dylib" \
+    "$destination/Chromium Embedded Framework.framework/Versions/A/Libraries/libvulkan.dylib" \
+    "$destination/Chromium Embedded Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib"; do
+    /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" \
+      --options runtime --timestamp=none "$library"
+  done
+  /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" \
+    --options runtime --timestamp=none "$destination/Chromium Embedded Framework.framework"
+  for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
+    /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" \
+      --options runtime --timestamp=none \
+      --entitlements "$SRCROOT/script/chromium-helper.entitlements" \
+      "$destination/Interlinked Helper${suffix}.app"
+  done
+fi

@@ -111,7 +111,7 @@ struct Palette {
             hairline: Color(hsla: 0, 0, 1, 0.08),
             hairlineActive: accent,
             text: Color(hsla: 0, 0, 1),
-            textDim: Color(hsla: 0, 0, 1, 0.82),
+            textDim: Color(hsla: 0, 0, 1),
             selection: Color(hsla: 0, 0, 1, 0.22),
             accent: accent
         )
@@ -126,7 +126,7 @@ struct Palette {
         hairline: Color(hsla: 0, 0, 0, 0.10),
         hairlineActive: Color(hsla: 0, 0, 0, 0.24),
         text: Color(hsla: 0, 0, 0.039),
-        textDim: Color(hsla: 0, 0, 0.039, 0.78),
+        textDim: Color(hsla: 0, 0, 0.039),
         selection: Color(hsla: 0, 0, 0, 0.14),
         accent: Color(hsla: 0, 0, 0.039)
     )

@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 
 enum LineTarget: Hashable {
     case pane(PaneID)
@@ -15,6 +14,17 @@ enum LineTarget: Hashable {
         if case .tab(let id) = self { return id }
         return nil
     }
+}
+
+enum SettingsDestination: String, CaseIterable, Identifiable {
+    case general = "General"
+    case intelligence = "Intelligence"
+    case extensions = "Extensions"
+    case data = "Data"
+    case sites = "Sites"
+    case about = "About"
+
+    var id: Self { self }
 }
 
 struct LineEdit: Equatable {
@@ -60,10 +70,16 @@ final class Workspace {
     let downloads = DownloadCenter()
     let permissions = WebsitePermissionStore()
     let navigationExceptions = NavigationExceptionStore()
+    let browserHistory = BrowserHistoryStore()
+    let extensions = BrowserExtensionRuntime()
+    let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
     var pageHistoryOpen = false
     var quickSwitchOpen = false
-    var commandKeyHeld = false
+    var leftCommandKeyHeld = false
+    var rightCommandKeyHeld = false
+    var settingsDestination: SettingsDestination = .general
+    private(set) var copiedPageURL: String?
 
     var sidebarCollapsed: Bool { sidebar <= 0 }
 
@@ -72,7 +88,9 @@ final class Workspace {
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var mouseMonitor: Any?
     @ObservationIgnored private var flagsMonitor: Any?
+    @ObservationIgnored private var commandStateObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var control: ControlServer?
+    @ObservationIgnored private var copiedPageURLTask: Task<Void, Never>?
 
     var activeTab: Tab? {
         tabs.indices.contains(active) ? tabs[active] : nil
@@ -114,6 +132,45 @@ final class Workspace {
         return true
     }
 
+    func toolboxShortcutLabel(_ shortcut: ToolboxShortcut) -> String {
+        shortcut.label
+    }
+
+    func togglePersonalFilters() {
+        downloads.closePanel()
+        assistance.filterPanelOpen ? assistance.closeFilters() : assistance.openFilters()
+    }
+
+    var currentPageURL: URL? {
+        guard let pane = activePane else { return nil }
+        if let url = hosts.existingBrowser(pane)?.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            return url
+        }
+        guard let url = URL(string: surfaces.line(pane)),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
+    }
+
+    var showsCopiedPageURL: Bool {
+        copiedPageURL == currentPageURL?.absoluteString
+    }
+
+    @discardableResult
+    func copyCurrentPageURL() -> Bool {
+        guard let address = currentPageURL?.absoluteString else { return false }
+        NSPasteboard.general.clearContents()
+        guard NSPasteboard.general.setString(address, forType: .string) else { return false }
+        copiedPageURLTask?.cancel()
+        copiedPageURL = address
+        copiedPageURLTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(1_400))
+            guard !Task.isCancelled else { return }
+            self?.copiedPageURL = nil
+        }
+        return true
+    }
+
     func newPage() {
         openTab(kind: .browser)
         editActiveLine()
@@ -127,21 +184,6 @@ final class Workspace {
         keep()
     }
 
-    func openPopup(configuration: WKWebViewConfiguration, openerURL: URL?, kind: NavigationKind) -> WKWebView? {
-        openTab(kind: .browser)
-        guard let pane = activePane else { return nil }
-        surfaces.setLine(pane, "about:blank")
-        let view = hosts.popupBrowser(
-            for: pane,
-            workspace: self,
-            configuration: configuration,
-            openerURL: openerURL,
-            kind: kind
-        )
-        keep()
-        return view
-    }
-
     func closeTab(_ id: TabID) {
         if activeTab?.id == id { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
@@ -149,9 +191,7 @@ final class Workspace {
         tabs.remove(at: index)
         active = tabs.firstIndex(where: { $0.id == selected }) ?? min(active, max(0, tabs.count - 1))
         if let pane = activePane { assistance.activated(pane) }
-        forgetClosed()
-        if tabs.isEmpty { setOverviewOpen(true) }
-        keep()
+        finishClosing()
     }
 
     func escape() {
@@ -165,9 +205,16 @@ final class Workspace {
     }
 
     private func restoreFocus() {
+        let expectedPane = activePane
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.overviewOpen, self.editing == nil else { return }
-            if let pane = self.activePane {
+            guard let self, let pane = expectedPane,
+                  self.activePane == pane, !self.overviewOpen, self.editing == nil else { return }
+            if self.hosts.focus(pane) { return }
+            // SwiftUI may attach the retained Chromium view one run-loop turn
+            // after the selected tab changes.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.activePane == pane,
+                      !self.overviewOpen, self.editing == nil else { return }
                 self.hosts.focus(pane)
             }
         }
@@ -177,6 +224,7 @@ final class Workspace {
         guard !started else { return }
         started = true
         Workspace.shared = self
+        extensions.start(workspace: self)
         assistance.workspace = self
         downloads.refreshNotificationStatus()
         if let session = Session.read() {
@@ -200,20 +248,21 @@ final class Workspace {
     }
 
     func stop() {
+        copiedPageURLTask?.cancel()
         downloads.prepareForTermination()
         assistance.history.save()
+        browserHistory.save()
         hosts.stopMemoryPressureMonitoring()
+        extensions.stop()
         keyMonitor.map(NSEvent.removeMonitor)
         flagsMonitor.map(NSEvent.removeMonitor)
         mouseMonitor.map(NSEvent.removeMonitor)
+        commandStateObservers.forEach(NotificationCenter.default.removeObserver)
+        commandStateObservers.removeAll()
+        setCommandKeyState(CommandKeyState(left: false, right: false))
         control?.stop()
         Session.flush()
         Workspace.shared = nil
-    }
-
-    func resumeDownload(_ id: UUID) {
-        let webView = activePane.flatMap(hosts.existingBrowser)
-        downloads.resume(id, in: webView)
     }
 
     func openExternalURLs(_ urls: [URL]) {
@@ -391,21 +440,18 @@ final class Workspace {
         if activePane == target { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.contains(target) }) else { return false }
         if tabs[index].close(target) {
-            forgetClosed()
-            keep()
+            finishClosing()
             return true
         }
         tabs.remove(at: index)
         active = min(active, max(0, tabs.count - 1))
         if let pane = activePane { assistance.activated(pane) }
-        forgetClosed()
-        keep()
+        finishClosing()
         return true
     }
 
     func closeActive() {
         if let pane = activePane { _ = closePane(pane) }
-        if tabs.isEmpty { setOverviewOpen(true) }
     }
 
     func dropTab(_ dragged: TabID, slot: Int) {
@@ -511,6 +557,19 @@ final class Workspace {
         guard editing?.pane != nil else { return }
         editing?.text = result.url.absoluteString
         commitLine()
+    }
+
+    func openHistoryVisit(_ visit: BrowserHistoryVisit) {
+        pageHistoryOpen = false
+        guard let pane = activePane else {
+            openAddress(visit.url)
+            return
+        }
+        discardLine()
+        surfaces.setKind(pane, .browser)
+        surfaces.setLine(pane, visit.url)
+        navigate(pane, visit.url)
+        keep()
     }
 
     func submitLine() {
@@ -691,43 +750,150 @@ final class Workspace {
         }
     }
 
+    private func finishClosing() {
+        forgetClosed()
+        if TabClosingPolicy.opensReplacementTab(remainingTabCount: tabs.count) {
+            newPage()
+        } else {
+            restoreFocus()
+            keep()
+        }
+    }
+
     private func installMonitors() {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.synchronizeCommandKeyState()
             guard !PageControlRegion.contains(event) else { return event }
             guard let self, let pane = self.activePane, let browser = self.hosts.existingBrowser(pane),
                   browser.window === event.window, let root = event.window?.contentView,
                   let hit = root.hitTest(root.convert(event.locationInWindow, from: nil)),
-                  hit === browser || hit.isDescendant(of: browser) else { return event }
+                  hit === browser.nativeView || hit.isDescendant(of: browser.nativeView) else { return event }
             self.clickPane(pane)
             return event // Let links, selection and form controls receive the original click.
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53, let self,
+            guard let self else { return event }
+            if event.keyCode == 53,
                self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
                self.editing != nil || self.overviewOpen {
                 self.escape()
                 return nil
             }
-            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-            if modifiers == .command,
-               let characters = event.charactersIgnoringModifiers,
-               let index = OpenWork.shortcutIndex(characters),
-               self?.selectQuickTab(index) == true {
-                return nil
-            }
-            if event.keyCode == 48 && (modifiers == .control || modifiers == [.control, .shift]) {
-                self?.cycleTabs(modifiers.contains(.shift) ? -1 : 1)
-                return nil
-            }
+            if self.performApplicationShortcut(event) { return nil }
             return event
         }
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self else { return event }
             let fn = event.modifierFlags.contains(.function)
             let command = event.modifierFlags.contains(.command)
-            self?.commandKeyHeld = command
-            self?.fnKey(held: fn, command: command)
+            let previous = CommandKeyState(left: self.leftCommandKeyHeld, right: self.rightCommandKeyHeld)
+            let keys = CommandKeyState.updating(
+                previous,
+                eventKeyCode: event.keyCode,
+                rawModifierFlags: event.modifierFlags.rawValue
+            )
+            self.setCommandKeyState(keys)
+            self.fnKey(held: fn, command: command)
             return event
         }
+
+        let center = NotificationCenter.default
+        commandStateObservers = [
+            center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.setCommandKeyState(CommandKeyState(left: false, right: false))
+                }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.setCommandKeyState(CommandKeyState(left: false, right: false))
+                }
+            },
+            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.synchronizeCommandKeyState()
+                }
+            },
+        ]
+    }
+
+    private func setCommandKeyState(_ state: CommandKeyState) {
+        leftCommandKeyHeld = state.left
+        rightCommandKeyHeld = state.right
+    }
+
+    private func synchronizeCommandKeyState() {
+        setCommandKeyState(CommandKeyState.current())
+    }
+
+    private func performApplicationShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift, .function])
+        let character = event.charactersIgnoringModifiers?.lowercased()
+
+        if PageURLCopyShortcut.matches(
+            character: character,
+            command: modifiers.contains(.command),
+            shift: modifiers.contains(.shift),
+            option: modifiers.contains(.option),
+            control: modifiers.contains(.control),
+            function: modifiers.contains(.function)
+        ) {
+            return copyCurrentPageURL()
+        }
+
+        if modifiers == .command, let character, let index = OpenWork.shortcutIndex(character) {
+            return selectQuickTab(index)
+        }
+
+        if event.keyCode == 48 && (modifiers == .control || modifiers == [.control, .shift]) {
+            cycleTabs(modifiers.contains(.shift) ? -1 : 1)
+            return true
+        }
+
+        switch (character, modifiers) {
+        case ("t", .command):
+            newPage()
+        case ("s", .command):
+            assistance.saveToVault()
+        case ("s", [.command, .control]):
+            toggleOverview()
+        case ("]", .command):
+            cycleTabs(1)
+        case ("[", .command):
+            cycleTabs(-1)
+        case ("f", [.command, .shift]):
+            togglePersonalFilters()
+        case ("f", .command):
+            assistance.openFind()
+        case ("g", .command):
+            assistance.moveMatch(1)
+        case ("g", [.command, .shift]):
+            assistance.moveMatch(-1)
+        case ("j", .command):
+            assistance.closeFilters()
+            if assistance.panel != nil { assistance.closePanel() }
+            downloads.togglePanel()
+        case ("w", .command):
+            closeActive()
+        case ("l", .command):
+            editActiveLine()
+        case ("r", .command):
+            reloadActivePage()
+        case (",", .command):
+            openNativeSettings()
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func openNativeSettings() {
+        settingsDestination = .general
+        assistance.closeFilters()
+        if assistance.panel != nil { assistance.closePanel() }
+        editing = nil
+        overviewOpen = false
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }
 

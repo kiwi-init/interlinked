@@ -167,9 +167,11 @@ struct SearchResult: Identifiable, Equatable {
     var id: URL { url }
 
     static func fetch(_ query: String) async throws -> [SearchResult] {
-        var endpoint = URLComponents(string: "https://www.bing.com/search")!
-        endpoint.queryItems = [URLQueryItem(name: "format", value: "rss"), URLQueryItem(name: "q", value: query)]
-        endpoint.percentEncodedQuery = endpoint.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        var endpoint = URLComponents(string: "https://suggestqueries.google.com/complete/search")!
+        endpoint.queryItems = [
+            URLQueryItem(name: "client", value: "firefox"),
+            URLQueryItem(name: "q", value: query)
+        ]
         let request = URLRequest(url: endpoint.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_000_000 else { return [] }
@@ -177,40 +179,18 @@ struct SearchResult: Identifiable, Equatable {
     }
 
     static func parse(_ data: Data) -> [SearchResult] {
-        let reader = SearchFeed()
-        let parser = XMLParser(data: data)
-        parser.shouldResolveExternalEntities = false
-        parser.delegate = reader
-        return parser.parse() ? reader.results : []
-    }
-}
-
-private final class SearchFeed: NSObject, XMLParserDelegate {
-    var results: [SearchResult] = []
-    private var inItem = false
-    private var field = "", title = "", link = ""
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String]) {
-        field = elementName
-        if elementName == "item" { inItem = true; title = ""; link = "" }
-    }
-
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        guard inItem else { return }
-        if field == "title" { title += string }
-        if field == "link" { link += string }
-    }
-
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
-        field = ""
-        guard elementName == "item" else { return }
-        inItem = false
-        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard results.count < 3, !title.isEmpty,
-              let url = URL(string: link.trimmingCharacters(in: .whitespacesAndNewlines)),
-              ["https", "http"].contains(url.scheme), url.host != nil,
-              !results.contains(where: { $0.url == url }) else { return }
-        results.append(SearchResult(title: title, url: url))
+        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [Any],
+              payload.count > 1,
+              let suggestions = payload[1] as? [String] else { return [] }
+        var seen = Set<String>()
+        return suggestions.compactMap { suggestion in
+            let title = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, seen.insert(title.localizedLowercase).inserted else { return nil }
+            var search = URLComponents(string: "https://www.google.com/search")!
+            search.queryItems = [URLQueryItem(name: "q", value: title)]
+            guard let url = search.url else { return nil }
+            return SearchResult(title: title, url: url)
+        }.prefix(3).map { $0 }
     }
 }
 

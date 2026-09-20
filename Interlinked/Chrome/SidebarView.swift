@@ -32,7 +32,7 @@ struct WorkspaceOverview: View {
                                         if let tab = workspace.tabs.first(where: { String($0.id.rawValue) == id }) {
                                             Button { workspace.selectWork(tab.id) } label: {
                                                 SiteIcon(pane: tab.active, palette: palette)
-                                            }.buttonStyle(.plain).help(workspace.title(tab))
+                                            }.buttonStyle(.pointing).help(workspace.title(tab))
                                         }
                                     }
                                 }
@@ -45,7 +45,7 @@ struct WorkspaceOverview: View {
                         Button { workspace.selectWork(tab.id) } label: {
                             workCard(tab)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pointing)
                         .accessibilityLabel("Open \(workspace.title(tab)), \(workspace.surfaces.tabTitle(tab))")
                         .accessibilityIdentifier("work-tab-\(tab.id.rawValue)")
                         .contextMenu {
@@ -64,13 +64,13 @@ struct WorkspaceOverview: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 8)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pointing)
                     .accessibilityIdentifier("workspace-open-query")
                 }
             }
             HStack {
                 Button("New page  ⌘T") { workspace.newPage() }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pointing)
                 Spacer()
                 Text("Esc to return")
             }

@@ -1,5 +1,146 @@
 import XCTest
-import WebKit
+
+final class CommandKeyStateTests: XCTestCase {
+    func testPhysicalCommandKeysAreReadIndependently() {
+        XCTAssertNotEqual(CommandKeyState.leftMask, CommandKeyState.rightMask)
+        let genericCommand: UInt = 1 << 20
+
+        let leftOnly = CommandKeyState.read(rawModifierFlags: genericCommand | CommandKeyState.leftMask)
+        XCTAssertEqual(leftOnly, CommandKeyState(left: true, right: false))
+
+        let rightOnly = CommandKeyState.read(rawModifierFlags: genericCommand | CommandKeyState.rightMask)
+        XCTAssertEqual(rightOnly, CommandKeyState(left: false, right: true))
+
+        let both = CommandKeyState.read(
+            rawModifierFlags: genericCommand | CommandKeyState.leftMask | CommandKeyState.rightMask
+        )
+        XCTAssertEqual(both, CommandKeyState(left: true, right: true))
+
+        XCTAssertEqual(
+            CommandKeyState.read(rawModifierFlags: genericCommand),
+            CommandKeyState(left: false, right: false),
+            "The generic Command flag must not be mistaken for the left key"
+        )
+    }
+
+    func testRightCommandUsesItsPhysicalKeyCodeWhenChromiumStripsDeviceBits() {
+        let pressed = CommandKeyState.updating(
+            CommandKeyState(left: false, right: false),
+            eventKeyCode: CommandKeyState.rightKeyCode,
+            rawModifierFlags: CommandKeyState.commandMask
+        )
+        XCTAssertEqual(pressed, CommandKeyState(left: false, right: true))
+
+        let released = CommandKeyState.updating(
+            pressed,
+            eventKeyCode: CommandKeyState.rightKeyCode,
+            rawModifierFlags: 0
+        )
+        XCTAssertEqual(released, CommandKeyState(left: false, right: false))
+    }
+
+    func testCommandSidesStayIndependentAcrossPressAndReleaseOrder() {
+        var state = CommandKeyState(left: false, right: false)
+        state = CommandKeyState.updating(
+            state,
+            eventKeyCode: CommandKeyState.leftKeyCode,
+            rawModifierFlags: CommandKeyState.commandMask
+        )
+        XCTAssertEqual(state, CommandKeyState(left: true, right: false))
+
+        state = CommandKeyState.updating(
+            state,
+            eventKeyCode: CommandKeyState.rightKeyCode,
+            rawModifierFlags: CommandKeyState.commandMask
+        )
+        XCTAssertEqual(state, CommandKeyState(left: true, right: true))
+
+        state = CommandKeyState.updating(
+            state,
+            eventKeyCode: CommandKeyState.leftKeyCode,
+            rawModifierFlags: CommandKeyState.commandMask
+        )
+        XCTAssertEqual(state, CommandKeyState(left: false, right: true))
+
+        state = CommandKeyState.updating(
+            state,
+            eventKeyCode: CommandKeyState.rightKeyCode,
+            rawModifierFlags: 0
+        )
+        XCTAssertEqual(state, CommandKeyState(left: false, right: false))
+    }
+
+    func testDeviceSpecificEventStateWinsOverStaleTrackedState() {
+        let stale = CommandKeyState(left: true, right: false)
+        let corrected = CommandKeyState.updating(
+            stale,
+            eventKeyCode: CommandKeyState.rightKeyCode,
+            rawModifierFlags: CommandKeyState.commandMask | CommandKeyState.rightMask
+        )
+        XCTAssertEqual(corrected, CommandKeyState(left: false, right: true))
+    }
+
+    func testUnrelatedModifierEventDoesNotChangeACommandSide() {
+        let held = CommandKeyState(left: false, right: true)
+        let unchanged = CommandKeyState.updating(
+            held,
+            eventKeyCode: 56,
+            rawModifierFlags: CommandKeyState.commandMask
+        )
+        XCTAssertEqual(unchanged, held)
+    }
+
+    func testGenericCommandReleaseClearsAnyStaleSideState() {
+        let stale = CommandKeyState(left: true, right: true)
+        let cleared = CommandKeyState.updating(
+            stale,
+            eventKeyCode: CommandKeyState.leftKeyCode,
+            rawModifierFlags: 0
+        )
+        XCTAssertEqual(cleared, CommandKeyState(left: false, right: false))
+    }
+}
+
+final class PageURLCopyShortcutTests: XCTestCase {
+    func testOnlyExactCommandShiftCMatches() {
+        XCTAssertTrue(PageURLCopyShortcut.matches(
+            character: "C", command: true, shift: true, option: false, control: false, function: false
+        ))
+        XCTAssertFalse(PageURLCopyShortcut.matches(
+            character: "c", command: true, shift: false, option: false, control: false, function: false
+        ))
+        XCTAssertFalse(PageURLCopyShortcut.matches(
+            character: "c", command: false, shift: true, option: false, control: false, function: false
+        ))
+        XCTAssertFalse(PageURLCopyShortcut.matches(
+            character: "c", command: true, shift: true, option: true, control: false, function: false
+        ))
+        XCTAssertFalse(PageURLCopyShortcut.matches(
+            character: "c", command: true, shift: true, option: false, control: true, function: false
+        ))
+        XCTAssertFalse(PageURLCopyShortcut.matches(
+            character: "v", command: true, shift: true, option: false, control: false, function: false
+        ))
+    }
+}
+
+final class ToolboxShortcutTests: XCTestCase {
+    func testToolboxUsesConventionalMacShortcuts() {
+        XCTAssertEqual(ToolboxShortcut.filters.label, "⇧⌘F")
+        XCTAssertEqual(ToolboxShortcut.find.label, "⌘F")
+        XCTAssertEqual(ToolboxShortcut.vault.label, "⌘S")
+        XCTAssertEqual(ToolboxShortcut.settings.label, "⌘,")
+        XCTAssertEqual(ToolboxShortcut.reading.label, "")
+    }
+}
+
+final class TabClosingPolicyTests: XCTestCase {
+    func testOnlyClosingTheLastTabOpensAReplacement() {
+        XCTAssertTrue(TabClosingPolicy.opensReplacementTab(remainingTabCount: 0))
+        XCTAssertFalse(TabClosingPolicy.opensReplacementTab(remainingTabCount: 1))
+        XCTAssertFalse(TabClosingPolicy.opensReplacementTab(remainingTabCount: 8))
+    }
+}
 
 final class PaneTests: XCTestCase {
     func leaf(_ id: UInt64) -> Pane { .leaf(PaneID(id)) }
@@ -116,13 +257,6 @@ final class IntentTests: XCTestCase {
 }
 
 final class NavigationSafetyTests: XCTestCase {
-    func testWebKitFraudWarningsAreExplicitlyEnabled() {
-        let preferences = WKPreferences()
-        preferences.isFraudulentWebsiteWarningEnabled = false
-        NavigationSafety.configure(preferences)
-        XCTAssertTrue(preferences.isFraudulentWebsiteWarningEnabled)
-    }
-
     func testOrdinarySameSiteNavigationIsAllowed() throws {
         let review = NavigationSafety.review(
             destination: try XCTUnwrap(URL(string: "https://shop.example.com/cart")),
@@ -213,12 +347,6 @@ final class NavigationSafetyTests: XCTestCase {
         XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .redirect).reasons.contains(.crossSiteRedirect))
     }
 
-    func testWebKitBlocksScriptPopupsWithoutAUserGesture() {
-        let preferences = WKPreferences()
-        preferences.javaScriptCanOpenWindowsAutomatically = true
-        PopupPolicy.configure(preferences)
-        XCTAssertFalse(preferences.javaScriptCanOpenWindowsAutomatically)
-    }
 }
 
 @MainActor
@@ -448,18 +576,15 @@ final class SurfaceTests: XCTestCase {
         XCTAssertNil(CompactLine.searchQuery("https://example.com/search?q=real"))
     }
 
-    func testSearchFeedKeepsThreeUniqueWebResultsInEngineOrder() {
+    func testGoogleSuggestionsKeepThreeUniqueQueriesInEngineOrder() {
         let data = """
-        <rss><channel><title>Engine</title><link>https://bing.com</link>
-        <item><title>Unsafe</title><link>javascript:alert(1)</link></item>
-        <item><title>One &amp; two</title><link>https://one.test/</link></item>
-        <item><title>Duplicate</title><link>https://one.test/</link></item>
-        <item><title>Second</title><link>https://two.test/</link></item>
-        <item><title>Third</title><link>https://three.test/</link></item>
-        <item><title>Fourth</title><link>https://four.test/</link></item>
-        </channel></rss>
+        ["space", ["SpaceX", " spacex ", "space station", "space needle", "space weather"]]
         """.data(using: .utf8)!
-        XCTAssertEqual(SearchResult.parse(data).map(\.title), ["One & two", "Second", "Third"])
+        let results = SearchResult.parse(data)
+        XCTAssertEqual(results.map(\.title), ["SpaceX", "space station", "space needle"])
+        XCTAssertEqual(results.compactMap { URLComponents(url: $0.url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value },
+                       ["SpaceX", "space station", "space needle"])
+        XCTAssertTrue(results.allSatisfy { $0.url.host == "www.google.com" && $0.url.path == "/search" })
         XCTAssertTrue(SearchResult.parse(Data("<broken>".utf8)).isEmpty)
     }
 

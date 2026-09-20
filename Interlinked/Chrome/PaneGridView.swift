@@ -44,6 +44,7 @@ private struct BrowserRecoveryView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .accessibilityIdentifier("browser-recovery-action")
+                .pointingHandCursor()
         }
         .foregroundStyle(palette.text)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

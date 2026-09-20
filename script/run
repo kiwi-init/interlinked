@@ -7,6 +7,10 @@ if [ ! -f Interlinked.xcodeproj/project.pbxproj ]; then
   xcodegen generate
 fi
 
+if [ ! -f build/cef/cef-project-out/libcef_dll_wrapper/libcef_dll_wrapper.a ]; then
+  script/bootstrap-chromium
+fi
+
 xcodebuild \
   -project Interlinked.xcodeproj \
   -scheme Interlinked \
@@ -27,4 +31,4 @@ while /usr/bin/pgrep -x Interlinked >/dev/null && [ "$attempt" -lt 20 ]; do
   attempt=$((attempt + 1))
 done
 /usr/bin/pkill -x Interlinked >/dev/null 2>&1 || true
-open -n "$app"
+open -n "$app" --args -ApplePersistenceIgnoreState YES

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One continuous shape holds the icon, address, open work, and voice feedback.
@@ -6,7 +7,7 @@ struct PageHandle: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var palette: Palette
     var available: CGSize
-    private var hovering: Bool { workspace.quickSwitchOpen || workspace.commandKeyHeld }
+    private var hovering: Bool { workspace.quickSwitchOpen || workspace.leftCommandKeyHeld }
 
     private var pane: PaneID? { workspace.activePane }
     private var expanded: Bool { workspace.overviewOpen || hovering || workspace.editing != nil }
@@ -59,7 +60,7 @@ struct PageHandle: View {
                           height: controlsHeight + resultsHeight)
         }
         let labelWidth = (identity as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
-        return CGSize(width: min(labelWidth + 62, 240, available.width - 36), height: 44)
+        return CGSize(width: min(labelWidth + 66, 240, available.width - 36), height: 44)
     }
 
     var body: some View {
@@ -111,7 +112,7 @@ struct PageHandle: View {
                                         .frame(height: 42)
                                         .contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.pointing)
                                     .id(tab.id)
                                     .accessibilityLabel(index < 9 ? "Switch to \(workspace.title(tab)), Command \(index + 1)" : "Switch to \(workspace.title(tab))")
                                     .accessibilityIdentifier("quick-tab-\(tab.id.rawValue)")
@@ -129,7 +130,7 @@ struct PageHandle: View {
             if workspace.editing != nil && (!workspace.searchResults.isEmpty || showsHistory) {
                 ScrollView { VStack(alignment: .leading, spacing: 0) {
                     if showsHistory { historyResults }
-                    if !workspace.searchResults.isEmpty { Text("Bing results")
+                    if !workspace.searchResults.isEmpty { Text("Google suggestions")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(palette.textDim)
                         .padding(.horizontal, 14)
@@ -147,7 +148,7 @@ struct PageHandle: View {
                             .contentShape(Rectangle())
                             .background(workspace.selectedSearchResult == index + workspace.assistance.historyResults.count ? palette.text.opacity(0.12) : .clear)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pointing)
                         .accessibilityIdentifier("search-result-\(index)")
                         .accessibilityAddTraits(workspace.selectedSearchResult == index + workspace.assistance.historyResults.count ? .isSelected : [])
                     }
@@ -161,16 +162,27 @@ struct PageHandle: View {
                     .frame(width: overviewSize.width, height: overviewSize.height)
                     .transition(.opacity)
             }
-            HStack(spacing: 2) {
+            HStack(spacing: 0) {
                 Button { workspace.toggleOverview() } label: {
                     SiteIcon(pane: pane, palette: palette, framed: false)
                         .frame(width: 44, height: 44)
+                        .padding(.leading, 6)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pointing)
                 .accessibilityLabel(workspace.overviewOpen ? "Return to page" : "Show all tabs, \(identity)")
+                .accessibilityHint("Hover or hold left Command to show open pages")
                 .accessibilityIdentifier("page-handle")
-                if showsTabs || workspace.editing != nil {
+                if showsTabs && workspace.editing == nil {
+                    LineEditor(palette: palette)
+                        .padding(.trailing, 8)
+                    Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .frame(width: 42, alignment: .trailing)
+                        .padding(.trailing, 14)
+                        .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
+                } else if workspace.editing != nil {
                     LineEditor(palette: palette)
                         .padding(.trailing, 14)
                 } else if let caption = voiceCaption, !workspace.overviewOpen {
@@ -180,13 +192,20 @@ struct PageHandle: View {
                         .padding(.trailing, 14)
                 } else {
                     Button { workspace.editActiveLine() } label: {
-                        AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
+                        Group {
+                            if workspace.showsCopiedPageURL {
+                                Text("Copied")
+                                    .font(.system(size: 12, weight: .medium))
+                            } else {
+                                AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
+                            }
+                        }
                             .lineLimit(1)
                             .padding(.trailing, 16)
                             .frame(height: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pointing)
                     .accessibilityLabel("Edit address, \(identity)")
                     .accessibilityIdentifier("page-address")
                     .help(pane.map { workspace.surfaces.line($0) } ?? "")
@@ -219,7 +238,7 @@ struct PageHandle: View {
                         Text(visit.title).font(.system(size: 12)).lineLimit(1)
                         Text(visit.host).font(.system(size: 10)).foregroundStyle(palette.textDim).lineLimit(1)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).frame(height: 42)
-                }.buttonStyle(.plain)
+                }.buttonStyle(.pointing)
                 .background(workspace.selectedSearchResult == index ? palette.text.opacity(0.12) : .clear)
                 .contextMenu { Button("Forget this page") { workspace.assistance.forgetVisit(visit.id) } }
             }
@@ -233,7 +252,7 @@ struct PageHandle: View {
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pointing)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
     }
@@ -346,18 +365,13 @@ struct PageGlass: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let backing = scheme == .dark ? Color.black : Color.white
-        // Keep a small neutral scrim for legibility over arbitrary web content.
-        // The previous 76% backing hid most of the system glass and read as an
-        // opaque black or white panel instead of translucent chrome.
-        let opacity = reduceTransparency || contrast == .increased ? 1.0 : (scheme == .dark ? 0.44 : 0.38)
-        let readable = content.background(backing.opacity(opacity), in: shape)
         Group {
-            if reduceTransparency {
-                readable
+            if reduceTransparency || contrast == .increased {
+                content.background(backing, in: shape)
             } else if #available(macOS 26.0, *) {
-                readable.glassEffect(.clear.interactive(), in: shape)
+                content.glassEffect(.regular.interactive(), in: shape)
             } else {
-                readable.background(.ultraThinMaterial, in: shape)
+                content.background(.ultraThinMaterial, in: shape)
             }
         }
         // Glass is visual only. Claim its empty space as well as its controls,
@@ -368,7 +382,48 @@ struct PageGlass: ViewModifier {
     }
 }
 
-/// AppKit's hit test can see WebKit below SwiftUI controls before SwiftUI routes
+struct PointingButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .pointingHandCursor()
+    }
+}
+
+extension ButtonStyle where Self == PointingButtonStyle {
+    static var pointing: PointingButtonStyle { PointingButtonStyle() }
+}
+
+extension View {
+    func pointingHandCursor() -> some View {
+        background(PointingCursorRegion())
+    }
+}
+
+private struct PointingCursorRegion: NSViewRepresentable {
+    @Environment(\.isEnabled) private var isEnabled
+
+    final class CursorView: NSView {
+        var cursor = NSCursor.pointingHand
+
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            addCursorRect(bounds, cursor: cursor)
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    func makeNSView(context: Context) -> CursorView {
+        CursorView()
+    }
+
+    func updateNSView(_ view: CursorView, context: Context) {
+        view.cursor = isEnabled ? .pointingHand : .arrow
+        view.window?.invalidateCursorRects(for: view)
+    }
+}
+
+/// AppKit's hit test can see Chromium below SwiftUI controls before SwiftUI routes
 /// the event. Track the actual panel bounds before deciding a click is outside.
 struct PageControlRegion: NSViewRepresentable {
     var radius: CGFloat

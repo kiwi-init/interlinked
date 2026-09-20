@@ -1,6 +1,11 @@
-import WebKit
+import Foundation
 
-/// Runs on demand in an isolated world. Reading annotations track only their source nodes.
+@MainActor
+protocol PageJavaScriptEvaluating: AnyObject {
+    func interlinkedEvaluate(_ body: String, arguments: [String: Any]) async throws -> Any?
+}
+
+/// Runs on demand in the page. Reading annotations track only their source nodes.
 @MainActor enum PageTextBridge {
     static let install = #"""
     if (!globalThis.interlinkedContext) {
@@ -150,7 +155,7 @@ import WebKit
             CSS.highlights.set(name,new Highlight(...ranges));
             CSS.highlights.set(selected,new Highlight(active.range));
           } else {
-            // Older WebKit fallback changes only presentation, never rewrites source text.
+            // The fallback changes only presentation, never rewrites source text.
             for (const item of items) {
               const node=nodes.get(item.id);
               if (!node.dataset.interlinkedMarked) node.dataset.interlinkedPreviousBackground=node.style.backgroundColor;
@@ -377,52 +382,56 @@ import WebKit
     }
     """#
 
-    static func metadata(_ view: WKWebView) async throws -> PageMetadata {
+    static func metadata<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageMetadata {
         try await value(view, call: "return interlinkedContext.metadata();", type: PageMetadata.self)
     }
-    static func extract(_ view: WKWebView) async throws -> PageExtract {
+    static func extract<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageExtract {
         try await value(view, call: "return interlinkedContext.extract();", type: PageExtract.self)
     }
-    static func extractFilterCandidates(_ view: WKWebView) async throws -> PageFilterExtract {
+    static func extractFilterCandidates<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageFilterExtract {
         try await value(view, call: "return interlinkedContext.extractFilterCandidates();", type: PageFilterExtract.self)
     }
-    static func navigationLinkText(_ view: WKWebView, destination: URL) async -> String? {
-        (try? await view.callAsyncJavaScript(
-            "return globalThis.interlinkedContext?.navigationLink(destination) ?? null;",
-            arguments: ["destination": destination.absoluteString], in: nil, contentWorld: .defaultClient
-        )) as? String
+    static func navigationLinkText<View: PageJavaScriptEvaluating>(_ view: View, destination: URL) async -> String? {
+        (try? await execute(view, body: "return globalThis.interlinkedContext?.navigationLink(destination) ?? null;",
+                            arguments: ["destination": destination.absoluteString])) as? String
     }
-    private static func value<T: Decodable>(_ view: WKWebView, call: String, type: T.Type) async throws -> T {
+    private static func value<T: Decodable, View: PageJavaScriptEvaluating>(
+        _ view: View, call: String, type: T.Type
+    ) async throws -> T {
         let result: Any?
         do {
-            result = try await view.callAsyncJavaScript(call, arguments: [:], in: nil, contentWorld: .defaultClient)
+            result = try await execute(view, body: call)
         } catch {
-            // Standalone web views (including tests) do not have the document-end user script.
-            result = try await view.callAsyncJavaScript(install + call, arguments: [:], in: nil, contentWorld: .defaultClient)
+            result = try await execute(view, body: install + call)
         }
         let data = try JSONSerialization.data(withJSONObject: result as Any)
         return try JSONDecoder().decode(T.self, from: data)
     }
-    static func highlight(_ passage: PagePassage, document: String, view: WKWebView) async -> Bool {
+    static func highlight<View: PageJavaScriptEvaluating>(
+        _ passage: PagePassage, document: String, view: View
+    ) async -> Bool {
         await highlight([passage], current: passage.id, document: document, view: view)
     }
-    static func highlight(_ passages: [PagePassage], current: String, document: String, view: WKWebView) async -> Bool {
-        (try? await view.callAsyncJavaScript("return globalThis.interlinkedContext?.highlight(items, current, document) ?? false;",
-            arguments: ["items": passages.map { ["id": $0.id, "text": $0.text] }, "current": current, "document": document],
-            in: nil, contentWorld: .defaultClient)) as? Bool ?? false
+    static func highlight<View: PageJavaScriptEvaluating>(
+        _ passages: [PagePassage], current: String, document: String, view: View
+    ) async -> Bool {
+        (try? await execute(view, body: "return globalThis.interlinkedContext?.highlight(items, current, document) ?? false;",
+            arguments: ["items": passages.map { ["id": $0.id, "text": $0.text] },
+                        "current": current, "document": document])) as? Bool ?? false
     }
-    static func clear(_ view: WKWebView?) {
+    static func clear<View: PageJavaScriptEvaluating>(_ view: View?) {
         guard let view else { return }
-        view.evaluateJavaScript("globalThis.interlinkedContext?.clear()", in: nil, in: .defaultClient) { _ in }
+        Task { _ = try? await view.interlinkedEvaluate("globalThis.interlinkedContext?.clear()", arguments: [:]) }
     }
 
-    static func clearFilters(_ view: WKWebView?) async {
+    static func clearFilters<View: PageJavaScriptEvaluating>(_ view: View?) async {
         guard let view else { return }
-        _ = try? await view.callAsyncJavaScript("return globalThis.interlinkedContext?.clearFilters() ?? false;",
-            arguments: [:], in: nil, contentWorld: .defaultClient)
+        _ = try? await execute(view, body: "return globalThis.interlinkedContext?.clearFilters() ?? false;")
     }
 
-    static func applyFilters(_ matches: [UUID: [PagePassage]], document: String, view: WKWebView) async -> [UUID: Int]? {
+    static func applyFilters<View: PageJavaScriptEvaluating>(
+        _ matches: [UUID: [PagePassage]], document: String, view: View
+    ) async -> [UUID: Int]? {
         let groups: [[String: Any]] = matches.map { rule, passages in
             return ["rule": rule.uuidString,
                     "items": passages.map { ["id": $0.id, "text": $0.text] },
@@ -430,9 +439,9 @@ import WebKit
         }
         let raw: Any?
         do {
-            raw = try await view.callAsyncJavaScript(
-                "return globalThis.interlinkedContext?.applyFilters(groups, document) ?? null;",
-                arguments: ["groups": groups, "document": document], in: nil, contentWorld: .defaultClient)
+            raw = try await execute(view,
+                body: "return globalThis.interlinkedContext?.applyFilters(groups, document) ?? null;",
+                arguments: ["groups": groups, "document": document])
         } catch {
             return nil
         }
@@ -443,17 +452,18 @@ import WebKit
         })
     }
 
-    static func applyFilterCandidates(_ matches: [UUID: [PageFilterCandidate]], document: String,
-                                      view: WKWebView) async -> [UUID: Int]? {
+    static func applyFilterCandidates<View: PageJavaScriptEvaluating>(
+        _ matches: [UUID: [PageFilterCandidate]], document: String, view: View
+    ) async -> [UUID: Int]? {
         let groups: [[String: Any]] = matches.map { rule, candidates in
             ["rule": rule.uuidString,
              "items": candidates.map { ["id": $0.id, "text": $0.text] }]
         }
         let raw: Any?
         do {
-            raw = try await view.callAsyncJavaScript(
-                "return globalThis.interlinkedContext?.applyFilterCandidates(groups, document) ?? null;",
-                arguments: ["groups": groups, "document": document], in: nil, contentWorld: .defaultClient)
+            raw = try await execute(view,
+                body: "return globalThis.interlinkedContext?.applyFilterCandidates(groups, document) ?? null;",
+                arguments: ["groups": groups, "document": document])
         } catch {
             return nil
         }
@@ -464,10 +474,21 @@ import WebKit
         })
     }
 
-    static func annotate(_ findings: [PassageDecisions.Finding], document: String, view: WKWebView) async -> Bool {
+    static func annotate<View: PageJavaScriptEvaluating>(
+        _ findings: [PassageDecisions.Finding], document: String, view: View
+    ) async -> Bool {
         let items = findings.map { ["id": $0.passage.id, "text": $0.passage.text,
                                     "label": $0.signal.label, "explanation": $0.signal.explanation] }
-        return (try? await view.callAsyncJavaScript("return globalThis.interlinkedContext?.annotate(items, document) ?? false;",
-            arguments: ["items": items, "document": document], in: nil, contentWorld: .defaultClient)) as? Bool ?? false
+        return (try? await execute(view,
+            body: "return globalThis.interlinkedContext?.annotate(items, document) ?? false;",
+            arguments: ["items": items, "document": document])) as? Bool ?? false
+    }
+
+    private static func execute<View: PageJavaScriptEvaluating>(
+        _ view: View,
+        body: String,
+        arguments: [String: Any] = [:]
+    ) async throws -> Any? {
+        try await view.interlinkedEvaluate(body, arguments: arguments)
     }
 }
