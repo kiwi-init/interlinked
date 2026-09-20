@@ -21,6 +21,7 @@ protocol ChromiumPageDelegate: AnyObject {
     func chromiumPage(_ page: ChromiumPage, requestedPopup url: URL, userGesture: Bool)
     func chromiumPage(_ page: ChromiumPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String)
     func chromiumPage(_ page: ChromiumPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool)
+    func chromiumPage(_ page: ChromiumPage, didBlockRequests count: Int)
     func chromiumPageDidClose(_ page: ChromiumPage)
 }
 
@@ -40,6 +41,10 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
     var canGoBack: Bool { nativeView.canGoBack }
     var canGoForward: Bool { nativeView.canGoForward }
     var window: NSWindow? { nativeView.window }
+    var forcedDarkMode: Bool {
+        get { nativeView.forcedDarkMode }
+        set { nativeView.forcedDarkMode = newValue }
+    }
 
     init(initialURL: URL) {
         nativeView = ILChromiumView(frame: .zero, initialURL: initialURL)
@@ -146,6 +151,10 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
 
     func chromiumView(_ view: ILChromiumView, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool) {
         delegate?.chromiumPage(self, didUpdateDownload: identifier, fullPath: fullPath, receivedBytes: receivedBytes, totalBytes: totalBytes, percent: percent, complete: complete, cancelled: cancelled, interrupted: interrupted)
+    }
+
+    func chromiumView(_ view: ILChromiumView, didBlockRequests count: Int) {
+        delegate?.chromiumPage(self, didBlockRequests: count)
     }
 
     func chromiumViewDidClose(_ view: ILChromiumView) {

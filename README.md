@@ -30,13 +30,13 @@ Downloads use Chromium's macOS save dialog and appear in the top-right page acti
 
 Download completion and failure mark the top-right page actions and can use macOS notifications when enabled in Settings.
 
-## Extensions
+## Built-in page features
 
-Interlinked loads unpacked Manifest V3 extensions in the same CEF/Chromium runtime that renders pages. Open **Toolbox → Extensions** to add, enable, disable, inspect, or remove an unpacked folder. Interlinked validates `manifest.json`, copies the extension into its managed library, shows the requested API and website access, and passes enabled extension paths to Chromium at the next launch.
+Interlinked does not load browser extensions. The features people install extensions for are part of the browser and act inside the engine.
 
-CEF 152 does not expose runtime extension loading for an embedded macOS Alloy view, so installing, enabling, disabling, or removing an extension requires restarting Interlinked. Permission and host lists are informational because CEF does not expose Chrome's per-extension grant UI to this embedding mode.
+**Ad and tracker blocking.** Chromium asks Interlinked before every network request, and Interlinked refuses the ones to known ad and tracking hosts. The host rules come from EasyList and EasyPrivacy (CC BY-SA 3.0), are downloaded on first launch, cached in Application Support, and refreshed weekly. Only host rules are used (`||host^`, with `$third-party` and `@@` exceptions); path, resource-type, and cosmetic rules are skipped, so first-party ads such as YouTube's are not blocked and empty ad slots are not hidden. The page you navigate to always loads. **Toolbox → Blocking Ads Here** turns blocking off for one site.
 
-Chrome Web Store installation, `chrome://extensions`, toolbar action popovers, extension commands, options-page hosting, and Chrome's extension-management UI are not exposed to Interlinked's embedded Alloy view.
+**Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`, and Chromium's Auto Dark Mode recolors the rest while leaving images alone. Settings → Built-ins chooses Off, Match macOS appearance, or Always. **Toolbox → Dark Page** keeps one site light.
 
 ## Find and save
 

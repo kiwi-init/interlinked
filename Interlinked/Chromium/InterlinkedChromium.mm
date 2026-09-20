@@ -4,7 +4,9 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "include/cef_app.h"
@@ -14,6 +16,9 @@
 #include "include/cef_command_line.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
+#include "include/cef_parser.h"
+#include "include/cef_request_handler.h"
+#include "include/cef_resource_request_handler.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -50,7 +55,82 @@ NSTimer *g_message_pump_timer;
 bool g_message_pump_active = false;
 bool g_message_pump_reentrant = false;
 bool g_immediate_pump_scheduled = false;
-NSArray<NSString *> *g_startup_extension_paths = @[];
+
+// Built-in content blocking. Rules are immutable once published, so the
+// network thread only takes the lock long enough to copy the pointer.
+struct BlockingRules {
+  std::unordered_set<std::string> blocked;              // ||host^
+  std::unordered_set<std::string> blocked_third_party;  // ||host^$third-party
+  std::unordered_set<std::string> allowed;              // @@||host^
+  std::unordered_set<std::string> disabled_sites;       // sites the user exempted
+};
+std::mutex g_blocking_mutex;
+std::shared_ptr<const BlockingRules> g_blocking_rules;
+
+std::shared_ptr<const BlockingRules> CurrentBlockingRules() {
+  std::lock_guard<std::mutex> lock(g_blocking_mutex);
+  return g_blocking_rules;
+}
+
+std::string HostOfURL(const CefString& url) {
+  CefURLParts parts;
+  if (url.empty() || !CefParseURL(url, parts)) {
+    return std::string();
+  }
+  std::string host = CefString(&parts.host).ToString();
+  for (char& c : host) {
+    c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  }
+  return host;
+}
+
+// True when |host| or one of its parent domains is in |set|.
+bool MatchesHostOrParent(const std::unordered_set<std::string>& set, const std::string& host) {
+  if (set.empty()) {
+    return false;
+  }
+  size_t start = 0;
+  while (start < host.size()) {
+    if (set.count(host.substr(start))) {
+      return true;
+    }
+    const size_t dot = host.find('.', start);
+    if (dot == std::string::npos) {
+      break;
+    }
+    start = dot + 1;
+  }
+  return false;
+}
+
+// Approximates the registrable domain with the last two labels. A wrong guess
+// for suffixes such as co.uk only makes a third-party rule apply less often.
+std::string SiteOfHost(const std::string& host) {
+  const size_t last = host.rfind('.');
+  if (last == std::string::npos || last == 0) {
+    return host;
+  }
+  const size_t previous = host.rfind('.', last - 1);
+  return previous == std::string::npos ? host : host.substr(previous + 1);
+}
+
+bool ShouldBlockRequest(const std::string& host, const std::string& page_host) {
+  const std::shared_ptr<const BlockingRules> rules = CurrentBlockingRules();
+  if (!rules || host.empty()) {
+    return false;
+  }
+  if (!page_host.empty() && MatchesHostOrParent(rules->disabled_sites, page_host)) {
+    return false;
+  }
+  if (MatchesHostOrParent(rules->allowed, host)) {
+    return false;
+  }
+  if (MatchesHostOrParent(rules->blocked, host)) {
+    return true;
+  }
+  const bool third_party = !page_host.empty() && SiteOfHost(host) != SiteOfHost(page_host);
+  return third_party && MatchesHostOrParent(rules->blocked_third_party, host);
+}
 
 // Browser bookkeeping, touched only on the main (CEF UI) thread.
 std::vector<CefRefPtr<CefBrowser>> g_browsers;
@@ -180,12 +260,8 @@ class InterlinkedBrowserApp final : public CefApp,
     if (process_type.empty()) {
       command_line->AppendSwitch("use-mock-keychain");
       command_line->AppendSwitch("disable-component-update");
-      NSArray<NSString *> *extensions = g_startup_extension_paths;
-      if (extensions.count > 0) {
-        command_line->AppendSwitchWithValue("load-extension", CefFromNSString([extensions componentsJoinedByString:@","]));
-        NSLog(@"Interlinked passed %lu unpacked extension%@ to Chromium.",
-              static_cast<unsigned long>(extensions.count), extensions.count == 1 ? @"" : @"s");
-      }
+      // Interlinked ships its own page features instead of Chrome extensions.
+      command_line->AppendSwitch("disable-extensions");
     }
   }
 
@@ -203,7 +279,9 @@ class InterlinkedClient final : public CefClient,
                                 public CefDownloadHandler,
                                 public CefFindHandler,
                                 public CefLifeSpanHandler,
-                                public CefLoadHandler {
+                                public CefLoadHandler,
+                                public CefRequestHandler,
+                                public CefResourceRequestHandler {
  public:
   explicit InterlinkedClient(ILChromiumView *view) : view_(view), parent_view_(view) {}
 
@@ -212,6 +290,22 @@ class InterlinkedClient final : public CefClient,
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefRefPtr<CefRequest> request,
+      bool is_navigation,
+      bool is_download,
+      const CefString& request_initiator,
+      bool& disable_default_handling) override {
+    return this;
+  }
+  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
+                                   CefRefPtr<CefFrame> frame,
+                                   CefRefPtr<CefRequest> request,
+                                   CefRefPtr<CefCallback> callback) override;
 
   void Detach() { view_ = nil; }
 
@@ -286,6 +380,7 @@ class InterlinkedClient final : public CefClient,
   ILChromiumView *parent_view_;
   CefRefPtr<CefRegistration> devtools_registration_;
   std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> downloads_;
+  std::atomic<int> unreported_blocks_{0};
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
 };
 
@@ -306,6 +401,7 @@ std::atomic_bool g_running(false);
   BOOL _canGoBack;
   BOOL _canGoForward;
   BOOL _closing;
+  BOOL _forcedDarkMode;
   NSMutableDictionary<NSNumber *, void (^)(id _Nullable, NSError * _Nullable)> *_evaluations;
   void (^_findCompletion)(BOOL);
 }
@@ -322,6 +418,8 @@ std::atomic_bool g_running(false);
 - (void)didStartDownload:(uint32_t)identifier URLString:(NSString *)URLString suggestedFilename:(NSString *)filename;
 - (void)didUpdateDownload:(uint32_t)identifier fullPath:(NSString *)fullPath receivedBytes:(int64_t)receivedBytes totalBytes:(int64_t)totalBytes percent:(NSInteger)percent complete:(BOOL)complete cancelled:(BOOL)cancelled interrupted:(BOOL)interrupted;
 - (void)didCloseBrowser;
+- (void)didBlockRequests:(NSInteger)count;
+- (void)applyForcedDarkMode;
 - (void)failPendingRequests;
 - (void)didReceiveEvaluation:(int)identifier
                      success:(BOOL)success
@@ -414,18 +512,29 @@ std::atomic_bool g_running(false);
                                     CEF_VERSION_PATCH];
 }
 
-+ (BOOL)supportsManifestV3Extensions {
-  return YES;
++ (void)setBlockedHosts:(NSArray<NSString *> *)blocked
+      thirdPartyHosts:(NSArray<NSString *> *)thirdParty
+         allowedHosts:(NSArray<NSString *> *)allowed
+        disabledSites:(NSArray<NSString *> *)disabledSites {
+  auto rules = std::make_shared<BlockingRules>();
+  void (^fill)(std::unordered_set<std::string>&, NSArray<NSString *> *) =
+      ^(std::unordered_set<std::string>& set, NSArray<NSString *> *hosts) {
+    set.reserve(hosts.count);
+    for (NSString *host in hosts) {
+      set.emplace(host.lowercaseString.UTF8String ?: "");
+    }
+  };
+  fill(rules->blocked, blocked);
+  fill(rules->blocked_third_party, thirdParty);
+  fill(rules->allowed, allowed);
+  fill(rules->disabled_sites, disabledSites);
+  std::lock_guard<std::mutex> lock(g_blocking_mutex);
+  g_blocking_rules = std::move(rules);
 }
 
-+ (NSArray<NSString *> *)startupExtensionPaths {
-  return g_startup_extension_paths;
-}
-
-+ (void)prepareManifestV3ExtensionPaths:(NSArray<NSString *> *)paths {
-  if (!g_running.load()) {
-    g_startup_extension_paths = [paths copy];
-  }
++ (void)disableContentBlocking {
+  std::lock_guard<std::mutex> lock(g_blocking_mutex);
+  g_blocking_rules = nullptr;
 }
 
 + (BOOL)startWithError:(NSError **)error {
@@ -473,6 +582,12 @@ std::atomic_bool g_running(false);
   settings.external_message_pump = true;
   settings.persist_session_cookies = true;
   settings.log_severity = LOGSEVERITY_WARNING;
+#ifdef DEBUG
+  // Lets development tools inspect pages over the DevTools protocol.
+  if (const char *port = getenv("INTERLINKED_REMOTE_DEBUGGING_PORT")) {
+    settings.remote_debugging_port = atoi(port);
+  }
+#endif
 
   NSFileManager *files = NSFileManager.defaultManager;
   NSURL *support = [files URLForDirectory:NSApplicationSupportDirectory
@@ -734,6 +849,46 @@ std::atomic_bool g_running(false);
   _findCompletion = nil;
 }
 
+- (BOOL)forcedDarkMode {
+  return _forcedDarkMode;
+}
+
+- (void)setForcedDarkMode:(BOOL)forcedDarkMode {
+  if (_forcedDarkMode == forcedDarkMode) {
+    return;
+  }
+  _forcedDarkMode = forcedDarkMode;
+  [self applyForcedDarkMode];
+}
+
+- (void)applyForcedDarkMode {
+  if (!_browser) {
+    return;
+  }
+  // Sites with their own dark theme are asked for it; Chromium's Auto Dark
+  // Mode recolors the rest and leaves images alone.
+  CefRefPtr<CefDictionaryValue> media = CefDictionaryValue::Create();
+  CefRefPtr<CefListValue> features = CefListValue::Create();
+  if (_forcedDarkMode) {
+    CefRefPtr<CefDictionaryValue> scheme = CefDictionaryValue::Create();
+    scheme->SetString("name", "prefers-color-scheme");
+    scheme->SetString("value", "dark");
+    features->SetDictionary(0, scheme);
+  }
+  media->SetList("features", features);
+  _browser->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setEmulatedMedia", media);
+
+  CefRefPtr<CefDictionaryValue> automatic = CefDictionaryValue::Create();
+  if (_forcedDarkMode) {
+    automatic->SetBool("enabled", true);
+  }
+  _browser->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", automatic);
+}
+
+- (void)didBlockRequests:(NSInteger)count {
+  [self.delegate chromiumView:self didBlockRequests:count];
+}
+
 - (void)cancelDownload:(uint32_t)identifier {
   if (_client) _client->CancelDownload(identifier);
 }
@@ -778,6 +933,7 @@ std::atomic_bool g_running(false);
 - (void)didCreateBrowser:(CefRefPtr<CefBrowser>)browser {
   _browser = browser;
   _client->ObserveDevTools(browser);
+  [self applyForcedDarkMode];
   [self updateBrowserVisibility];
   NSString *pendingURLString = _pendingURL.absoluteString;
   NSString *createdURLString = NSStringFromCef(browser->GetMainFrame()->GetURL());
@@ -980,6 +1136,31 @@ void InterlinkedClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     return;
   }
   [view didCreateBrowser:browser];
+}
+
+CefResourceRequestHandler::ReturnValue InterlinkedClient::OnBeforeResourceLoad(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    CefRefPtr<CefRequest> request,
+    CefRefPtr<CefCallback> callback) {
+  // Called on the network thread. The page the user navigated to always loads.
+  if (request->GetResourceType() == RT_MAIN_FRAME) {
+    return RV_CONTINUE;
+  }
+  std::string page_host = HostOfURL(request->GetFirstPartyForCookies());
+  if (page_host.empty() && browser && browser->GetMainFrame()) {
+    page_host = HostOfURL(browser->GetMainFrame()->GetURL());
+  }
+  if (!ShouldBlockRequest(HostOfURL(request->GetURL()), page_host)) {
+    return RV_CONTINUE;
+  }
+  if (unreported_blocks_.fetch_add(1) == 0) {
+    CefRefPtr<InterlinkedClient> self(this);
+    PerformOnMainRunLoop(^{
+      [self->view_ didBlockRequests:self->unreported_blocks_.exchange(0)];
+    });
+  }
+  return RV_CANCEL;
 }
 
 bool InterlinkedClient::DoClose(CefRefPtr<CefBrowser> browser) {

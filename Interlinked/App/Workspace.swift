@@ -19,7 +19,7 @@ enum LineTarget: Hashable {
 enum SettingsDestination: String, CaseIterable, Identifiable {
     case general = "General"
     case intelligence = "Intelligence"
-    case extensions = "Extensions"
+    case builtIns = "Built-ins"
     case data = "Data"
     case sites = "Sites"
     case about = "About"
@@ -71,7 +71,7 @@ final class Workspace {
     let permissions = WebsitePermissionStore()
     let navigationExceptions = NavigationExceptionStore()
     let browserHistory = BrowserHistoryStore()
-    let extensions = BrowserExtensionRuntime()
+    let builtIns = PageBuiltIns()
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
     var pageHistoryOpen = false
@@ -225,7 +225,7 @@ final class Workspace {
         guard !started else { return }
         started = true
         Workspace.shared = self
-        extensions.start(workspace: self)
+        builtIns.start(workspace: self)
         assistance.workspace = self
         downloads.refreshNotificationStatus()
         if let session = Session.read() {
@@ -254,7 +254,7 @@ final class Workspace {
         assistance.history.save()
         browserHistory.save()
         hosts.stopMemoryPressureMonitoring()
-        extensions.stop()
+        builtIns.stop()
         keyMonitor.map(NSEvent.removeMonitor)
         flagsMonitor.map(NSEvent.removeMonitor)
         mouseMonitor.map(NSEvent.removeMonitor)
@@ -741,6 +741,7 @@ final class Workspace {
 
     private func forgetClosed() {
         hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) })
+        builtIns.forget(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
         if let editing {
             let gone: Bool

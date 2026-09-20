@@ -27,7 +27,7 @@ enum Control {
         "sidebar [width|collapse|expand|toggle]",
         "overview [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
-        "extension [list|enable UUID|disable UUID|remove UUID]",
+        "builtins [state|blocking on|off|dark off|system|always]",
         "quit",
     ]
 
@@ -334,27 +334,31 @@ enum Control {
             workspace.nameTab(tab.id, "")
             return ok()
 
-        case "extension":
-            let records = workspace.extensions.records
-            switch words.first ?? "list" {
-            case "list":
-                return json(["available": workspace.extensions.isAvailable, "extensions": records.map {
-                    [
-                        "id": $0.id.uuidString,
-                        "name": $0.name,
-                        "version": $0.version,
-                        "enabled": $0.enabled,
-                        "errors": $0.errors,
-                    ] as [String: Any]
-                }])
-            case "enable", "disable", "remove":
-                guard words.count == 2, let id = UUID(uuidString: words[1]),
-                      records.contains(where: { $0.id == id }) else { return error("extension UUID not found") }
-                if words[0] == "remove" { workspace.extensions.uninstall(id) }
-                else { workspace.extensions.setEnabled(words[0] == "enable", for: id) }
+        case "builtins":
+            let builtIns = workspace.builtIns
+            switch words.first ?? "state" {
+            case "state":
+                return json([
+                    "blocking": builtIns.blockingEnabled,
+                    "rules": builtIns.ruleCount,
+                    "blocked_on_page": workspace.activePane.flatMap { builtIns.blockedCounts[$0] } ?? 0,
+                    "blocked_total": builtIns.blockedTotal,
+                    "dark_mode": builtIns.darkMode.rawValue,
+                    "page_darkened": builtIns.darkens(workspace.currentPageURL),
+                    "status": builtIns.status,
+                ])
+            case "blocking":
+                guard words.count == 2, ["on", "off"].contains(words[1]) else { return error("builtins blocking takes on or off") }
+                builtIns.blockingEnabled = words[1] == "on"
+                return ok()
+            case "dark":
+                guard words.count == 2, let mode = PageDarkMode(rawValue: words[1]) else {
+                    return error("builtins dark takes off, system, or always")
+                }
+                builtIns.darkMode = mode
                 return ok()
             default:
-                return error("extension takes list, enable UUID, disable UUID, or remove UUID")
+                return error("builtins takes state, blocking on|off, or dark off|system|always")
             }
 
         case "quit":

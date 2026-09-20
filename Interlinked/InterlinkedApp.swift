@@ -93,7 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startChromium() {
         guard !ILChromiumRuntime.isRunning else { return }
         do {
-            ILChromiumRuntime.prepareManifestV3ExtensionPaths(BrowserExtensionCatalog.startupExtensionPaths())
             try ILChromiumRuntime.start()
         } catch {
             chromiumStartupError = error

@@ -29,6 +29,7 @@ NS_ASSUME_NONNULL_BEGIN
             complete:(BOOL)complete
            cancelled:(BOOL)cancelled
          interrupted:(BOOL)interrupted;
+- (void)chromiumView:(ILChromiumView *)view didBlockRequests:(NSInteger)count;
 - (void)chromiumViewDidClose:(ILChromiumView *)view;
 @end
 
@@ -43,12 +44,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// True while the main thread is inside Chromium's message loop work.
 @property(class, nonatomic, readonly, getter=isPumpingMessages) BOOL pumpingMessages;
 @property(class, nonatomic, readonly, copy) NSString *engineVersion;
-@property(class, nonatomic, readonly) BOOL supportsManifestV3Extensions;
 
-/// Absolute paths to valid enabled unpacked extensions in the startup catalog.
-/// Chromium reads this same list before its browser process is initialized.
-+ (NSArray<NSString *> *)startupExtensionPaths;
-+ (void)prepareManifestV3ExtensionPaths:(NSArray<NSString *> *)paths;
+/// Publishes the built-in blocker's rules. Hosts also cover their subdomains.
+/// Requests from pages on |disabledSites| are never blocked.
++ (void)setBlockedHosts:(NSArray<NSString *> *)blocked
+      thirdPartyHosts:(NSArray<NSString *> *)thirdParty
+         allowedHosts:(NSArray<NSString *> *)allowed
+        disabledSites:(NSArray<NSString *> *)disabledSites;
++ (void)disableContentBlocking;
 
 + (BOOL)startWithError:(NSError * _Nullable * _Nullable)error;
 /// Closes every Chromium browser. The completion runs on the main thread,
@@ -68,6 +71,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) BOOL canGoBack;
 @property(nonatomic, readonly) BOOL canGoForward;
 @property(nonatomic, readonly, getter=isBrowserReady) BOOL browserReady;
+/// Renders the page dark: its own dark theme if it has one, otherwise
+/// Chromium's Auto Dark Mode.
+@property(nonatomic) BOOL forcedDarkMode;
 
 - (instancetype)initWithFrame:(NSRect)frame initialURL:(NSURL *)URL NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithFrame:(NSRect)frameRect;

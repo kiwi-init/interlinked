@@ -82,7 +82,7 @@ private extension SettingsDestination {
         switch self {
         case .general: "gearshape"
         case .intelligence: "sparkles"
-        case .extensions: "puzzlepiece.extension"
+        case .builtIns: "shield.lefthalf.filled"
         case .data: "externaldrive"
         case .sites: "globe"
         case .about: "info.circle"
@@ -93,7 +93,7 @@ private extension SettingsDestination {
         switch self {
         case .general: .gray
         case .intelligence: .purple
-        case .extensions: .green
+        case .builtIns: .green
         case .data: .orange
         case .sites: .blue
         case .about: .gray
@@ -107,7 +107,6 @@ struct AssistanceSettings: View {
     @State private var keyMessage = ""
     @State private var exportMessage = ""
     @State private var confirmClearActivity = false
-    @State private var extensionToRemove: BrowserExtensionRecord?
     @State private var settingsSearch = ""
     @State private var promptDrafts = Dictionary(
         uniqueKeysWithValues: IntelligencePromptFeature.allCases.map {
@@ -168,22 +167,6 @@ struct AssistanceSettings: View {
         } message: {
             Text("This removes the complete local intelligence audit log.")
         }
-        .confirmationDialog(
-            "Remove \(extensionToRemove?.name ?? "extension")?",
-            isPresented: Binding(
-                get: { extensionToRemove != nil },
-                set: { if !$0 { extensionToRemove = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Remove Extension", role: .destructive) {
-                if let id = extensionToRemove?.id { workspace.extensions.uninstall(id) }
-                extensionToRemove = nil
-            }
-            Button("Cancel", role: .cancel) { extensionToRemove = nil }
-        } message: {
-            Text("Its managed files, local extension data, and saved permissions will be removed from Interlinked.")
-        }
     }
 
     @ViewBuilder
@@ -202,7 +185,7 @@ struct AssistanceSettings: View {
             switch section {
             case .general: generalSettings
             case .intelligence: intelligenceSettings
-            case .extensions: extensionSettings
+            case .builtIns: builtInSettings
             case .data: dataSettings
             case .sites: siteSettings
             case .about: aboutSettings
@@ -407,90 +390,55 @@ struct AssistanceSettings: View {
         .settingsForm()
     }
 
-    private var extensionSettings: some View {
-        let extensions = workspace.extensions
+    private var builtInSettings: some View {
+        @Bindable var builtIns = workspace.builtIns
         return Form {
-            Section("Manifest V3") {
-                LabeledContent("Runtime") {
-                    Label(
-                        extensions.isAvailable ? "Chromium" : "Unavailable",
-                        systemImage: extensions.isAvailable ? "checkmark.circle.fill" : "xmark.circle.fill"
-                    )
-                    .foregroundStyle(.primary)
+            Section("Ad and tracker blocking") {
+                Toggle("Block ads and trackers", isOn: $builtIns.blockingEnabled)
+                LabeledContent("Blocked so far") { Text("\(builtIns.blockedTotal)").monospacedDigit() }
+                LabeledContent("Rules") {
+                    Text(builtIns.ruleCount == 0 ? "Not downloaded yet" : "\(builtIns.ruleCount) hosts")
                 }
-                LabeledContent("Install from") {
-                    Text("Unpacked folder").foregroundStyle(.primary)
+                LabeledContent("Lists updated") {
+                    Text(builtIns.listsUpdatedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
                 }
-                LabeledContent("Chrome Web Store") {
-                    Text(extensions.supportsChromeWebStore ? "Available" : "Unavailable in embedded mode")
-                        .foregroundStyle(.primary)
+                HStack {
+                    Button("Update Now") { Task { await builtIns.updateLists() } }
+                        .disabled(builtIns.updating)
+                        .pointingHandCursor()
+                    if builtIns.updating { ProgressView().controlSize(.small) }
+                    if !builtIns.status.isEmpty { Text(builtIns.status).foregroundStyle(.primary) }
                 }
-                Button("Add Extension…", action: extensions.installFromPanel)
-                    .disabled(!extensions.isAvailable || extensions.busy)
-                    .pointingHandCursor()
-                if extensions.busy { ProgressView().controlSize(.small) }
-                if extensions.requiresRestart {
-                    Label("Restart required", systemImage: "arrow.clockwise")
-                        .foregroundStyle(.primary)
-                }
-                if !extensions.message.isEmpty {
-                    Text(extensions.message).foregroundStyle(.primary)
+                Text("Interlinked refuses connections to known ad and tracking hosts from EasyList and EasyPrivacy (CC BY-SA 3.0). The lists refresh weekly.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if !builtIns.unblockedSites.isEmpty {
+                Section("Sites where blocking is off") {
+                    ForEach(builtIns.unblockedSites.sorted(), id: \.self) { site in
+                        HStack {
+                            Text(site)
+                            Spacer()
+                            Button("Remove") { builtIns.removeUnblockedSite(site) }.pointingHandCursor()
+                        }
+                    }
                 }
             }
-
-            if extensions.records.isEmpty {
-                Section("Extensions") {
-                    Text("No extensions installed.").foregroundStyle(.primary)
+            Section("Dark pages") {
+                Picker("Darken pages", selection: $builtIns.darkMode) {
+                    ForEach(PageDarkMode.allCases) { Text($0.label).tag($0) }
                 }
-            } else {
-                ForEach(extensions.records) { record in
-                    Section(record.name) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "puzzlepiece.extension.fill")
-                                .font(.system(size: 24))
-                                .frame(width: 30)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(record.name).fontWeight(.semibold)
-                                if !record.version.isEmpty { Text("Version \(record.version)") }
-                            }
-                            .foregroundStyle(.primary)
-                            Spacer()
-                            Toggle("Enabled", isOn: Binding(
-                                get: { record.enabled },
-                                set: { extensions.setEnabled($0, for: record.id) }
-                            ))
-                            .labelsHidden()
-                            .pointingHandCursor()
-                        }
-
-                        if !record.requestedPermissions.isEmpty || !record.optionalPermissions.isEmpty {
-                            DisclosureGroup("Permissions") {
-                                ForEach(Array(Set(record.requestedPermissions + record.optionalPermissions)).sorted(), id: \.self) { permission in
-                                    Text(permission).foregroundStyle(.primary)
-                                }
-                            }
-                        }
-
-                        if !record.requestedHosts.isEmpty || !record.optionalHosts.isEmpty {
-                            DisclosureGroup("Website Access") {
-                                ForEach(Array(Set(record.requestedHosts + record.optionalHosts)).sorted(), id: \.self) { host in
-                                    Text(host).foregroundStyle(.primary)
-                                }
-                            }
-                        }
-
-                        if !record.errors.isEmpty {
-                            DisclosureGroup("Errors (\(record.errors.count))") {
-                                ForEach(record.errors, id: \.self) { error in
-                                    Text(error).foregroundStyle(.primary).textSelection(.enabled)
-                                }
-                            }
-                        }
-
+                Text("Sites with their own dark theme use it. Interlinked recolors the rest and leaves images alone.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if !builtIns.lightSites.isEmpty {
+                Section("Sites kept light") {
+                    ForEach(builtIns.lightSites.sorted(), id: \.self) { site in
                         HStack {
+                            Text(site)
                             Spacer()
-                            Button("Remove", role: .destructive) { extensionToRemove = record }
-                                .pointingHandCursor()
+                            Button("Remove") { builtIns.removeLightSite(site) }.pointingHandCursor()
                         }
                     }
                 }
@@ -800,15 +748,7 @@ struct Toolbox: View {
                     VStack(spacing: 0) {
                         PersonalFilterButton(palette: palette)
                         PageTools(palette: palette)
-                        Button {
-                            workspace.settingsDestination = .extensions
-                            openSettings()
-                        } label: {
-                            ToolboxRowLabel(title: "Extensions", symbol: "puzzlepiece.extension", shortcut: "")
-                        }
-                        .buttonStyle(.pointing)
-                        .font(.system(size: 12, weight: .medium))
-                        .accessibilityIdentifier("toolbox-extensions-button")
+                        BuiltInRows(palette: palette)
                     }
                     .frame(width: menuWidth)
                     .padding(.bottom, 44)
@@ -1295,6 +1235,37 @@ private struct PersonalFilterPanel: View {
     }
 }
 
+
+/// Per-site switches for the built-in blocker and dark pages.
+struct BuiltInRows: View {
+    @Environment(Workspace.self) private var workspace
+    var palette: Palette
+
+    var body: some View {
+        let builtIns = workspace.builtIns
+        let url = workspace.currentPageURL
+        let blocking = builtIns.blocks(url)
+        let dark = builtIns.darkens(url)
+        VStack(spacing: 0) {
+            Button { builtIns.setBlocking(!blocking, for: url) } label: {
+                ToolboxRowLabel(title: blocking ? "Blocking Ads Here" : "Ads Allowed Here",
+                                symbol: blocking ? "shield.lefthalf.filled" : "shield.slash", shortcut: "",
+                                count: workspace.activePane.flatMap { builtIns.blockedCounts[$0] } ?? 0,
+                                accent: palette.accent)
+            }
+            .disabled(url == nil || !builtIns.blockingEnabled)
+            .accessibilityIdentifier("toolbox-blocking-button")
+            Button { builtIns.setDarkening(!dark, for: url) } label: {
+                ToolboxRowLabel(title: dark ? "Dark Page" : "Light Page",
+                                symbol: dark ? "moon.fill" : "sun.max", shortcut: "")
+            }
+            .disabled(url == nil || builtIns.darkMode == .off)
+            .accessibilityIdentifier("toolbox-dark-button")
+        }
+        .buttonStyle(.pointing)
+        .font(.system(size: 12, weight: .medium))
+    }
+}
 
 struct PageTools: View {
     @Environment(Workspace.self) private var workspace

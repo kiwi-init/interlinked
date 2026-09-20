@@ -29,7 +29,9 @@ final class PaneHosts {
             return existing
         }
         let coordinator = BrowserCoordinator(pane: pane, workspace: workspace)
-        let page = ChromiumPage(initialURL: address(from: workspace.surfaces.line(pane)))
+        let initialURL = address(from: workspace.surfaces.line(pane))
+        let page = ChromiumPage(initialURL: initialURL)
+        page.forcedDarkMode = workspace.builtIns.darkens(initialURL)
         page.delegate = coordinator
         coordinators[pane] = coordinator
         browsers[pane] = page
@@ -55,6 +57,7 @@ final class PaneHosts {
     }
 
     func existingBrowser(_ pane: PaneID) -> ChromiumPage? { browsers[pane] }
+    func forEachBrowser(_ body: (ChromiumPage) -> Void) { browsers.values.forEach(body) }
     func touch(_ pane: PaneID) { lifecycle.touch(pane) }
     func recovery(for pane: PaneID) -> BrowserRecovery? { lifecycle.recoveries[pane] }
 
@@ -248,6 +251,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         if urlChanged {
             lastURL = page.url
             workspace.assistance.committed(pane)
+            workspace.builtIns.apply(to: page)
         }
         workspace.hosts.updatePage(page, pane: pane)
         if urlChanged {
@@ -263,6 +267,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     func chromiumPageDidChange(_ page: ChromiumPage) { update(page) }
 
     func chromiumPageDidCommit(_ page: ChromiumPage) {
+        workspace?.builtIns.navigated(pane)
         workspace?.assistance.committed(pane)
         update(page)
     }
@@ -289,6 +294,10 @@ final class BrowserCoordinator: ChromiumPageDelegate {
 
     func chromiumPage(_ page: ChromiumPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool) {
         workspace?.downloads.update(page: page, identifier: identifier, fullPath: fullPath, receivedBytes: receivedBytes, totalBytes: totalBytes, percent: percent, complete: complete, cancelled: cancelled, interrupted: interrupted)
+    }
+
+    func chromiumPage(_ page: ChromiumPage, didBlockRequests count: Int) {
+        workspace?.builtIns.blocked(count, pane: pane)
     }
 
     func chromiumPageDidClose(_ page: ChromiumPage) {}
