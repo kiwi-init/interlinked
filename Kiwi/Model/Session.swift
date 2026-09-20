@@ -1,6 +1,48 @@
 import Foundation
 
+private final class SessionWriter: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "computer.kiwi.session-writer", qos: .utility)
+    private var pending: (data: Data, path: URL)?
+    private var scheduled = false
+
+    func write(_ data: Data, to path: URL) {
+        queue.async { [self] in
+            pending = (data, path)
+            guard !scheduled else { return }
+            scheduled = true
+            queue.asyncAfter(deadline: .now() + .milliseconds(150)) { [self] in
+                drain()
+            }
+        }
+    }
+
+    func flush() {
+        queue.sync { [self] in
+            scheduled = false
+            drainPending()
+        }
+    }
+
+    private func drain() {
+        scheduled = false
+        drainPending()
+    }
+
+    private func drainPending() {
+        guard let pending else { return }
+        self.pending = nil
+        do {
+            try FileManager.default.createDirectory(at: pending.path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try pending.data.write(to: pending.path, options: .atomic)
+        } catch {
+            // A missed write is not worth interrupting anyone over.
+        }
+    }
+}
+
 struct Session: Codable {
+    private static let writer = SessionWriter()
+
     static let version: UInt32 = 1
 
     var version: UInt32
@@ -67,17 +109,20 @@ struct Session: Codable {
         return session
     }
 
-    static func write(_ session: Session) {
+    static func data(_ session: Session) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try? encoder.encode(session.stamped())
+    }
+
+    static func write(_ data: Data) {
         guard let path = path() else { return }
-        do {
-            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(session.stamped())
-            try data.write(to: path, options: .atomic)
-        } catch {
-            // A missed write is not worth interrupting anyone over.
-        }
+        writer.write(data, to: path)
+    }
+
+    /// Finish already queued writes before the process exits.
+    static func flush() {
+        writer.flush()
     }
 }
 

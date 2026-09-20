@@ -24,6 +24,12 @@ final class PaneHosts {
         let config = WKWebViewConfiguration()
         let coordinator = BrowserCoordinator(pane: pane, workspace: workspace)
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        config.userContentController.addUserScript(WKUserScript(
+            source: PageTextBridge.install,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true,
+            in: .defaultClient
+        ))
         if #available(macOS 12.3, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
@@ -67,9 +73,10 @@ final class PaneHosts {
             pageURLs[pane] = view.url
             previews.removeValue(forKey: pane)
         }
-        titles[pane] = view.title ?? ""
-        canGoBack[pane] = view.canGoBack
-        canGoForward[pane] = view.canGoForward
+        let title = view.title ?? ""
+        if titles[pane] != title { titles[pane] = title }
+        if canGoBack[pane] != view.canGoBack { canGoBack[pane] = view.canGoBack }
+        if canGoForward[pane] != view.canGoForward { canGoForward[pane] = view.canGoForward }
     }
 
     func capturePreviews() {
@@ -154,6 +161,7 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate {
     weak var workspace: Workspace?
     private var observations: [NSKeyValueObservation] = []
     private var lastURL: URL?
+    private var updateScheduled = false
 
     init(pane: PaneID, workspace: Workspace) {
         self.pane = pane
@@ -163,31 +171,44 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate {
     func observe(_ view: WKWebView) {
         observations = [
             view.observe(\.title) { [weak self] view, _ in
-                Task { @MainActor in self?.update(view) }
+                Task { @MainActor in self?.scheduleUpdate(view) }
             },
             view.observe(\.url) { [weak self] view, _ in
-                Task { @MainActor in self?.update(view) }
+                Task { @MainActor in self?.scheduleUpdate(view) }
             },
             view.observe(\.canGoBack) { [weak self] view, _ in
-                Task { @MainActor in self?.update(view) }
+                Task { @MainActor in self?.scheduleUpdate(view) }
             },
             view.observe(\.canGoForward) { [weak self] view, _ in
-                Task { @MainActor in self?.update(view) }
+                Task { @MainActor in self?.scheduleUpdate(view) }
             },
         ]
     }
 
+    private func scheduleUpdate(_ view: WKWebView) {
+        guard !updateScheduled else { return }
+        updateScheduled = true
+        DispatchQueue.main.async { [weak self, weak view] in
+            guard let self else { return }
+            self.updateScheduled = false
+            if let view { self.update(view) }
+        }
+    }
+
     private func update(_ view: WKWebView) {
         guard let workspace else { return }
-        if lastURL != view.url {
+        let urlChanged = lastURL != view.url
+        if urlChanged {
             lastURL = view.url
             workspace.assistance.committed(pane)
             workspace.assistance.loaded(pane, view: view)
         }
         workspace.hosts.updatePage(view, pane: pane)
-        workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces)
-        if let url = view.url, url.absoluteString != "about:blank" {
-            workspace.setLineFromHost(pane, url.absoluteString)
+        if urlChanged {
+            workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces)
+            if let url = view.url, url.absoluteString != "about:blank" {
+                workspace.setLineFromHost(pane, url.absoluteString)
+            }
         }
     }
 

@@ -43,7 +43,11 @@ final class Workspace {
     var nextSplit: UInt64 = 1
     var tint: Tint = .ink
     var surfaces = Surfaces()
-    var editing: LineEdit? { didSet { refreshSearch() } }
+    var editing: LineEdit? {
+        didSet {
+            if editing != oldValue { refreshSearch() }
+        }
+    }
     private(set) var searchResults: [SearchResult] = []
     var selectedSearchResult: Int?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
@@ -57,7 +61,7 @@ final class Workspace {
 
     var sidebarCollapsed: Bool { sidebar <= 0 }
 
-    @ObservationIgnored private var written = ""
+    @ObservationIgnored private var written: Data?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var mouseMonitor: Any?
@@ -159,6 +163,7 @@ final class Workspace {
         flagsMonitor.map(NSEvent.removeMonitor)
         mouseMonitor.map(NSEvent.removeMonitor)
         control?.stop()
+        Session.flush()
         Workspace.shared = nil
     }
 
@@ -206,11 +211,10 @@ final class Workspace {
         hosts.syncFavicons(tabs: tabs, surfaces: surfaces)
         assistance.prune()
         let session = session()
-        guard let data = try? JSONEncoder().encode(session) else { return }
-        let text = String(data: data, encoding: .utf8) ?? ""
-        if text != written {
-            written = text
-            Session.write(session)
+        guard let data = Session.data(session) else { return }
+        if data != written {
+            written = data
+            Session.write(data)
         }
     }
 
@@ -283,9 +287,9 @@ final class Workspace {
     }
 
     func clickPane(_ pane: PaneID) {
-        editing = nil
-        overviewOpen = false
-        quickSwitchOpen = false
+        if editing != nil { editing = nil }
+        if overviewOpen { overviewOpen = false }
+        if quickSwitchOpen { quickSwitchOpen = false }
         if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
         if activePane != pane { activatePane(pane) }
     }
