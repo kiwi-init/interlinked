@@ -46,6 +46,12 @@ struct InterlinkedApp: App {
                 Button("Share This Page with Jev…") { workspace.assistance.requestSharing() }
                 Button("Stop Sharing This Page") { workspace.assistance.revokePage() }
                     .disabled(!workspace.assistance.shared)
+                Button("Downloads") {
+                    workspace.assistance.closeFilters()
+                    if workspace.assistance.panel != nil { workspace.assistance.closePanel() }
+                    workspace.downloads.togglePanel()
+                }
+                .keyboardShortcut("j", modifiers: .command)
                 Divider()
                 Button("Close Tab") { workspace.closeActive() }
                     .keyboardShortcut("w", modifiers: .command)

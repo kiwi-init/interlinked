@@ -83,6 +83,8 @@ struct AssistanceSettings: View {
                 .tabItem { Label("Jev Access", systemImage: "key") }
             dataSettings(assistant)
                 .tabItem { Label("Data", systemImage: "externaldrive") }
+            siteSettings
+                .tabItem { Label("Sites", systemImage: "globe") }
         }
         .padding(.top, 8)
         .frame(width: 620, height: 500)
@@ -193,6 +195,53 @@ struct AssistanceSettings: View {
         .padding(.horizontal, 8)
     }
 
+    private var siteSettings: some View {
+        Form {
+            Section("Website permissions") {
+                if workspace.permissions.records.isEmpty {
+                    Text("No saved website permissions.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(workspace.permissions.records) { record in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(record.key.origin)
+                                Text("\(record.key.kind.label): \(record.decision == .allow ? "Allowed" : "Denied")")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Revoke") { workspace.permissions.revoke(record.key) }
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Revoke All", role: .destructive, action: workspace.permissions.revokeAll)
+                    }
+                }
+                SettingsNote("Camera, microphone, and location choices belong to the exact requesting origin. Revoking a choice makes that origin ask again.")
+            }
+            Section("Browser support") {
+                SettingsNote("Location permission prompts require macOS 27 or later. On earlier macOS versions, WebKit does not expose a permission delegate to Interlinked.")
+                SettingsNote("WebKit does not expose website notification permission to embedded macOS browsers. Interlinked cannot grant those requests; download completion notifications are app notifications instead.")
+            }
+            Section("Download notifications") {
+                LabeledContent("System notifications", value: workspace.downloads.notificationStatus)
+                if workspace.downloads.notificationStatus == "Off" {
+                    HStack {
+                        SettingsNote("Interlinked also marks finished and failed downloads in the Toolbox without interrupting the page.")
+                        Spacer()
+                        Button("Allow Notifications", action: workspace.downloads.requestNotificationPermission)
+                    }
+                } else {
+                    SettingsNote("Finished and failed downloads stay in the Toolbox. System notifications appear only when macOS allows them.")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(.horizontal, 8)
+    }
+
     private func saveKey(_ assistant: BrowserAssistance) {
         do {
             try JevCredential.save(key)
@@ -249,16 +298,19 @@ struct Toolbox: View {
     @State private var hovering = false
     var palette: Palette
     private var assistant: BrowserAssistance { workspace.assistance }
+    private var downloads: DownloadCenter { workspace.downloads }
     private var expanded: Bool {
-        hovering || workspace.commandKeyHeld || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
+        hovering || workspace.commandKeyHeld || downloads.panelOpen || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
     }
     private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 190 }
-    private var menuRows: CGFloat { assistant.criticalReadingMode == .onRequest ? 4 : 3 }
+    private var menuRows: CGFloat { assistant.criticalReadingMode == .onRequest ? 5 : 4 }
     private var width: CGFloat {
+        if downloads.panelOpen { return 390 }
         if assistant.filterPanelOpen || assistant.readingPanelOpen { return 340 }
         return expanded ? menuWidth : 108
     }
     private var height: CGFloat {
+        if downloads.panelOpen { return 360 }
         if assistant.filterPanelOpen { return 300 }
         if assistant.readingPanelOpen { return 150 }
         return expanded ? 44 + menuRows * 40 : 44
@@ -266,7 +318,10 @@ struct Toolbox: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if assistant.filterPanelOpen {
+            if downloads.panelOpen {
+                DownloadsPanel(palette: palette)
+                    .transition(.opacity)
+            } else if assistant.filterPanelOpen {
                 PersonalFilterPanel(palette: palette)
                     .transition(.opacity)
             } else if assistant.readingPanelOpen {
@@ -298,6 +353,11 @@ struct Toolbox: View {
                     HStack(spacing: 0) {
                         Image(systemName: "wrench.and.screwdriver")
                             .frame(width: 44, height: 44)
+                            .overlay(alignment: .topTrailing) {
+                                if downloads.unreadCount > 0 {
+                                    Circle().fill(.red).frame(width: 7, height: 7).offset(x: -5, y: 6)
+                                }
+                            }
                         Text("Toolbox")
                             .font(.system(size: 12, weight: .medium))
                             .padding(.trailing, 16)
@@ -319,12 +379,146 @@ struct Toolbox: View {
         .animation(reduceMotion ? nil : Metrics.morph, value: width)
         .animation(reduceMotion ? nil : Metrics.morph, value: height)
         .animation(reduceMotion ? nil : Metrics.morph, value: assistant.filterPanelOpen)
+        .animation(reduceMotion ? nil : Metrics.morph, value: downloads.panelOpen)
         .animation(reduceMotion ? nil : Metrics.morph, value: assistant.appliedFilterCount)
     }
 
     private func closeActivePanel() {
-        if assistant.filterPanelOpen { assistant.closeFilters() }
+        if downloads.panelOpen { downloads.closePanel() }
+        else if assistant.filterPanelOpen { assistant.closeFilters() }
         else if assistant.panel != nil { assistant.closePanel() }
+    }
+}
+
+private struct DownloadsPanel: View {
+    @Environment(Workspace.self) private var workspace
+    var palette: Palette
+    private var downloads: DownloadCenter { workspace.downloads }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Downloads").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                if downloads.records.contains(where: { !$0.state.isActive }) {
+                    Button("Clear", action: downloads.clearFinished)
+                        .font(.system(size: 10))
+                }
+                Button(action: downloads.closePanel) {
+                    Image(systemName: "xmark").frame(width: 24, height: 24)
+                }
+                .accessibilityLabel("Close Downloads")
+            }
+
+            if downloads.records.isEmpty {
+                Text("Downloaded files will appear here.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.textDim)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(downloads.records) { record in
+                            DownloadRow(record: record, palette: palette)
+                        }
+                    }
+                }
+            }
+            Text("Downloads keep running when their tab closes. Quitting interrupts them; resumable servers can continue later.")
+                .font(.system(size: 9))
+                .foregroundStyle(palette.textDim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.text)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct DownloadRow: View {
+    @Environment(Workspace.self) private var workspace
+    var record: DownloadRecord
+    var palette: Palette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(iconColor)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(record.filename)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(record.origin)
+                    .font(.system(size: 9))
+                    .foregroundStyle(palette.textDim)
+                    .lineLimit(1)
+                if record.state == .downloading {
+                    if let fraction = record.fractionCompleted {
+                        ProgressView(value: fraction).controlSize(.small)
+                    } else {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Text(progressLabel)
+                        .font(.system(size: 9).monospacedDigit())
+                        .foregroundStyle(palette.textDim)
+                } else if let message = record.message {
+                    Text(message)
+                        .font(.system(size: 9))
+                        .foregroundStyle(record.state == .failed ? .red : palette.textDim)
+                        .lineLimit(2)
+                }
+                if let destination = record.destination {
+                    Text(destination.deletingLastPathComponent().path)
+                        .font(.system(size: 9))
+                        .foregroundStyle(palette.textDim)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            if record.state.isActive {
+                Button { workspace.downloads.cancel(record.id) } label: {
+                    Image(systemName: "xmark.circle").frame(width: 24, height: 24)
+                }
+                .accessibilityLabel("Cancel \(record.filename)")
+            } else if record.canReveal {
+                Button { workspace.downloads.reveal(record.id) } label: {
+                    Image(systemName: "folder").frame(width: 24, height: 24)
+                }
+                .accessibilityLabel("Reveal \(record.filename) in Finder")
+            } else if record.canResume {
+                Button { workspace.resumeDownload(record.id) } label: {
+                    Image(systemName: "arrow.clockwise").frame(width: 24, height: 24)
+                }
+                .accessibilityLabel("Resume \(record.filename)")
+            }
+        }
+        .padding(8)
+        .background(palette.hover, in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private var icon: String {
+        switch record.state {
+        case .choosingDestination, .downloading: return "arrow.down.circle"
+        case .completed: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .cancelled, .interrupted: return "pause.circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch record.state {
+        case .completed: return .green
+        case .failed: return .red
+        default: return palette.textDim
+        }
+    }
+
+    private var progressLabel: String {
+        let received = ByteCountFormatter.string(fromByteCount: record.receivedBytes, countStyle: .file)
+        guard let expected = record.expectedBytes else { return received }
+        return "\(received) of \(ByteCountFormatter.string(fromByteCount: expected, countStyle: .file))"
     }
 }
 
@@ -373,6 +567,7 @@ private struct PersonalFilterButton: View {
 
     var body: some View {
         Button {
+            workspace.downloads.closePanel()
             assistant.filterPanelOpen ? assistant.closeFilters() : assistant.openFilters()
         } label: {
             HStack(spacing: 10) {
@@ -490,7 +685,10 @@ struct PageTools: View {
         @Bindable var assistant = assistant
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Button { open ? assistant.closePanel() : assistant.openFind() } label: {
+                Button {
+                    workspace.downloads.closePanel()
+                    open ? assistant.closePanel() : assistant.openFind()
+                } label: {
                     Label("Find for me", systemImage: "magnifyingglass")
                         .labelStyle(ToolboxLabelStyle())
                         .padding(.leading, 12)
@@ -532,8 +730,16 @@ struct PageTools: View {
                 .accessibilityLabel(assistant.savedInVault ? "Update saved page in Vault" : "Save page to Vault")
                 .help(assistant.vaultStatus.isEmpty ? "Save page to Vault" : assistant.vaultStatus)
                 .accessibilityIdentifier("page-vault-button")
+            toolboxButton("Downloads", symbol: workspace.downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle") {
+                assistant.closeFilters()
+                if assistant.panel != nil { assistant.closePanel() }
+                workspace.downloads.togglePanel()
+            }
+            .accessibilityLabel(workspace.downloads.activeCount == 0 ? "Downloads" : "Downloads, \(workspace.downloads.activeCount) active")
+            .accessibilityIdentifier("downloads-button")
             if assistant.criticalReadingMode == .onRequest {
                 toolboxButton("Critical Reading", symbol: "text.magnifyingglass") {
+                    workspace.downloads.closePanel()
                     assistant.panel == .reading ? assistant.closePanel() : assistant.openReading()
                 }
                 .accessibilityLabel("Critical reading")

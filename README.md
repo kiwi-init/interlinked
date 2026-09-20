@@ -22,7 +22,11 @@ Favicons are fetched once per hostname, shared across tabs, and saved in `~/Libr
 
 Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
 
-Links that open a new browser window become a new Interlinked tab. File downloads use the standard macOS save panel, starting in Downloads. Camera and microphone requests keep WebKit's per-site permission prompt.
+Links that open a new browser window become a new Interlinked tab. File uploads use the macOS open panel and keep each input's multiple-selection, directory, and accepted-type rules. JavaScript alert, confirm, and prompt calls use native sheets. HTTP Basic and Digest credentials last for the session; client-certificate requests are cancelled with an explanation.
+
+Downloads use the standard macOS save panel and appear in the Toolbox with their origin, destination, byte progress, cancel, resume when the server permits it, failure details, and Reveal in Finder. They keep running after their tab closes. Interlinked never opens a downloaded file automatically. It records an interrupted state if the app quits during a transfer.
+
+Camera, microphone, and location choices belong to the exact requesting origin and can be revoked in Settings. Location prompting requires macOS 27 or later. WebKit does not expose website notification permission to embedded macOS browsers, so Interlinked cannot grant those requests. Download completion and failure mark the Toolbox and can use macOS notifications when enabled in Settings.
 
 ## Find and save
 
@@ -52,6 +56,7 @@ Choose **Interlinked → About Interlinked** to inspect the exact Critical Readi
 | `cmd-r` | Reload page |
 | `cmd-f` | Find in page |
 | `cmd-g` / `cmd-shift-g` | Next / previous match |
+| `cmd-j` | Downloads |
 | `ctrl-tab` / `ctrl-shift-tab` | Next / previous tab |
 | `cmd-]` / `cmd-[` | Next / previous tab |
 | hold `cmd`, then `1`–`9` | Show other tabs and open the numbered tab |
@@ -96,5 +101,13 @@ Run the tests with:
 xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
   -derivedDataPath build -destination 'platform=macOS' test
 ```
+
+The local browser-capability fixture covers file inputs, JavaScript dialogs, HTTP authentication, permission requests, and known-length, unknown-length, cancelled, failed, and duplicate-name downloads:
+
+```sh
+python3 test-fixtures/server.py
+```
+
+Then open `http://127.0.0.1:8765` in Interlinked.
 
 `project.yml` defines the Xcode project. After changing it, regenerate with `xcodegen generate`. The generated project is checked in so normal builds only need Xcode. Build products and local validation output belong in the ignored `build/` directory.

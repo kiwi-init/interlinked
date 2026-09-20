@@ -195,6 +195,68 @@ final class NavigationSafetyTests: XCTestCase {
     }
 }
 
+@MainActor
+final class WebsitePermissionTests: XCTestCase {
+    func testDecisionsAreScopedToTheExactOriginAndPermission() {
+        let suite = "WebsitePermissionTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WebsitePermissionStore(defaults: defaults, storageKey: "permissions")
+
+        store.set(.allow, for: "https://one.test", kind: .camera)
+        store.set(.deny, for: "https://one.test", kind: .microphone)
+
+        XCTAssertEqual(store.decision(for: "https://one.test", kind: .camera), .allow)
+        XCTAssertEqual(store.decision(for: "https://one.test", kind: .microphone), .deny)
+        XCTAssertNil(store.decision(for: "https://two.test", kind: .camera))
+    }
+
+    func testRevokingAPermissionMakesOnlyThatOriginAskAgain() throws {
+        let suite = "WebsitePermissionTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WebsitePermissionStore(defaults: defaults, storageKey: "permissions")
+        store.set(.allow, for: "https://one.test", kind: .location)
+        store.set(.allow, for: "https://two.test", kind: .location)
+
+        store.revoke(try XCTUnwrap(store.records.first { $0.key.origin == "https://one.test" }).key)
+
+        XCTAssertNil(store.decision(for: "https://one.test", kind: .location))
+        XCTAssertEqual(store.decision(for: "https://two.test", kind: .location), .allow)
+    }
+}
+
+final class DownloadRecordTests: XCTestCase {
+    func testDuplicateFilenamesGetANewDestinationWithoutOverwriting() {
+        let directory = URL(fileURLWithPath: "/tmp/downloads", isDirectory: true)
+        let occupied = Set(["/tmp/downloads/report.pdf", "/tmp/downloads/report 2.pdf"])
+        let result = DownloadNaming.availableURL(directory: directory, suggestedFilename: "report.pdf") {
+            occupied.contains($0)
+        }
+        XCTAssertEqual(result.path, "/tmp/downloads/report 3.pdf")
+    }
+
+    func testSuggestedFilenameCannotEscapeTheDestinationDirectory() {
+        XCTAssertEqual(DownloadNaming.sanitized("../../private.txt"), "private.txt")
+        XCTAssertEqual(DownloadNaming.sanitized("  "), "Download")
+    }
+
+    func testDownloadFailuresExplainCommonServerDiskAndPermissionErrors() {
+        XCTAssertEqual(
+            DownloadFailure.message(for: NSError(domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse)),
+            "The server returned an invalid response."
+        )
+        XCTAssertEqual(
+            DownloadFailure.message(for: NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)),
+            "There is not enough disk space for this download."
+        )
+        XCTAssertEqual(
+            DownloadFailure.message(for: NSError(domain: NSCocoaErrorDomain, code: NSFileWriteFileExistsError)),
+            "A file already exists at the chosen destination."
+        )
+    }
+}
+
 final class SurfaceTests: XCTestCase {
     func testTabRowsAreBalancedAndNeverExceedFive() {
         XCTAssertEqual(OpenWork.rows(count: 6).map(\.count), [3, 3])

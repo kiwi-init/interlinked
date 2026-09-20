@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Interlinked web capability fixtures</title>
+<style>
+  :root { color-scheme: light dark; font: 16px system-ui; }
+  body { max-width: 760px; margin: 40px auto; padding: 0 20px; }
+  section { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 12px; padding: 16px; margin: 16px 0; }
+  button, a, input { margin: 5px 6px 5px 0; }
+  output { display: block; min-height: 1.4em; margin-top: 8px; white-space: pre-wrap; }
+</style>
+<h1>Interlinked web capability fixtures</h1>
+<p>Run <code>python3 test-fixtures/server.py</code>, then open <code>http://127.0.0.1:8765</code>.</p>
+
+<section>
+  <h2>File chooser</h2>
+  <label>One image <input id="image" type="file" accept="image/*,.svg"></label><br>
+  <label>Several text files <input id="multiple" type="file" accept="text/plain,.md" multiple></label><br>
+  <label>A directory <input id="directory" type="file" webkitdirectory></label>
+  <output id="files">Choose or cancel each panel.</output>
+</section>
+
+<section>
+  <h2>JavaScript dialogs</h2>
+  <button id="alert">Alert</button>
+  <button id="confirm">Confirm</button>
+  <button id="prompt">Prompt</button>
+  <output id="dialogs">No result yet.</output>
+</section>
+
+<section>
+  <h2>HTTP authentication</h2>
+  <a href="/auth/basic">Basic challenge</a>
+  <a href="/auth/digest">Digest challenge</a>
+  <p>The fixture accepts <code>fixture / interlinked</code>. Client certificates require a TLS server configured to request a client identity; Interlinked should cancel that challenge with a native explanation.</p>
+</section>
+
+<section>
+  <h2>Permissions</h2>
+  <button id="media">Camera and microphone</button>
+  <button id="location">Location</button>
+  <button id="notifications">Notifications</button>
+  <output id="permissions">No result yet.</output>
+</section>
+
+<section>
+  <h2>Downloads</h2>
+  <a href="/download/known" download>Known length</a>
+  <a href="/download/unknown" download>Unknown length</a>
+  <a href="/download/slow" download>Slow, cancellable</a>
+  <a href="/download/failure" download>Server failure</a>
+  <a href="/download/duplicate" download>Duplicate filename</a>
+</section>
+
+<script>
+  for (const input of document.querySelectorAll('input[type=file]')) {
+    input.addEventListener('change', () => {
+      document.querySelector('#files').textContent = input.files.length
+        ? [...input.files].map(file => `${file.name} (${file.type || 'unknown type'})`).join('\n')
+        : 'No files selected.';
+    });
+  }
+  document.querySelector('#alert').onclick = () => { alert('Alert completion handler returned.'); dialogs.textContent = 'Alert closed.'; };
+  document.querySelector('#confirm').onclick = () => { dialogs.textContent = `Confirm returned ${confirm('Choose OK or Cancel.')}.`; };
+  document.querySelector('#prompt').onclick = () => { dialogs.textContent = `Prompt returned ${JSON.stringify(prompt('Enter a value or cancel.', 'fixture'))}.`; };
+  const permissions = document.querySelector('#permissions');
+  document.querySelector('#media').onclick = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
+      permissions.textContent = `Media granted with ${stream.getTracks().length} tracks.`;
+      stream.getTracks().forEach(track => track.stop());
+    } catch (error) { permissions.textContent = `Media failed: ${error.name}: ${error.message}`; }
+  };
+  document.querySelector('#location').onclick = () => {
+    navigator.geolocation.getCurrentPosition(
+      position => permissions.textContent = `Location granted: ${position.coords.latitude.toFixed(3)}, ${position.coords.longitude.toFixed(3)}`,
+      error => permissions.textContent = `Location failed: ${error.code}: ${error.message}`
+    );
+  };
+  document.querySelector('#notifications').onclick = async () => {
+    if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this WebKit build.'; return; }
+    try { permissions.textContent = `Notification permission: ${await Notification.requestPermission()}`; }
+    catch (error) { permissions.textContent = `Notifications failed: ${error.name}: ${error.message}`; }
+  };
+</script>
+</html>

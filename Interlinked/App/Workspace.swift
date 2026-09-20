@@ -56,6 +56,8 @@ final class Workspace {
     var voice = Voice()
     let hosts = PaneHosts()
     let assistance = BrowserAssistance()
+    let downloads = DownloadCenter()
+    let permissions = WebsitePermissionStore()
     var overviewOpen = false
     var quickSwitchOpen = false
     var commandKeyHeld = false
@@ -135,7 +137,8 @@ final class Workspace {
     }
 
     func escape() {
-        if assistance.filterPanelOpen { assistance.closeFilters() }
+        if downloads.panelOpen { downloads.closePanel() }
+        else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if editing != nil { discardLine() }
         else if overviewOpen { setOverviewOpen(false) }
@@ -156,6 +159,7 @@ final class Workspace {
         started = true
         Workspace.shared = self
         assistance.workspace = self
+        downloads.refreshNotificationStatus()
         if let session = Session.read() {
             restore(session)
             if tabs.isEmpty { openTab() }
@@ -173,6 +177,7 @@ final class Workspace {
     }
 
     func stop() {
+        downloads.prepareForTermination()
         assistance.history.save()
         keyMonitor.map(NSEvent.removeMonitor)
         flagsMonitor.map(NSEvent.removeMonitor)
@@ -180,6 +185,11 @@ final class Workspace {
         control?.stop()
         Session.flush()
         Workspace.shared = nil
+    }
+
+    func resumeDownload(_ id: UUID) {
+        let webView = activePane.flatMap(hosts.existingBrowser)
+        downloads.resume(id, in: webView)
     }
 
 
@@ -618,6 +628,12 @@ final class Workspace {
             return event // Let links, selection and form controls receive the original click.
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53, let self,
+               self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
+               self.editing != nil || self.overviewOpen {
+                self.escape()
+                return nil
+            }
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             if modifiers == .command,
                let characters = event.charactersIgnoringModifiers,

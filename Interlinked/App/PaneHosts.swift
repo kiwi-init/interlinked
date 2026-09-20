@@ -158,7 +158,7 @@ final class PaneHosts {
 }
 
 @MainActor
-final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     let pane: PaneID
     weak var workspace: Workspace?
     private var observations: [NSKeyValueObservation] = []
@@ -306,7 +306,7 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         navigationAction: WKNavigationAction,
         didBecome download: WKDownload
     ) {
-        download.delegate = self
+        workspace?.downloads.track(download)
     }
 
     func webView(
@@ -314,28 +314,7 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         navigationResponse: WKNavigationResponse,
         didBecome download: WKDownload
     ) {
-        download.delegate = self
-    }
-
-    func download(
-        _ download: WKDownload,
-        decideDestinationUsing response: URLResponse,
-        suggestedFilename: String,
-        completionHandler: @escaping (URL?) -> Void
-    ) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggestedFilename
-        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        panel.canCreateDirectories = true
-        if let window = NSApp.keyWindow {
-            panel.beginSheetModal(for: window) { result in
-                completionHandler(result == .OK ? panel.url : nil)
-            }
-        } else {
-            panel.begin { result in
-                completionHandler(result == .OK ? panel.url : nil)
-            }
-        }
+        workspace?.downloads.track(download)
     }
 
     func webView(
@@ -379,6 +358,128 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         type: WKMediaCaptureType,
         decisionHandler: @escaping (WKPermissionDecision) -> Void
     ) {
-        decisionHandler(.prompt)
+        let kind: WebsitePermissionKind
+        switch type {
+        case .camera: kind = .camera
+        case .microphone: kind = .microphone
+        case .cameraAndMicrophone: kind = .cameraAndMicrophone
+        @unknown default:
+            decisionHandler(.deny)
+            return
+        }
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let workspace else {
+                decisionHandler(.deny)
+                return
+            }
+            let decision = await WebPrompts.requestPermission(
+                origin: WebPrompts.origin(origin), kind: kind,
+                store: workspace.permissions, window: webView?.window
+            )
+            decisionHandler(decision == .allow ? .grant : .deny)
+        }
+    }
+
+    @available(macOS 27.0, *)
+    func webView(
+        _ webView: WKWebView,
+        requestGeolocationPermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let workspace else {
+                decisionHandler(.deny)
+                return
+            }
+            let decision = await WebPrompts.requestPermission(
+                origin: WebPrompts.origin(origin), kind: .location,
+                store: workspace.permissions, window: webView?.window
+            )
+            decisionHandler(decision == .allow ? .grant : .deny)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        Task { @MainActor [weak webView] in
+            guard let webView else {
+                completionHandler(nil)
+                return
+            }
+            let script = "document.activeElement instanceof HTMLInputElement ? document.activeElement.accept : ''"
+            let accepted = (try? await webView.evaluateJavaScript(script)) as? String
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.canChooseFiles = true
+            let types = WebPrompts.acceptedContentTypes(accepted)
+            if !types.isEmpty { panel.allowedContentTypes = types }
+            let finish: (NSApplication.ModalResponse) -> Void = { response in
+                completionHandler(response == .OK ? panel.urls : nil)
+            }
+            if let window = webView.window {
+                panel.beginSheetModal(for: window, completionHandler: finish)
+            } else {
+                panel.begin(completionHandler: finish)
+            }
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        Task { @MainActor [weak webView] in
+            await WebPrompts.showAlert(message: message, origin: WebPrompts.origin(frame), window: webView?.window)
+            completionHandler()
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        Task { @MainActor [weak webView] in
+            let confirmed = await WebPrompts.showConfirm(
+                message: message, origin: WebPrompts.origin(frame), window: webView?.window
+            )
+            completionHandler(confirmed)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        Task { @MainActor [weak webView] in
+            let answer = await WebPrompts.showPrompt(
+                message: prompt, defaultText: defaultText,
+                origin: WebPrompts.origin(frame), window: webView?.window
+            )
+            completionHandler(answer)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        Task { @MainActor [weak webView] in
+            let response = await WebPrompts.authenticationResponse(for: challenge, window: webView?.window)
+            completionHandler(response.0, response.1)
+        }
     }
 }
