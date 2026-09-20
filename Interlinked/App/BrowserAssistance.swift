@@ -17,6 +17,7 @@ final class BrowserAssistance {
     }
 
     var panel: Panel?
+    var readingPanelOpen = false
     var query = ""
     var byMeaning = true
     var status = ""
@@ -279,12 +280,14 @@ final class BrowserAssistance {
 
     func openFind() {
         closeFilters()
+        readingPanelOpen = false
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
         panel = .find
         findChanged()
     }
     func closePanel() {
         cancel("find"); cancel("exact"); cancel("reading"); panel = nil; nextPanel = nil
+        readingPanelOpen = false
         if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
         busy = false; matches = []; findings = []; status = ""
         if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
@@ -420,7 +423,7 @@ final class BrowserAssistance {
     func openReading() {
         closePanel()
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
-        panel = .reading; findings = []; status = "Check wording in the current page."
+        panel = .reading; readingPanelOpen = true; findings = []; status = "Check wording in the current page."
         review()
     }
     func review() {

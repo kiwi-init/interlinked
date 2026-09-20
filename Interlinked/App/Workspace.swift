@@ -135,7 +135,8 @@ final class Workspace {
     }
 
     func escape() {
-        if assistance.panel != nil { assistance.closePanel() }
+        if assistance.filterPanelOpen { assistance.closeFilters() }
+        else if assistance.panel != nil { assistance.closePanel() }
         else if editing != nil { discardLine() }
         else if overviewOpen { setOverviewOpen(false) }
         else { cancelListening() }

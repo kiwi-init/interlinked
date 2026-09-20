@@ -13,10 +13,8 @@ struct ContentView: View {
                     .padding(18)
             }
             .overlay(alignment: .bottomTrailing) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    PersonalFilterTools(palette: palette)
-                    PageTools(palette: palette)
-                }.padding(18)
+                Toolbox(palette: palette)
+                    .padding(18)
             }
         }
         .background(palette.pane)
