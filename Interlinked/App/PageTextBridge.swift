@@ -6,7 +6,7 @@ import WebKit
     if (!globalThis.interlinkedContext) {
       const documentID = crypto.randomUUID();
       const ids = new WeakMap(), nodes = new Map(), filterCandidates = new Map(); let next = 0;
-      let stopReading, filterStyle;
+      let stopReading, filterStyle; let lastLink;
       const filteredNodes = new Set(), previousDisplays = new WeakMap();
       const filterHighlightNames = new Set();
       const clean = value => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -32,6 +32,10 @@ import WebKit
         if (node.matches('video')) return clean(node.getAttribute('aria-label') || node.getAttribute('title')) || 'Video';
         return clean(node.innerText);
       };
+      document.addEventListener('pointerdown',event=>{
+        const link=event.target?.closest?.('a[href]');
+        lastLink=link ? {href:link.href,text:clean(link.innerText||link.getAttribute('aria-label')||link.title).slice(0,160),at:Date.now()} : null;
+      },true);
       globalThis.interlinkedContext = {
         metadata() {
           const meta = name => clean(document.querySelector('meta[name="'+name+'"],meta[property="'+name+'"]')?.content).slice(0,240);
@@ -40,6 +44,12 @@ import WebKit
             summary:meta('description') || meta('og:description'),siteName:meta('og:site_name'),
             breadcrumbs:Array.from(document.querySelectorAll('[aria-label*="readcrumb"] a,[itemprop="itemListElement"] [itemprop="name"]')).slice(0,5).map(n=>clean(n.textContent).slice(0,60)),
             sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]')};
+        },
+        navigationLink(destination) {
+          if (!lastLink || Date.now()-lastLink.at>5000) return null;
+          try { if (new URL(lastLink.href,location.href).href!==new URL(destination,location.href).href) return null; }
+          catch { return null; }
+          return lastLink.text || null;
         },
         extract() {
           const root = document.body;
@@ -375,6 +385,12 @@ import WebKit
     }
     static func extractFilterCandidates(_ view: WKWebView) async throws -> PageFilterExtract {
         try await value(view, call: "return interlinkedContext.extractFilterCandidates();", type: PageFilterExtract.self)
+    }
+    static func navigationLinkText(_ view: WKWebView, destination: URL) async -> String? {
+        (try? await view.callAsyncJavaScript(
+            "return globalThis.interlinkedContext?.navigationLink(destination) ?? null;",
+            arguments: ["destination": destination.absoluteString], in: nil, contentWorld: .defaultClient
+        )) as? String
     }
     private static func value<T: Decodable>(_ view: WKWebView, call: String, type: T.Type) async throws -> T {
         let result: Any?

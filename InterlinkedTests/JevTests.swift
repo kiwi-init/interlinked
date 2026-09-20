@@ -19,6 +19,29 @@ private actor FixtureJev: JevProvider {
     }
 }
 
+private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
+    let label: String?
+    let vaultIDs: [UUID]?
+    let memberGroups: [[String]]?
+    let advice: String?
+    private(set) var vaultInputCount = 0
+
+    init(label: String? = nil, vaultIDs: [UUID]? = nil, memberGroups: [[String]]? = nil, advice: String? = nil) {
+        self.label = label
+        self.vaultIDs = vaultIDs
+        self.memberGroups = memberGroups
+        self.advice = advice
+    }
+
+    func pageLabel(page: PageMetadata, candidates: [LabelCandidate]) async throws -> String? { label }
+    func vaultMatches(query: String, visits: [HistoryVisit]) async throws -> [UUID]? {
+        vaultInputCount = visits.count
+        return vaultIDs
+    }
+    func relatedPageGroups(pages: [ResearchPage]) async throws -> [[String]]? { memberGroups }
+    func navigationAdvice(_ review: NavigationReview) async throws -> String? { advice }
+}
+
 private final class JevURLProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -152,6 +175,82 @@ final class JevServiceTests: XCTestCase {
         CriticalReadingMode.onRequest.save(to: defaults)
         XCTAssertFalse(JevPreferences.enabled(in: defaults))
         XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
+    }
+}
+
+final class BrowserIntelligenceTests: XCTestCase {
+    private func page() -> PageMetadata {
+        PageMetadata(document: "doc", url: "https://example.com/products/browser", title: "Example Browser",
+                     heading: "A focused browser", summary: "Browse without losing context", breadcrumbs: ["Products"])
+    }
+
+    private func visit(_ index: Int) -> HistoryVisit {
+        HistoryVisit(id: UUID(), url: "https://example.com/\(index)", title: "Saved page \(index)",
+                     summary: "Research note \(index)", visited: Date(timeIntervalSince1970: TimeInterval(index)))
+    }
+
+    func testAppleLabelWinsWithoutCallingJev() async throws {
+        let page = page(), candidates = ContextLabels.candidates(page)
+        let expected = try XCTUnwrap(candidates.last?.text)
+        let local = FixtureLocalIntelligence(label: expected)
+        let jev = FixtureJev()
+        let intelligence = BrowserIntelligence(jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)), local: local)
+
+        let decision = try await intelligence.refinePageLabel(page: page, candidates: candidates, allowJev: true)
+        let calls = await jev.calls
+
+        XCTAssertEqual(decision?.value, expected)
+        XCTAssertEqual(decision?.source, .appleIntelligence)
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testInvalidAppleLabelFallsBackToJevOnlyWhenAllowed() async throws {
+        let page = page(), candidates = ContextLabels.candidates(page)
+        let local = FixtureLocalIntelligence(label: "invented label")
+        let jev = FixtureJev()
+        let intelligence = BrowserIntelligence(jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)), local: local)
+
+        let localOnly = try await intelligence.refinePageLabel(page: page, candidates: candidates, allowJev: false)
+        let localOnlyCalls = await jev.calls
+        XCTAssertNil(localOnly)
+        XCTAssertEqual(localOnlyCalls, 0)
+
+        let fallback = try await intelligence.refinePageLabel(page: page, candidates: candidates, allowJev: true)
+        let fallbackCalls = await jev.calls
+        XCTAssertEqual(fallback?.source, .jev)
+        XCTAssertTrue(candidates.contains { $0.text == fallback?.value })
+        XCTAssertEqual(fallbackCalls, 1)
+    }
+
+    func testVaultUsesOnlySixLocalCandidatesAndValidatesReturnedIDs() async throws {
+        let visits = (0..<9).map(visit)
+        let local = FixtureLocalIntelligence(vaultIDs: [visits[4].id, UUID(), visits[1].id])
+        let jev = FixtureJev()
+        let intelligence = BrowserIntelligence(jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)), local: local)
+
+        let decision = try await intelligence.vaultMatches(query: "research", visits: visits, allowJev: true)
+        let localCount = await local.vaultInputCount
+        let jevCalls = await jev.calls
+
+        XCTAssertEqual(decision?.source, .appleIntelligence)
+        XCTAssertEqual(decision?.value.map(\.id), [visits[4].id, visits[1].id])
+        XCTAssertEqual(localCount, 6)
+        XCTAssertEqual(jevCalls, 0)
+    }
+
+    func testRelatedGroupsRejectUnknownAndDuplicateMembers() async throws {
+        let pages = [
+            ResearchPage(id: "one", title: "First", detail: "", host: "one.test"),
+            ResearchPage(id: "two", title: "Second", detail: "", host: "two.test"),
+            ResearchPage(id: "three", title: "Third", detail: "", host: "three.test")
+        ]
+        let local = FixtureLocalIntelligence(memberGroups: [["two", "unknown", "one"], ["one", "three"]])
+        let intelligence = BrowserIntelligence(jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)), local: local)
+
+        let decision = try await intelligence.relatedPageGroups(pages: pages, jevPages: [], allowJev: false)
+
+        XCTAssertEqual(decision?.source, .appleIntelligence)
+        XCTAssertEqual(decision?.value, [ResearchGroup(id: "one", title: "First", members: ["one", "two"])])
     }
 }
 
