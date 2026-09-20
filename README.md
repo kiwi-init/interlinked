@@ -34,7 +34,14 @@ Download completion and failure mark the top-right page actions and can use macO
 
 Interlinked does not load browser extensions. The features people install extensions for are part of the browser and act inside the engine.
 
-**Ad and tracker blocking.** Chromium asks Interlinked before every network request, and Interlinked refuses the ones to known ad and tracking hosts. The host rules come from EasyList and EasyPrivacy (CC BY-SA 3.0), are downloaded on first launch, cached in Application Support, and refreshed weekly. Only host rules are used (`||host^`, with `$third-party` and `@@` exceptions); path, resource-type, and cosmetic rules are skipped, so first-party ads such as YouTube's are not blocked and empty ad slots are not hidden. The page you navigate to always loads. **Toolbox → Blocking Ads Here** turns blocking off for one site.
+**Ad and tracker blocking.** Interlinked embeds Brave's `adblock` engine (`blocker/`, Rust, MPL-2.0) and feeds it uBlock Origin's filter lists, EasyList, EasyPrivacy, and Peter Lowe's list, refreshed daily and cached as a serialized engine in Application Support. It acts in four places:
+
+- *Requests.* Chromium asks before every request; the engine decides with full rule syntax (paths, resource types, third-party, exceptions). The page you navigate to always loads.
+- *Stand-ins.* Scripts that pages depend on, such as Google's ad and analytics libraries, are answered locally with harmless replacements instead of failing, so sites keep working.
+- *Tracking parameters.* `$removeparam` rules strip identifiers such as `utm_source` from addresses.
+- *In the page.* Before a document's own scripts run, Interlinked registers that site's scriptlets in the page's world (this is what removes video ads) and its element-hiding rules in an isolated world the page cannot see. The page's class names and ids are matched against generic hiding rules as the DOM changes.
+
+`script/build-blocker-resources` converts uBlock Origin's scriptlets and redirect resources (GPL-3.0) into `Interlinked/Resources/blocker-resources.json`; rerun it to pick up new scriptlets. Procedural cosmetic filters (`:has-text()`, `:upward()`) are not applied yet. **Toolbox → Blocking Ads Here** turns blocking off for one site.
 
 **Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`, and Chromium's Auto Dark Mode recolors the rest while leaving images alone. Settings → Built-ins chooses Off, Match macOS appearance, or Always. **Toolbox → Dark Page** keeps one site light.
 
@@ -111,4 +118,4 @@ Then open `http://127.0.0.1:8765` in Interlinked.
 
 On memory pressure, the tab lifecycle targets 75 percent of live pages with a floor of eight on a warning, and 40 percent with a floor of three on a critical event. Protected pages stay live even when that prevents the target.
 
-`project.yml` defines the Xcode project. After changing it, regenerate with `xcodegen generate`. The generated project is checked in so normal builds only need Xcode. Build products and local validation output belong in the ignored `build/` directory.
+`project.yml` defines the Xcode project. After changing it, regenerate with `xcodegen generate`. The generated project is checked in so normal builds only need Xcode. The content blocker engine in `blocker/` is built by a pre-build step and needs Rust (`brew install rust`). Build products and local validation output belong in the ignored `build/` directory.

@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// Converts uBlock Origin's scriptlets and redirect resources into the JSON the
+// built-in blocker's engine loads (Interlinked/Resources/blocker-resources.json).
+// Run after updating build/ublock/uBlock; the output is committed.
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const source = join(root, 'build/ublock/uBlock');
+if (!existsSync(source)) {
+  mkdirSync(dirname(source), { recursive: true });
+  execSync(`git clone --depth 1 https://github.com/gorhill/uBlock.git "${source}"`, { stdio: 'inherit' });
+}
+
+const base64 = value => Buffer.from(value).toString('base64');
+const mimes = { js: 'application/javascript', gif: 'image/gif', png: 'image/png', html: 'text/html',
+                txt: 'text/plain', json: 'application/json', css: 'text/css', xml: 'text/xml',
+                mp3: 'audio/mp3', mp4: 'video/mp4' };
+const resources = [];
+
+const { builtinScriptlets } = await import(pathToFileURL(join(source, 'src/js/resources/scriptlets.js')));
+for (const scriptlet of builtinScriptlets) {
+  resources.push({
+    name: scriptlet.name,
+    aliases: scriptlet.aliases ?? [],
+    kind: { mime: scriptlet.name.endsWith('.fn') ? 'fn/javascript' : 'application/javascript' },
+    content: base64(scriptlet.fn.toString()),
+    dependencies: scriptlet.dependencies ?? [],
+    // The engine grants permission bit 1 to lists Interlinked trusts.
+    ...(scriptlet.requiresTrust ? { permission: 1 } : {}),
+  });
+}
+const scriptlets = resources.length;
+
+const redirects = (await import(pathToFileURL(join(source, 'src/js/redirect-resources.js')))).default;
+for (const [name, details] of redirects) {
+  const mime = mimes[name.split('.').pop()];
+  const path = join(source, 'src/web_accessible_resources', name);
+  if (!mime || !existsSync(path)) continue;
+  const aliases = [details.alias ?? []].flat();
+  if (resources.some(r => r.name === name || r.aliases.includes(name))) continue;
+  resources.push({ name, aliases, kind: { mime }, content: readFileSync(path).toString('base64') });
+}
+
+const commit = execSync('git rev-parse --short HEAD', { cwd: source }).toString().trim();
+const output = join(root, 'Interlinked/Resources/blocker-resources.json');
+mkdirSync(dirname(output), { recursive: true });
+writeFileSync(output, JSON.stringify(resources));
+console.log(`${scriptlets} scriptlets and ${resources.length - scriptlets} redirect resources from uBlock Origin ${commit}`);

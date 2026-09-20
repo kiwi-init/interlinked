@@ -45,13 +45,16 @@ NS_ASSUME_NONNULL_BEGIN
 @property(class, nonatomic, readonly, getter=isPumpingMessages) BOOL pumpingMessages;
 @property(class, nonatomic, readonly, copy) NSString *engineVersion;
 
-/// Publishes the built-in blocker's rules. Hosts also cover their subdomains.
-/// Requests from pages on |disabledSites| are never blocked.
-+ (void)setBlockedHosts:(NSArray<NSString *> *)blocked
-      thirdPartyHosts:(NSArray<NSString *> *)thirdParty
-         allowedHosts:(NSArray<NSString *> *)allowed
-        disabledSites:(NSArray<NSString *> *)disabledSites;
-+ (void)disableContentBlocking;
+/// Builds the content blocker from filter lists in uBlock Origin syntax and
+/// starts using it. Lists at |trustedLists| may use response-rewriting
+/// scriptlets. Slow; call off the main thread. Returns the engine serialized
+/// for -restoreBlockerFromData:, or nil.
++ (nullable NSData *)buildBlockerWithLists:(NSArray<NSString *> *)lists
+                              trustedLists:(NSIndexSet *)trustedLists
+                             resourcesJSON:(NSString *)resourcesJSON;
++ (BOOL)restoreBlockerFromData:(NSData *)data resourcesJSON:(NSString *)resourcesJSON;
+/// |disabledSites| are hosts without a leading "www." whose pages load unfiltered.
++ (void)setContentBlockingEnabled:(BOOL)enabled disabledSites:(NSArray<NSString *> *)disabledSites;
 
 + (BOOL)startWithError:(NSError * _Nullable * _Nullable)error;
 /// Closes every Chromium browser. The completion runs on the main thread,

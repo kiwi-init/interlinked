@@ -64,9 +64,9 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
-        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal"
-        LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project-out/libcef_dll_wrapper"
-        OTHER_LDFLAGS: "$(inherited) -lcef_dll_wrapper -framework Cocoa -framework IOSurface"
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal $(SRCROOT)/blocker"
+        LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project-out/libcef_dll_wrapper $(SRCROOT)/blocker/target/release"
+        OTHER_LDFLAGS: "$(inherited) -lcef_dll_wrapper -linterlinked_blocker -framework Cocoa -framework IOSurface"
         CLANG_CXX_LANGUAGE_STANDARD: c++20
         SWIFT_OBJC_BRIDGING_HEADER: Interlinked/Chromium/Interlinked-Bridging-Header.h
         ENABLE_TESTABILITY: YES
@@ -79,6 +79,10 @@ targets:
           ENABLE_APP_SANDBOX: YES
           INTERLINKED_JEV_RELAY_URL: "https://interlinked-jev.187-77-224-188.sslip.io/v1/jev"
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) TESTFLIGHT"
+    preBuildScripts:
+      - name: Build Content Blocker
+        script: '"$SRCROOT/script/build-blocker"'
+        basedOnDependencyAnalysis: false
     postBuildScripts:
       - name: Stage Chromium Runtime
         script: '"$SRCROOT/script/stage-chromium"'

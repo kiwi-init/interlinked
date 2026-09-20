@@ -340,7 +340,7 @@ enum Control {
             case "state":
                 return json([
                     "blocking": builtIns.blockingEnabled,
-                    "rules": builtIns.ruleCount,
+                    "engine_ready": builtIns.engineReady,
                     "blocked_on_page": workspace.activePane.flatMap { builtIns.blockedCounts[$0] } ?? 0,
                     "blocked_total": builtIns.blockedTotal,
                     "dark_mode": builtIns.darkMode.rawValue,

@@ -1,6 +1,8 @@
 #import "InterlinkedChromium.h"
 #import <objc/runtime.h>
 
+#include "interlinked_blocker.h"
+
 #include <atomic>
 #include <map>
 #include <memory>
@@ -21,6 +23,7 @@
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
+#include "include/wrapper/cef_stream_resource_handler.h"
 #include "include/wrapper/cef_library_loader.h"
 
 namespace {
@@ -56,21 +59,19 @@ bool g_message_pump_active = false;
 bool g_message_pump_reentrant = false;
 bool g_immediate_pump_scheduled = false;
 
-// Built-in content blocking. Rules are immutable once published, so the
+// Built-in content blocking. The engine is immutable once built, so the
 // network thread only takes the lock long enough to copy the pointer.
-struct BlockingRules {
-  std::unordered_set<std::string> blocked;              // ||host^
-  std::unordered_set<std::string> blocked_third_party;  // ||host^$third-party
-  std::unordered_set<std::string> allowed;              // @@||host^
-  std::unordered_set<std::string> disabled_sites;       // sites the user exempted
+struct BlockerEngine {
+  explicit BlockerEngine(ILBlocker *blocker) : blocker(blocker) {}
+  ~BlockerEngine() { il_blocker_free(blocker); }
+  BlockerEngine(const BlockerEngine&) = delete;
+  BlockerEngine& operator=(const BlockerEngine&) = delete;
+  ILBlocker *const blocker;
 };
 std::mutex g_blocking_mutex;
-std::shared_ptr<const BlockingRules> g_blocking_rules;
-
-std::shared_ptr<const BlockingRules> CurrentBlockingRules() {
-  std::lock_guard<std::mutex> lock(g_blocking_mutex);
-  return g_blocking_rules;
-}
+std::shared_ptr<const BlockerEngine> g_blocker_engine;
+std::shared_ptr<const std::unordered_set<std::string>> g_blocking_disabled_sites;
+std::atomic_bool g_blocking_enabled(false);
 
 std::string HostOfURL(const CefString& url) {
   CefURLParts parts;
@@ -84,52 +85,43 @@ std::string HostOfURL(const CefString& url) {
   return host;
 }
 
-// True when |host| or one of its parent domains is in |set|.
-bool MatchesHostOrParent(const std::unordered_set<std::string>& set, const std::string& host) {
-  if (set.empty()) {
-    return false;
+// The engine to use for a page on |page_host|, or null when blocking is off
+// globally or for that site. Sites are stored without a leading "www.".
+std::shared_ptr<const BlockerEngine> BlockerForPage(const std::string& page_host) {
+  if (!g_blocking_enabled.load()) {
+    return nullptr;
   }
-  size_t start = 0;
-  while (start < host.size()) {
-    if (set.count(host.substr(start))) {
-      return true;
+  std::lock_guard<std::mutex> lock(g_blocking_mutex);
+  if (g_blocking_disabled_sites && !page_host.empty()) {
+    const std::string site = page_host.rfind("www.", 0) == 0 ? page_host.substr(4) : page_host;
+    if (g_blocking_disabled_sites->count(site)) {
+      return nullptr;
     }
-    const size_t dot = host.find('.', start);
-    if (dot == std::string::npos) {
-      break;
-    }
-    start = dot + 1;
   }
-  return false;
+  return g_blocker_engine;
 }
 
-// Approximates the registrable domain with the last two labels. A wrong guess
-// for suffixes such as co.uk only makes a third-party rule apply less often.
-std::string SiteOfHost(const std::string& host) {
-  const size_t last = host.rfind('.');
-  if (last == std::string::npos || last == 0) {
-    return host;
+const char *BlockerRequestType(cef_resource_type_t type) {
+  switch (type) {
+    case RT_MAIN_FRAME: return "document";
+    case RT_SUB_FRAME: return "subdocument";
+    case RT_STYLESHEET: return "stylesheet";
+    case RT_SCRIPT: return "script";
+    case RT_IMAGE: case RT_FAVICON: return "image";
+    case RT_FONT_RESOURCE: return "font";
+    case RT_MEDIA: return "media";
+    case RT_OBJECT: case RT_PLUGIN_RESOURCE: return "object";
+    case RT_XHR: return "xmlhttprequest";
+    case RT_PING: return "ping";
+    case RT_CSP_REPORT: return "csp_report";
+    default: return "other";
   }
-  const size_t previous = host.rfind('.', last - 1);
-  return previous == std::string::npos ? host : host.substr(previous + 1);
 }
 
-bool ShouldBlockRequest(const std::string& host, const std::string& page_host) {
-  const std::shared_ptr<const BlockingRules> rules = CurrentBlockingRules();
-  if (!rules || host.empty()) {
-    return false;
-  }
-  if (!page_host.empty() && MatchesHostOrParent(rules->disabled_sites, page_host)) {
-    return false;
-  }
-  if (MatchesHostOrParent(rules->allowed, host)) {
-    return false;
-  }
-  if (MatchesHostOrParent(rules->blocked, host)) {
-    return true;
-  }
-  const bool third_party = !page_host.empty() && SiteOfHost(host) != SiteOfHost(page_host);
-  return third_party && MatchesHostOrParent(rules->blocked_third_party, host);
+std::string TakeBlockerString(char *value) {
+  std::string result = value ? value : "";
+  il_string_free(value);
+  return result;
 }
 
 // Browser bookkeeping, touched only on the main (CEF UI) thread.
@@ -306,6 +298,18 @@ class InterlinkedClient final : public CefClient,
                                    CefRefPtr<CefFrame> frame,
                                    CefRefPtr<CefRequest> request,
                                    CefRefPtr<CefCallback> callback) override;
+  CefRefPtr<CefResourceHandler> GetResourceHandler(CefRefPtr<CefBrowser> browser,
+                                                   CefRefPtr<CefFrame> frame,
+                                                   CefRefPtr<CefRequest> request) override;
+  bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                      CefRefPtr<CefFrame> frame,
+                      CefRefPtr<CefRequest> request,
+                      bool user_gesture,
+                      bool is_redirect) override;
+  void OnDevToolsEvent(CefRefPtr<CefBrowser> browser,
+                       const CefString& method,
+                       const void* params,
+                       size_t params_size) override;
 
   void Detach() { view_ = nil; }
 
@@ -381,8 +385,65 @@ class InterlinkedClient final : public CefClient,
   CefRefPtr<CefRegistration> devtools_registration_;
   std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> downloads_;
   std::atomic<int> unreported_blocks_{0};
+  // Stand-in responses chosen in OnBeforeResourceLoad, keyed by request id.
+  std::mutex replacements_mutex_;
+  std::map<uint64_t, std::string> replacements_;
+  void CountBlockedRequest();
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
 };
+
+// Runs in an isolated world at document start. |cfg| is prepended by the caller.
+NSString *ILCosmeticsScript() {
+  return @R"JS(
+const sheet = new CSSStyleSheet();
+const hide = selectors => {
+  for (const selector of selectors) {
+    // One rule per selector: an invalid selector must not void the others.
+    try { sheet.insertRule(selector + '{display:none!important}', sheet.cssRules.length); } catch {}
+  }
+};
+hide(cfg.hide);
+const adopt = () => {
+  if (!document.adoptedStyleSheets.includes(sheet)) {
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  }
+};
+adopt();
+document.addEventListener('DOMContentLoaded', adopt);
+globalThis.__interlinkedHide = selectors => { hide(selectors); adopt(); };
+
+const report = globalThis[cfg.binding];
+if (!cfg.generic || typeof report !== 'function') return;
+const seenClasses = new Set(), seenIds = new Set();
+let classes = [], ids = [], scheduled = false;
+const flush = () => {
+  scheduled = false;
+  if (!classes.length && !ids.length) return;
+  report(JSON.stringify({ classes, ids }));
+  classes = []; ids = [];
+};
+const note = element => {
+  const id = element.id;
+  if (id && typeof id === 'string' && !seenIds.has(id)) { seenIds.add(id); ids.push(id); }
+  for (const name of element.classList ?? []) {
+    if (!seenClasses.has(name)) { seenClasses.add(name); classes.push(name); }
+  }
+};
+const scan = root => {
+  if (root.nodeType !== 1) return;
+  note(root);
+  for (const element of root.querySelectorAll('[id],[class]')) note(element);
+  if (!scheduled && (classes.length || ids.length)) { scheduled = true; setTimeout(flush, 80); }
+};
+new MutationObserver(records => {
+  for (const record of records) {
+    if (record.type === 'attributes') scan(record.target);
+    else for (const node of record.addedNodes) scan(node);
+  }
+}).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id'] });
+if (document.documentElement) scan(document.documentElement);
+)JS";
+}
 
 std::unique_ptr<CefScopedLibraryLoader> g_library_loader;
 CefRefPtr<InterlinkedBrowserApp> g_browser_app;
@@ -402,6 +463,13 @@ std::atomic_bool g_running(false);
   BOOL _canGoForward;
   BOOL _closing;
   BOOL _forcedDarkMode;
+  // Content blocking scripts registered for the next document, and the
+  // navigation they were registered for.
+  NSMutableArray<NSString *> *_blockingScriptIdentifiers;
+  NSMutableDictionary<NSNumber *, NSNumber *> *_blockingScriptRequests;
+  NSInteger _blockingGeneration;
+  NSString *_blockingExceptionsJSON;
+  BOOL _blockingBindingInstalled;
   NSMutableDictionary<NSNumber *, void (^)(id _Nullable, NSError * _Nullable)> *_evaluations;
   void (^_findCompletion)(BOOL);
 }
@@ -419,6 +487,9 @@ std::atomic_bool g_running(false);
 - (void)didUpdateDownload:(uint32_t)identifier fullPath:(NSString *)fullPath receivedBytes:(int64_t)receivedBytes totalBytes:(int64_t)totalBytes percent:(NSInteger)percent complete:(BOOL)complete cancelled:(BOOL)cancelled interrupted:(BOOL)interrupted;
 - (void)didCloseBrowser;
 - (void)didBlockRequests:(NSInteger)count;
+- (void)prepareBlockingForURLString:(NSString *)URLString;
+- (void)didReceiveBindingCall:(NSData *)parameters;
+- (void)removeBlockingScript:(NSString *)identifier;
 - (void)applyForcedDarkMode;
 - (void)failPendingRequests;
 - (void)didReceiveEvaluation:(int)identifier
@@ -512,29 +583,49 @@ std::atomic_bool g_running(false);
                                     CEF_VERSION_PATCH];
 }
 
-+ (void)setBlockedHosts:(NSArray<NSString *> *)blocked
-      thirdPartyHosts:(NSArray<NSString *> *)thirdParty
-         allowedHosts:(NSArray<NSString *> *)allowed
-        disabledSites:(NSArray<NSString *> *)disabledSites {
-  auto rules = std::make_shared<BlockingRules>();
-  void (^fill)(std::unordered_set<std::string>&, NSArray<NSString *> *) =
-      ^(std::unordered_set<std::string>& set, NSArray<NSString *> *hosts) {
-    set.reserve(hosts.count);
-    for (NSString *host in hosts) {
-      set.emplace(host.lowercaseString.UTF8String ?: "");
-    }
-  };
-  fill(rules->blocked, blocked);
-  fill(rules->blocked_third_party, thirdParty);
-  fill(rules->allowed, allowed);
-  fill(rules->disabled_sites, disabledSites);
++ (nullable NSData *)buildBlockerWithLists:(NSArray<NSString *> *)lists
+                              trustedLists:(NSIndexSet *)trustedLists
+                             resourcesJSON:(NSString *)resourcesJSON {
+  ILFilters *filters = il_filters_new();
+  [lists enumerateObjectsUsingBlock:^(NSString *list, NSUInteger index, BOOL *stop) {
+    il_filters_add(filters, list.UTF8String ?: "", [trustedLists containsIndex:index]);
+  }];
+  ILBlocker *blocker = il_blocker_new(filters, resourcesJSON.UTF8String ?: "[]");
+  if (!blocker) {
+    return nil;
+  }
+  size_t length = 0;
+  uint8_t *bytes = il_blocker_serialize(blocker, &length);
+  NSData *serialized = [NSData dataWithBytes:bytes length:length];
+  il_bytes_free(bytes, length);
+  auto engine = std::make_shared<const BlockerEngine>(blocker);
   std::lock_guard<std::mutex> lock(g_blocking_mutex);
-  g_blocking_rules = std::move(rules);
+  g_blocker_engine = std::move(engine);
+  return serialized;
 }
 
-+ (void)disableContentBlocking {
++ (BOOL)restoreBlockerFromData:(NSData *)data resourcesJSON:(NSString *)resourcesJSON {
+  ILBlocker *blocker = il_blocker_restore(static_cast<const uint8_t *>(data.bytes), data.length,
+                                          resourcesJSON.UTF8String ?: "[]");
+  if (!blocker) {
+    return NO;
+  }
+  auto engine = std::make_shared<const BlockerEngine>(blocker);
   std::lock_guard<std::mutex> lock(g_blocking_mutex);
-  g_blocking_rules = nullptr;
+  g_blocker_engine = std::move(engine);
+  return YES;
+}
+
++ (void)setContentBlockingEnabled:(BOOL)enabled disabledSites:(NSArray<NSString *> *)disabledSites {
+  auto sites = std::make_shared<std::unordered_set<std::string>>();
+  for (NSString *site in disabledSites) {
+    sites->emplace(site.lowercaseString.UTF8String ?: "");
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_blocking_mutex);
+    g_blocking_disabled_sites = std::move(sites);
+  }
+  g_blocking_enabled.store(enabled);
 }
 
 + (BOOL)startWithError:(NSError **)error {
@@ -688,6 +779,8 @@ std::atomic_bool g_running(false);
     _pendingURL = URL;
     _pageTitle = @"";
     _evaluations = [NSMutableDictionary dictionary];
+    _blockingScriptIdentifiers = [NSMutableArray array];
+    _blockingScriptRequests = [NSMutableDictionary dictionary];
     self.wantsLayer = YES;
     [self createBrowserIfPossible];
   }
@@ -704,6 +797,8 @@ std::atomic_bool g_running(false);
     _pendingURL = [NSURL URLWithString:@"about:blank"];
     _pageTitle = @"";
     _evaluations = [NSMutableDictionary dictionary];
+    _blockingScriptIdentifiers = [NSMutableArray array];
+    _blockingScriptRequests = [NSMutableDictionary dictionary];
     self.wantsLayer = YES;
     [self createBrowserIfPossible];
   }
@@ -885,6 +980,134 @@ std::atomic_bool g_running(false);
   _browser->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", automatic);
 }
 
+#pragma mark - Content blocking
+
+static NSString *const ILCosmeticsWorld = @"interlinked-cosmetics";
+static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
+
+- (void)removeBlockingScript:(NSString *)identifier {
+  if (!_browser) {
+    return;
+  }
+  CefRefPtr<CefDictionaryValue> parameters = CefDictionaryValue::Create();
+  parameters->SetString("identifier", CefFromNSString(identifier));
+  _browser->GetHost()->ExecuteDevToolsMethod(0, "Page.removeScriptToEvaluateOnNewDocument", parameters);
+}
+
+- (void)addBlockingScript:(NSString *)source world:(nullable NSString *)world {
+  CefRefPtr<CefDictionaryValue> parameters = CefDictionaryValue::Create();
+  parameters->SetString("source", CefFromNSString(source));
+  parameters->SetBool("runImmediately", false);
+  if (world) {
+    parameters->SetString("worldName", CefFromNSString(world));
+  }
+  const int request = _browser->GetHost()->ExecuteDevToolsMethod(
+      0, "Page.addScriptToEvaluateOnNewDocument", parameters);
+  if (request != 0) {
+    _blockingScriptRequests[@(request)] = @(_blockingGeneration);
+  }
+}
+
+/// Registers what the next document at |URLString| needs before any of its own
+/// scripts run: scriptlets in the page's world, and element hiding in an
+/// isolated world the page cannot see.
+- (void)prepareBlockingForURLString:(NSString *)URLString {
+  if (!_browser) {
+    return;
+  }
+  _blockingGeneration += 1;
+  for (NSString *identifier in _blockingScriptIdentifiers) {
+    [self removeBlockingScript:identifier];
+  }
+  [_blockingScriptIdentifiers removeAllObjects];
+  _blockingExceptionsJSON = @"[]";
+
+  const std::string host = HostOfURL(CefFromNSString(URLString));
+  const std::shared_ptr<const BlockerEngine> engine = BlockerForPage(host);
+  if (!engine || host.empty()) {
+    return;
+  }
+  const std::string found = TakeBlockerString(il_blocker_cosmetics(engine->blocker, URLString.UTF8String ?: ""));
+  NSDictionary *cosmetics = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:found.data() length:found.size()]
+                                                            options:0 error:nil];
+  if (![cosmetics isKindOfClass:NSDictionary.class]) {
+    return;
+  }
+  if (!_blockingBindingInstalled) {
+    _blockingBindingInstalled = YES;
+    // Blink only runs new-document scripts while the Page domain is enabled,
+    // and only reports binding calls while the Runtime domain is.
+    _browser->GetHost()->ExecuteDevToolsMethod(0, "Page.enable", nullptr);
+    _browser->GetHost()->ExecuteDevToolsMethod(0, "Runtime.enable", nullptr);
+    CefRefPtr<CefDictionaryValue> binding = CefDictionaryValue::Create();
+    binding->SetString("name", CefFromNSString(ILCosmeticsBinding));
+    binding->SetString("executionContextName", CefFromNSString(ILCosmeticsWorld));
+    _browser->GetHost()->ExecuteDevToolsMethod(0, "Runtime.addBinding", binding);
+  }
+
+  NSString *hostString = @(host.c_str());
+  NSData *hostJSON = [NSJSONSerialization dataWithJSONObject:hostString options:NSJSONWritingFragmentsAllowed error:nil];
+  NSString *hostLiteral = [[NSString alloc] initWithData:hostJSON encoding:NSUTF8StringEncoding];
+  // Subframes from other sites get neither: the rules were chosen for this site.
+  NSString *guard = [NSString stringWithFormat:
+      @"const h=%@,l=location.hostname;if(l!==h&&!l.endsWith('.'+h)&&!h.endsWith('.'+l))return;", hostLiteral];
+
+  NSString *scriptlets = cosmetics[@"script"];
+  if ([scriptlets isKindOfClass:NSString.class] && scriptlets.length > 0) {
+    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@\n%@\n})();", guard, scriptlets] world:nil];
+  }
+
+  NSArray *exceptions = cosmetics[@"exceptions"] ?: @[];
+  NSData *exceptionsJSON = [NSJSONSerialization dataWithJSONObject:exceptions options:0 error:nil];
+  _blockingExceptionsJSON = [[NSString alloc] initWithData:exceptionsJSON encoding:NSUTF8StringEncoding] ?: @"[]";
+  NSDictionary *configuration = @{
+    @"hide": cosmetics[@"hide"] ?: @[],
+    @"generic": @(![cosmetics[@"generichide"] boolValue]),
+    @"binding": ILCosmeticsBinding,
+  };
+  NSData *configurationJSON = [NSJSONSerialization dataWithJSONObject:configuration options:0 error:nil];
+  NSString *configurationLiteral = [[NSString alloc] initWithData:configurationJSON encoding:NSUTF8StringEncoding];
+  [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@const cfg=%@;%@})();", guard, configurationLiteral,
+                                                     ILCosmeticsScript()]
+                    world:ILCosmeticsWorld];
+}
+
+/// The page reported class names and ids it uses; answer with the generic
+/// hiding rules that apply to them.
+- (void)didReceiveBindingCall:(NSData *)parameters {
+  NSDictionary *event = [NSJSONSerialization JSONObjectWithData:parameters options:0 error:nil];
+  if (![event isKindOfClass:NSDictionary.class] || ![event[@"name"] isEqual:ILCosmeticsBinding] || !_browser) {
+    return;
+  }
+  NSString *payload = event[@"payload"];
+  NSNumber *context = event[@"executionContextId"];
+  if (![payload isKindOfClass:NSString.class] || ![context isKindOfClass:NSNumber.class] || payload.length > 2000000) {
+    return;
+  }
+  const std::shared_ptr<const BlockerEngine> engine = BlockerForPage(HostOfURL(CefFromNSString(_URL.absoluteString)));
+  NSDictionary *names = [NSJSONSerialization JSONObjectWithData:[payload dataUsingEncoding:NSUTF8StringEncoding]
+                                                        options:0 error:nil];
+  if (!engine || ![names isKindOfClass:NSDictionary.class]) {
+    return;
+  }
+  NSData *exceptions = [_blockingExceptionsJSON ?: @"[]" dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary *query = @{
+    @"classes": [names[@"classes"] isKindOfClass:NSArray.class] ? names[@"classes"] : @[],
+    @"ids": [names[@"ids"] isKindOfClass:NSArray.class] ? names[@"ids"] : @[],
+    @"exceptions": [NSJSONSerialization JSONObjectWithData:exceptions options:0 error:nil] ?: @[],
+  };
+  NSData *queryJSON = [NSJSONSerialization dataWithJSONObject:query options:0 error:nil];
+  std::string request(static_cast<const char *>(queryJSON.bytes), queryJSON.length);
+  const std::string selectors = TakeBlockerString(il_blocker_generic_selectors(engine->blocker, request.c_str()));
+  if (selectors.size() <= 2) {
+    return;
+  }
+  CefRefPtr<CefDictionaryValue> evaluate = CefDictionaryValue::Create();
+  evaluate->SetString("expression", "globalThis.__interlinkedHide?.(" + selectors + ")");
+  evaluate->SetInt("contextId", context.intValue);
+  _browser->GetHost()->ExecuteDevToolsMethod(0, "Runtime.evaluate", evaluate);
+}
+
 - (void)didBlockRequests:(NSInteger)count {
   [self.delegate chromiumView:self didBlockRequests:count];
 }
@@ -1006,6 +1229,24 @@ std::atomic_bool g_running(false);
                      success:(BOOL)success
                         bytes:(const void *)bytes
                        length:(size_t)length {
+  NSNumber *generation = _blockingScriptRequests[@(identifier)];
+  if (generation) {
+    [_blockingScriptRequests removeObjectForKey:@(identifier)];
+    NSDictionary *reply = success && length > 0
+        ? [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:bytes length:length] options:0 error:nil]
+        : nil;
+    NSString *script = [reply isKindOfClass:NSDictionary.class] ? reply[@"identifier"] : nil;
+    if (![script isKindOfClass:NSString.class]) {
+      return;
+    }
+    if (generation.integerValue == _blockingGeneration) {
+      [_blockingScriptIdentifiers addObject:script];
+    } else {
+      // A newer navigation started before Chromium answered.
+      [self removeBlockingScript:script];
+    }
+    return;
+  }
   void (^completion)(id, NSError *) = _evaluations[@(identifier)];
   if (!completion) {
     return;
@@ -1138,29 +1379,112 @@ void InterlinkedClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   [view didCreateBrowser:browser];
 }
 
-CefResourceRequestHandler::ReturnValue InterlinkedClient::OnBeforeResourceLoad(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame,
-    CefRefPtr<CefRequest> request,
-    CefRefPtr<CefCallback> callback) {
-  // Called on the network thread. The page the user navigated to always loads.
-  if (request->GetResourceType() == RT_MAIN_FRAME) {
-    return RV_CONTINUE;
-  }
-  std::string page_host = HostOfURL(request->GetFirstPartyForCookies());
-  if (page_host.empty() && browser && browser->GetMainFrame()) {
-    page_host = HostOfURL(browser->GetMainFrame()->GetURL());
-  }
-  if (!ShouldBlockRequest(HostOfURL(request->GetURL()), page_host)) {
-    return RV_CONTINUE;
-  }
+void InterlinkedClient::CountBlockedRequest() {
   if (unreported_blocks_.fetch_add(1) == 0) {
     CefRefPtr<InterlinkedClient> self(this);
     PerformOnMainRunLoop(^{
       [self->view_ didBlockRequests:self->unreported_blocks_.exchange(0)];
     });
   }
+}
+
+CefResourceRequestHandler::ReturnValue InterlinkedClient::OnBeforeResourceLoad(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    CefRefPtr<CefRequest> request,
+    CefRefPtr<CefCallback> callback) {
+  // Called on the network thread.
+  const bool navigation = request->GetResourceType() == RT_MAIN_FRAME;
+  CefString page_url = navigation ? request->GetURL() : request->GetFirstPartyForCookies();
+  if (page_url.empty() && browser && browser->GetMainFrame()) {
+    page_url = browser->GetMainFrame()->GetURL();
+  }
+  const std::shared_ptr<const BlockerEngine> engine = BlockerForPage(HostOfURL(page_url));
+  if (!engine) {
+    return RV_CONTINUE;
+  }
+  char *detail = nullptr;
+  const int32_t verdict = il_blocker_check(engine->blocker, request->GetURL().ToString().c_str(),
+                                           page_url.ToString().c_str(),
+                                           BlockerRequestType(request->GetResourceType()),
+                                           request->GetMethod().ToString().c_str(), &detail);
+  const std::string value = TakeBlockerString(detail);
+  if (verdict == IL_REWRITE && !value.empty()) {
+    // Tracking parameters removed from the address.
+    request->SetURL(value);
+    return RV_CONTINUE;
+  }
+  // The page the user navigated to always loads.
+  if (navigation || verdict == IL_ALLOW) {
+    return RV_CONTINUE;
+  }
+  CountBlockedRequest();
+  if (verdict == IL_REDIRECT && !value.empty()) {
+    std::lock_guard<std::mutex> lock(replacements_mutex_);
+    replacements_[request->GetIdentifier()] = value;
+    return RV_CONTINUE;
+  }
   return RV_CANCEL;
+}
+
+CefRefPtr<CefResourceHandler> InterlinkedClient::GetResourceHandler(CefRefPtr<CefBrowser> browser,
+                                                                    CefRefPtr<CefFrame> frame,
+                                                                    CefRefPtr<CefRequest> request) {
+  std::string replacement;
+  {
+    std::lock_guard<std::mutex> lock(replacements_mutex_);
+    auto found = replacements_.find(request->GetIdentifier());
+    if (found == replacements_.end()) {
+      return nullptr;
+    }
+    replacement = std::move(found->second);
+    replacements_.erase(found);
+  }
+  // Answer with a harmless stand-in (data:<mime>;base64,<body>) so pages that
+  // depend on an ad or analytics script keep working.
+  const size_t comma = replacement.find(',');
+  if (replacement.rfind("data:", 0) != 0 || comma == std::string::npos) {
+    return nullptr;
+  }
+  std::string mime = replacement.substr(5, comma - 5);
+  const size_t semicolon = mime.find(';');
+  if (semicolon != std::string::npos) {
+    mime.resize(semicolon);
+  }
+  CefRefPtr<CefBinaryValue> body = CefBase64Decode(replacement.substr(comma + 1));
+  if (!body) {
+    return nullptr;
+  }
+  std::vector<uint8_t> bytes(body->GetSize());
+  body->GetData(bytes.data(), bytes.size(), 0);
+  CefResponse::HeaderMap headers;
+  headers.insert({"Access-Control-Allow-Origin", "*"});
+  headers.insert({"Cache-Control", "no-store"});
+  return new CefStreamResourceHandler(
+      200, "OK", mime.empty() ? "text/plain" : mime, headers,
+      CefStreamReader::CreateForData(bytes.data(), bytes.size()));
+}
+
+bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                                       CefRefPtr<CefFrame> frame,
+                                       CefRefPtr<CefRequest> request,
+                                       bool user_gesture,
+                                       bool is_redirect) {
+  CEF_REQUIRE_UI_THREAD();
+  if (frame->IsMain()) {
+    [view_ prepareBlockingForURLString:NSStringFromCef(request->GetURL())];
+  }
+  return false;
+}
+
+void InterlinkedClient::OnDevToolsEvent(CefRefPtr<CefBrowser> browser,
+                                        const CefString& method,
+                                        const void* params,
+                                        size_t params_size) {
+  CEF_REQUIRE_UI_THREAD();
+  if (method == "Runtime.bindingCalled") {
+    [view_ didReceiveBindingCall:[NSData dataWithBytes:params length:params_size]];
+  }
 }
 
 bool InterlinkedClient::DoClose(CefRefPtr<CefBrowser> browser) {

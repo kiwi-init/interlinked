@@ -396,8 +396,8 @@ struct AssistanceSettings: View {
             Section("Ad and tracker blocking") {
                 Toggle("Block ads and trackers", isOn: $builtIns.blockingEnabled)
                 LabeledContent("Blocked so far") { Text("\(builtIns.blockedTotal)").monospacedDigit() }
-                LabeledContent("Rules") {
-                    Text(builtIns.ruleCount == 0 ? "Not downloaded yet" : "\(builtIns.ruleCount) hosts")
+                LabeledContent("Engine") {
+                    Text(builtIns.engineReady ? "\(BlockList.standard.count) lists active" : "Preparing…")
                 }
                 LabeledContent("Lists updated") {
                     Text(builtIns.listsUpdatedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
@@ -409,7 +409,7 @@ struct AssistanceSettings: View {
                     if builtIns.updating { ProgressView().controlSize(.small) }
                     if !builtIns.status.isEmpty { Text(builtIns.status).foregroundStyle(.primary) }
                 }
-                Text("Interlinked refuses connections to known ad and tracking hosts from EasyList and EasyPrivacy (CC BY-SA 3.0). The lists refresh weekly.")
+                Text("Interlinked blocks ad and tracker requests, answers the scripts pages depend on with harmless stand-ins, hides leftover ad slots, and removes video ads. It uses Brave’s adblock engine with uBlock Origin’s filters, EasyList, EasyPrivacy, and Peter Lowe’s list, refreshed daily.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
