@@ -58,7 +58,7 @@ struct InterlinkedApp: App {
                 Button("Edit Address") { workspace.editActiveLine() }
                     .keyboardShortcut("l", modifiers: .command)
                 Button("Reload Page") {
-                    if let pane = workspace.activePane { workspace.hosts.existingBrowser(pane)?.reload() }
+                    workspace.reloadActivePage()
                 }
                 .keyboardShortcut("r", modifiers: .command)
             }
@@ -72,8 +72,10 @@ struct InterlinkedApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appearanceObservation: NSKeyValueObservation?
+    private var pendingWebURLs: [URL] = []
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
@@ -85,6 +87,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
             self?.updateApplicationIcon(for: app.effectiveAppearance)
         }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let urls = urls.compactMap(ExternalURLRouting.webURL)
+        guard !urls.isEmpty else { return }
+        if let workspace = Workspace.shared {
+            workspace.openExternalURLs(urls)
+        } else {
+            pendingWebURLs.append(contentsOf: urls)
+        }
+    }
+
+    func takePendingWebURLs() -> [URL] {
+        defer { pendingWebURLs.removeAll() }
+        return pendingWebURLs
     }
 
     private func updateApplicationIcon(for appearance: NSAppearance) {

@@ -16,9 +16,10 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        if self.path == "/":
+        path = self.path.partition("?")[0]
+        if path == "/":
             return self.send_bytes((ROOT / "web-capabilities.html").read_bytes(), "text/html; charset=utf-8")
-        if self.path == "/auth/basic":
+        if path == "/auth/basic":
             expected = "fixture:interlinked"
             supplied = self.headers.get("Authorization", "")
             if supplied.startswith("Basic "):
@@ -28,15 +29,15 @@ class Handler(BaseHTTPRequestHandler):
                 except (ValueError, UnicodeDecodeError):
                     pass
             return self.challenge('Basic realm="Interlinked fixture"')
-        if self.path == "/auth/digest":
+        if path == "/auth/digest":
             if self.headers.get("Authorization", "").startswith("Digest "):
                 return self.send_bytes(b"Digest authentication completed.\n", "text/plain")
             return self.challenge('Digest realm="Interlinked fixture", nonce="interlinked", algorithm=MD5, qop="auth"')
-        if self.path in {"/download/known", "/download/duplicate"}:
+        if path in {"/download/known", "/download/duplicate"}:
             return self.download(PAYLOAD, "fixture.txt", include_length=True)
-        if self.path == "/download/unknown":
+        if path == "/download/unknown":
             return self.download(PAYLOAD, "unknown-length.txt", include_length=False)
-        if self.path == "/download/slow":
+        if path == "/download/slow":
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Disposition", 'attachment; filename="slow-fixture.bin"')
@@ -50,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     break
             return
-        if self.path == "/download/failure":
+        if path == "/download/failure":
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Disposition", 'attachment; filename="broken-fixture.bin"')

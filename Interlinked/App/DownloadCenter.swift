@@ -39,6 +39,10 @@ final class DownloadCenter: NSObject, WKDownloadDelegate {
 
     var activeCount: Int { records.count(where: { $0.state.isActive }) }
 
+    func hasActiveDownload(for webView: WKWebView) -> Bool {
+        downloads.values.contains { $0.webView === webView }
+    }
+
     func togglePanel() {
         panelOpen.toggle()
         if panelOpen { unreadCount = 0 }

@@ -1,4 +1,5 @@
 import AppKit
+import Dispatch
 import Observation
 import WebKit
 
@@ -8,6 +9,9 @@ import WebKit
 final class PaneHosts {
     @ObservationIgnored private var browsers: [PaneID: WKWebView] = [:]
     @ObservationIgnored private var coordinators: [PaneID: BrowserCoordinator] = [:]
+    @ObservationIgnored private var uploadPanes: Set<PaneID> = []
+    @ObservationIgnored private var pendingScroll: [PaneID: Double] = [:]
+    @ObservationIgnored private var memorySource: DispatchSourceMemoryPressure?
     @ObservationIgnored private var iconTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var iconCache = DomainIconCache<NSImage>()
     @ObservationIgnored private let iconStore = DomainIconStore()
@@ -18,9 +22,13 @@ final class PaneHosts {
     private(set) var previews: [PaneID: NSImage] = [:]
     private(set) var canGoBack: [PaneID: Bool] = [:]
     private(set) var canGoForward: [PaneID: Bool] = [:]
+    private(set) var lifecycle = TabLifecycleLedger()
 
     func browser(for pane: PaneID, workspace: Workspace) -> WKWebView {
-        if let existing = browsers[pane] { return existing }
+        if let existing = browsers[pane] {
+            lifecycle.touch(pane)
+            return existing
+        }
         let config = WKWebViewConfiguration()
         let coordinator = BrowserCoordinator(pane: pane, workspace: workspace)
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -41,15 +49,19 @@ final class PaneHosts {
         view.uiDelegate = coordinator
         coordinators[pane] = coordinator
         browsers[pane] = view
+        lifecycle.register(pane)
+        lifecycle.touch(pane)
         coordinator.observe(view)
         return view
     }
 
     func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind) {
-        for pane in browsers.keys where !keep(pane) || kinds(pane) != .browser {
-            browsers[pane]?.stopLoading()
-            browsers.removeValue(forKey: pane)
-            coordinators.removeValue(forKey: pane)
+        let tracked = Set(browsers.keys).union(lifecycle.panes)
+        for pane in tracked where !keep(pane) || kinds(pane) != .browser {
+            removeBrowser(pane)
+            lifecycle.close(pane)
+            uploadPanes.remove(pane)
+            pendingScroll.removeValue(forKey: pane)
             pageURLs.removeValue(forKey: pane)
             titles.removeValue(forKey: pane)
             favicons.removeValue(forKey: pane)
@@ -64,6 +76,28 @@ final class PaneHosts {
         browsers[pane]
     }
 
+    func touch(_ pane: PaneID) {
+        lifecycle.touch(pane)
+    }
+
+    func recovery(for pane: PaneID) -> BrowserRecovery? {
+        lifecycle.recoveries[pane]
+    }
+
+    func beginRecovery(_ pane: PaneID) -> BrowserRecovery? {
+        guard let recovery = lifecycle.takeRecovery(pane) else { return nil }
+        if recovery.scrollY > 0 { pendingScroll[pane] = recovery.scrollY }
+        return recovery
+    }
+
+    func beginUpload(_ pane: PaneID) {
+        uploadPanes.insert(pane)
+    }
+
+    func endUpload(_ pane: PaneID) {
+        uploadPanes.remove(pane)
+    }
+
     func focus(_ pane: PaneID) {
         let view: NSView? = browsers[pane]
         if let view { view.window?.makeFirstResponder(view) }
@@ -74,6 +108,7 @@ final class PaneHosts {
         if pageURLs[pane] != view.url {
             pageURLs[pane] = view.url
             previews.removeValue(forKey: pane)
+            lifecycle.touch(pane)
         }
         let title = view.title ?? ""
         if titles[pane] != title { titles[pane] = title }
@@ -155,6 +190,91 @@ final class PaneHosts {
         }
     }
 
+    func startMemoryPressureMonitoring(workspace: Workspace) {
+        guard memorySource == nil else { return }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        memorySource = source
+        source.setEventHandler { @MainActor [weak self, weak workspace] in
+            guard let self, let workspace, let event = self.memorySource?.data else { return }
+            let pressure: TabMemoryPressure = event.contains(.critical) ? .critical : .warning
+            Task { @MainActor [weak self, weak workspace] in
+                guard let self, let workspace else { return }
+                await self.discardBackgroundTabs(pressure: pressure, workspace: workspace)
+            }
+        }
+        source.resume()
+    }
+
+    func stopMemoryPressureMonitoring() {
+        memorySource?.cancel()
+        memorySource = nil
+    }
+
+    func handleWebContentTermination(_ view: WKWebView, pane: PaneID, workspace: Workspace) {
+        guard browsers[pane] === view else { return }
+        let url = view.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
+        lifecycle.suspend(pane, recovery: BrowserRecovery(
+            cause: .webContentTerminated,
+            url: url,
+            scrollY: 0,
+            occurredAt: Date()
+        ))
+        pageURLs[pane] = url
+        removeBrowser(pane)
+    }
+
+    func restoreScrollIfNeeded(_ view: WKWebView, pane: PaneID) {
+        guard let y = pendingScroll.removeValue(forKey: pane), y > 0 else { return }
+        view.evaluateJavaScript("window.scrollTo(0, \(y))")
+    }
+
+    private func discardBackgroundTabs(pressure: TabMemoryPressure, workspace: Workspace) async {
+        let goal = TabMemoryPolicy.discardCount(liveCount: browsers.count, pressure: pressure)
+        guard goal > 0 else { return }
+        let candidates = browsers.map { pane, view in
+            var protections: TabDiscardProtection = []
+            if pane == workspace.activePane { protections.insert(.active) }
+            if uploadPanes.contains(pane) { protections.insert(.upload) }
+            if workspace.downloads.hasActiveDownload(for: view) { protections.insert(.download) }
+            return TabMemoryCandidate(
+                pane: pane,
+                lastUsed: lifecycle.lastUsed[pane] ?? .distantPast,
+                protections: protections
+            )
+        }
+
+        var discarded = 0
+        for pane in TabMemoryPolicy.orderedDiscardCandidates(candidates) where discarded < goal {
+            guard let view = browsers[pane], let probe = await discardProbe(view), probe.safe else { continue }
+            let url = view.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
+            lifecycle.suspend(pane, recovery: BrowserRecovery(
+                cause: .memoryPressure,
+                url: url,
+                scrollY: probe.scrollY,
+                occurredAt: Date()
+            ))
+            pageURLs[pane] = url
+            removeBrowser(pane)
+            discarded += 1
+        }
+    }
+
+    private func discardProbe(_ view: WKWebView) async -> BrowserDiscardProbe? {
+        guard let value = try? await view.evaluateJavaScript(BrowserDiscardProbe.script) else { return nil }
+        return BrowserDiscardProbe.decode(value)
+    }
+
+    private func removeBrowser(_ pane: PaneID) {
+        guard let view = browsers.removeValue(forKey: pane) else {
+            coordinators.removeValue(forKey: pane)
+            return
+        }
+        view.stopLoading()
+        view.navigationDelegate = nil
+        view.uiDelegate = nil
+        coordinators.removeValue(forKey: pane)
+    }
+
 }
 
 @MainActor
@@ -217,12 +337,18 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         update(webView)
         workspace?.hosts.loadFavicon(webView, pane: pane)
+        workspace?.hosts.restoreScrollIfNeeded(webView, pane: pane)
         workspace?.assistance.loaded(pane, view: webView)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         workspace?.assistance.committed(pane)
         update(webView)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard let workspace else { return }
+        workspace.hosts.handleWebContentTermination(webView, pane: pane, workspace: workspace)
     }
 
     func webView(
@@ -406,11 +532,12 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping ([URL]?) -> Void
     ) {
-        Task { @MainActor [weak webView] in
-            guard let webView else {
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let webView else {
                 completionHandler(nil)
                 return
             }
+            self.workspace?.hosts.beginUpload(self.pane)
             let script = "document.activeElement instanceof HTMLInputElement ? document.activeElement.accept : ''"
             let accepted = (try? await webView.evaluateJavaScript(script)) as? String
             let panel = NSOpenPanel()
@@ -419,7 +546,8 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
             panel.canChooseFiles = true
             let types = WebPrompts.acceptedContentTypes(accepted)
             if !types.isEmpty { panel.allowedContentTypes = types }
-            let finish: (NSApplication.ModalResponse) -> Void = { response in
+            let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+                if let self { self.workspace?.hosts.endUpload(self.pane) }
                 completionHandler(response == .OK ? panel.urls : nil)
             }
             if let window = webView.window {
