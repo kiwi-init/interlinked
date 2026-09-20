@@ -1,6 +1,10 @@
-name: Kiwi
+name: Interlinked
+configs:
+  Debug: debug
+  Release: release
+  TestFlight: release
 options:
-  bundleIdPrefix: computer.kiwi
+  bundleIdPrefix: computer.interlinked
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
@@ -18,74 +22,94 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 targets:
-  Kiwi:
+  Interlinked:
     type: application
     platform: macOS
     category: public.app-category.productivity
     sources:
-      - path: Kiwi
+      - path: Interlinked
     info:
-      path: Kiwi/Info.plist
+      path: Interlinked/Info.plist
       properties:
         CFBundleDisplayName: Interlinked
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleURLTypes:
           - CFBundleTypeRole: Viewer
-            CFBundleURLName: computer.kiwi.web-url
+            CFBundleURLName: computer.interlinked.web-url
             CFBundleURLSchemes:
               - http
               - https
-    entitlements:
-      path: Kiwi/Kiwi.entitlements
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.productivity
+        NSCameraUsageDescription: Interlinked lets websites use the camera only after you approve their request.
+        NSHumanReadableCopyright: Copyright © 2026 Jonatas Walker. All rights reserved.
+        NSMicrophoneUsageDescription: Interlinked uses the microphone for voice navigation and for websites you authorize.
+        NSSpeechRecognitionUsageDescription: Interlinked uses on-device speech recognition for voice navigation and browser commands.
+        InterlinkedJevRelayURL: "$(INTERLINKED_JEV_RELAY_URL)"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: computer.kiwi.dev
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked
         PRODUCT_NAME: Interlinked
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
+        DEVELOPMENT_TEAM: 57249C654W
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        INFOPLIST_FILE: Kiwi/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Kiwi/Kiwi.entitlements
+        INFOPLIST_FILE: Interlinked/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Interlinked/Interlinked.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         ENABLE_TESTABILITY: YES
         DEFINES_MODULE: YES
         ENABLE_DEBUG_DYLIB: NO
-  kiwi-ctl:
+        INTERLINKED_JEV_RELAY_URL: ""
+      configs:
+        TestFlight:
+          CODE_SIGN_ENTITLEMENTS: Interlinked/InterlinkedTestFlight.entitlements
+          ENABLE_APP_SANDBOX: YES
+          INTERLINKED_JEV_RELAY_URL: "https://interlinked-jev.187-77-224-188.sslip.io/v1/jev"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) TESTFLIGHT"
+  interlinked-ctl:
     type: tool
     platform: macOS
     sources:
-      - path: KiwiControl
+      - path: InterlinkedControl
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: computer.kiwi.cli
-        PRODUCT_NAME: kiwi
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.cli
+        PRODUCT_NAME: interlinked
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_FORCE_DYNAMIC_LINK_STDLIB: YES
+        SKIP_INSTALL: YES
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path"
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
-  KiwiTests:
+  InterlinkedTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: KiwiTests
-      - path: Kiwi/Model
-      - path: Kiwi/App/Intent.swift
-      - path: Kiwi/App/PageTextBridge.swift
+      - path: InterlinkedTests
+      - path: Interlinked/Model
+      - path: Interlinked/App/Intent.swift
+      - path: Interlinked/App/PageTextBridge.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: computer.kiwi.tests
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.tests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
-  Kiwi:
+  Interlinked:
     build:
       targets:
-        Kiwi: all
-        kiwi-ctl: all
-        KiwiTests: [test]
+        Interlinked: all
+        interlinked-ctl: all
+        InterlinkedTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - KiwiTests
+        - InterlinkedTests
+    archive:
+      config: TestFlight

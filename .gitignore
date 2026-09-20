@@ -1,4 +1,7 @@
 /build
+/.build
+/relay/node_modules
+/relay/dist
 .DS_Store
 xcuserdata/
 *.xcuserstate

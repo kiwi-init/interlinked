@@ -3,16 +3,28 @@
 set -e
 cd "$(dirname "$0")/.."
 
-if [ ! -f Kiwi.xcodeproj/project.pbxproj ]; then
+if [ ! -f Interlinked.xcodeproj/project.pbxproj ]; then
   xcodegen generate
 fi
 
 xcodebuild \
-  -project Kiwi.xcodeproj \
-  -scheme Kiwi \
+  -project Interlinked.xcodeproj \
+  -scheme Interlinked \
   -configuration Debug \
   -derivedDataPath build \
   -destination 'platform=macOS' \
+  -allowProvisioningUpdates \
   build
 
-open build/Build/Products/Debug/Interlinked.app
+app=build/Build/Products/Debug/Interlinked.app
+team=$(/usr/bin/codesign -dvv "$app" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p')
+test "$team" = "57249C654W"
+
+/usr/bin/osascript -e 'tell application id "computer.interlinked" to quit' >/dev/null 2>&1 || true
+attempt=0
+while /usr/bin/pgrep -x Interlinked >/dev/null && [ "$attempt" -lt 20 ]; do
+  /bin/sleep 0.1
+  attempt=$((attempt + 1))
+done
+/usr/bin/pkill -x Interlinked >/dev/null 2>&1 || true
+open -n "$app"

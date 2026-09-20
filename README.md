@@ -4,7 +4,7 @@ A minimal macOS browser with pages that fill the window. A small Liquid Glass co
 
 ## Run
 
-Open `Kiwi.xcodeproj` in Xcode and press Play, or run `script/run`.
+Open `Interlinked.xcodeproj` in Xcode and press Play, or run `script/run`.
 
 macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a translucent material.
 
@@ -18,9 +18,11 @@ Click a page icon to switch directly. Click the current page's favicon for a sea
 
 The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state while WebKit can throttle their rendering.
 
-Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Kiwi/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
+Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
-Tabs restore from `~/Library/Application Support/Kiwi/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
+Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
+
+Links that open a new browser window become a new Interlinked tab. File downloads use the standard macOS save panel, starting in Downloads. Camera and microphone requests keep WebKit's per-site permission prompt.
 
 ## Find and save
 
@@ -28,13 +30,15 @@ The bottom-right actions stay in fixed icon slots. Hovering an icon reveals only
 
 Meaning search uses Jev to select the best answer and rank existing page text by likely intent, including translations and synonyms. Extraction includes navigation links and headings so a useful destination can rank above an incidental word fragment in body text. Results highlight the original text in yellow. Searches evaluate all extracted elements without a local count or text-length cutoff; hover over the count to check coverage or errors. Changed pages invalidate stale results.
 
-**Might need later** explicitly saves the current page's URL, metadata and selected text on this Mac. Ordinary browsing does not save pages to Vault. Search saved pages from the address field; use **Find by description** to ask Jev to rank saved excerpts. Vault stores text, not screenshots, and can be cleared in Settings.
+**Might need later** explicitly saves the current page's URL, metadata and selected text on this Mac. Ordinary browsing does not save pages to Vault. Address-field searches check saved pages automatically and can ask Jev to rank relevant excerpts. Vault stores text, not screenshots, and can be cleared in Settings.
 
-Configure Jev and an OpenRouter key in Settings. The key stays in macOS Keychain. Critical reading runs automatically on public pages by default. Settings can change it to **Run only when asked**. Meaning searches, reading checks and Vault description searches send page or saved text to OpenRouter and TypeSafe. Automatic public-page label refinement has a separate opt-in setting. Requests use the [OpenRouter decisions API](https://openrouter.ai/openapi.json) with [Jev 1.13](https://openrouter.ai/typesafe/jev-1.13), with cancellation and an in-memory cache. Exact find and local labels work without a key.
+Local development builds can use a personal OpenRouter key saved in macOS Keychain. TestFlight builds instead use Interlinked's relay and the App Store-signed app transaction, so testers never enter or receive an API key. The OpenRouter key remains on the relay. Critical reading runs automatically on public pages by default. Settings can change it to **Run only when asked**. Meaning searches and reading checks send page text to OpenRouter and TypeSafe. Address-field searches automatically check the Vault and may send the query with relevant saved excerpts. Automatic public-page label refinement has a separate opt-in setting. Exact Jev requests and their responses are cached on this Mac for five days; the cache stores a request hash rather than page text, queries, or URLs. A page-content, model, or instruction change produces a different key. Exact find and local labels work without Jev.
 
 When Jev replaces the local page label with its selected label, the page handle briefly picks up a spectrum glow. Local labels and names you type yourself do not trigger it.
 
-Critical reading checks public pages after they load. To run it again, click **Critical reading** in the bottom-right controls or choose **Page → Critical Reading…** in the macOS menu bar. Progress appears on the button. Results highlight the source paragraphs in yellow. Hover or click a highlighted paragraph to see its evaluation beside the text; the note has previous/next controls. Click elsewhere to hide the note, or click **Critical reading** again to clear all annotations. It identifies possible loaded wording, emotional pressure, unsupported certainty and opinion presented as fact. It does not verify factual claims.
+Critical reading checks public pages after they load. It highlights source paragraphs in yellow without moving the page. Hover or click a highlighted paragraph to see its evaluation beside the text; the note has previous/next controls. Click elsewhere to hide the note. In **Run only when asked** mode, use the bottom-right **Critical reading** button or choose **Page → Critical Reading…** in the macOS menu bar. The button stays out of the way in **Always on** mode. Critical reading identifies possible loaded wording, emotional pressure, unsupported certainty, opinion presented as fact, and text that is probably AI-generated. AI authorship detection is only a pattern-based guess. It does not verify factual claims.
+
+Choose **Interlinked → About Interlinked** to inspect the exact Critical Reading instruction, every classification definition, the display threshold, and a plain-language account of what the browser sends to AI services and what stays on your Mac.
 
 ## Shortcuts
 
@@ -48,6 +52,7 @@ Critical reading checks public pages after they load. To run it again, click **C
 | `cmd-g` / `cmd-shift-g` | Next / previous match |
 | `ctrl-tab` / `ctrl-shift-tab` | Next / previous tab |
 | `cmd-]` / `cmd-[` | Next / previous tab |
+| hold `cmd`, then `1`–`9` | Show other tabs and open the numbered tab |
 | `ctrl-cmd-s` | All tabs |
 | hold `fn` | Speak an address or search |
 | `cmd-fn` | Speak a browser command, such as "new tab" |
@@ -58,35 +63,35 @@ Voice needs microphone and speech-recognition permission, which macOS asks for t
 
 ## Passkeys and Touch ID
 
-WebKit only permits a third-party browser to use passkeys for arbitrary websites when Apple has approved the app for the managed `com.apple.developer.web-browser.public-key-credential` entitlement. The ordinary `script/run` build stays ad-hoc signed and cannot use passkeys.
+WebKit only permits a third-party browser to use passkeys for arbitrary websites when Apple has approved the app for the managed `com.apple.developer.web-browser.public-key-credential` entitlement. The ordinary `script/run` build uses the Interlinked Apple Development identity but omits that restricted entitlement until Apple approves it.
 
 The Account Holder must first submit Apple's [macOS browser passkey entitlement request](https://developer.apple.com/contact/request/macos-browsers-passkeys/). After Apple enables the capability for the app's Developer account, run the provisioned build with:
 
 ```sh
-INTERLINKED_DEVELOPMENT_TEAM=YOUR_TEAM_ID script/run-passkeys
+script/run-passkeys
 ```
 
 The script stops if Xcode cannot provision that managed capability or if the signed app does not contain it. Once present, `WKWebView` handles WebAuthn challenges and macOS presents the passkey and Touch ID UI.
 
 ## Development
 
-`build/Build/Products/Debug/kiwi commands` lists the local control API. For example:
+`build/Build/Products/Debug/interlinked commands` lists the local control API. For example:
 
 ```sh
-build/Build/Products/Debug/kiwi state
-build/Build/Products/Debug/kiwi overview show
-build/Build/Products/Debug/kiwi new-tab
-build/Build/Products/Debug/kiwi edit
-build/Build/Products/Debug/kiwi type paper.design
-build/Build/Products/Debug/kiwi commit
+build/Build/Products/Debug/interlinked state
+build/Build/Products/Debug/interlinked overview show
+build/Build/Products/Debug/interlinked new-tab
+build/Build/Products/Debug/interlinked edit
+build/Build/Products/Debug/interlinked type paper.design
+build/Build/Products/Debug/interlinked commit
 ```
 
-The native app is in `Kiwi/`, its control client in `KiwiControl/`, and tests in `KiwiTests/`. The internal Kiwi identifiers preserve existing sessions, Vault data, and Keychain credentials. Legacy pane types remain for session compatibility.
+The native app is in `Interlinked/`, its control client in `InterlinkedControl/`, and tests in `InterlinkedTests/`. Project, target, tool, storage, and Keychain identifiers use the Interlinked name. Legacy pane types remain for session compatibility.
 
 Run the tests with:
 
 ```sh
-xcodebuild -project Kiwi.xcodeproj -scheme Kiwi -configuration Debug \
+xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
   -derivedDataPath build -destination 'platform=macOS' test
 ```
 
