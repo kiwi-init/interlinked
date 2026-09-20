@@ -169,6 +169,16 @@ final class NavigationSafetyTests: XCTestCase {
         XCTAssertTrue(review.reasons.contains(.unusualPort))
     }
 
+    func testInvalidPortsAreBlocked() throws {
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://example.test:99999/path")),
+            source: nil,
+            kind: .link
+        )
+        XCTAssertEqual(review.disposition, .block)
+        XCTAssertTrue(review.reasons.contains(.invalidPort))
+    }
+
     func testCrossSiteFormsAndMisleadingHostTextWarn() throws {
         let source = try XCTUnwrap(URL(string: "https://accounts.example.com/profile"))
         let crossSite = NavigationSafety.review(
@@ -192,6 +202,48 @@ final class NavigationSafetyTests: XCTestCase {
             linkText: "Sign in at paypal.com"
         )
         XCTAssertTrue(misleading.reasons.contains(.misleadingLinkText))
+    }
+
+    func testUnexpectedCrossSitePopupDownloadAndRedirectWarn() throws {
+        let source = try XCTUnwrap(URL(string: "https://source.test/start"))
+        let destination = try XCTUnwrap(URL(string: "https://destination.test/end"))
+
+        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .popup).reasons.contains(.crossOriginPopup))
+        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .download).reasons.contains(.crossOriginDownload))
+        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .redirect).reasons.contains(.crossSiteRedirect))
+    }
+
+    func testWebKitBlocksScriptPopupsWithoutAUserGesture() {
+        let preferences = WKPreferences()
+        preferences.javaScriptCanOpenWindowsAutomatically = true
+        PopupPolicy.configure(preferences)
+        XCTAssertFalse(preferences.javaScriptCanOpenWindowsAutomatically)
+    }
+}
+
+@MainActor
+final class NavigationExceptionStoreTests: XCTestCase {
+    func testExceptionsAreExactOriginAndReasonScopedAndRevocable() throws {
+        let suite = "NavigationExceptionStoreTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = NavigationExceptionStore(defaults: defaults, storageKey: "exceptions")
+        let warned = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://example.test:8443/path")),
+            source: nil,
+            kind: .link
+        )
+        store.allow(warned)
+        XCTAssertTrue(store.contains(warned))
+
+        let otherReason = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "http://example.test:8443/path")),
+            source: try XCTUnwrap(URL(string: "https://source.test")),
+            kind: .link
+        )
+        XCTAssertFalse(store.contains(otherReason))
+        store.revoke(try XCTUnwrap(warned.exceptionKey))
+        XCTAssertFalse(store.contains(warned))
     }
 }
 

@@ -89,7 +89,7 @@ struct AboutView: View {
 
             statement("Data on this Mac", (JevRuntime.includesJev ? "This build does not need or store an OpenRouter key. " : "Your OpenRouter key is stored in macOS Keychain. ") + "Vault pages are saved only when you choose the Vault button, in a local file readable only by your macOS account. Vault stores the URL and extracted text, not screenshots, cookies, or form contents. Personal Filter descriptions are stored in a separate local file readable only by your macOS account and are scoped to the website where you created them.")
 
-            statement("Your controls", "Settings can turn Jev off, run Critical Reading only when asked, disable AI page labels, clear the five-day AI cache, or clear the Vault. Each Personal Filter can be paused or deleted from its own panel. Local builds that use a personal OpenRouter key can also remove it. Navigating or reloading ends a page-sharing grant and cancels stale results.")
+            statement("Your controls", "Settings can turn Jev off, run Critical Reading only when asked, disable AI page labels, clear the five-day AI cache, clear the Vault, and revoke saved navigation exceptions. Each Personal Filter can be paused or deleted from its own panel. Local builds that use a personal OpenRouter key can also remove it. Navigating or reloading ends a page-sharing grant and cancels stale results.")
 
             Text("AI classifications can be wrong. Read the highlighted source text and decide for yourself.")
                 .font(.callout.weight(.semibold))

@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 /// Temporary tools grow inside the existing page handle.
 struct AssistanceView: View {
@@ -197,6 +198,31 @@ struct AssistanceSettings: View {
 
     private var siteSettings: some View {
         Form {
+            Section("Navigation exceptions") {
+                if workspace.navigationExceptions.records.isEmpty {
+                    Text("No saved navigation exceptions.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(workspace.navigationExceptions.records) { record in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(record.key.origin)
+                                Text(record.key.reasons.joined(separator: " "))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Button("Revoke") { workspace.navigationExceptions.revoke(record.key) }
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Revoke All", role: .destructive, action: workspace.navigationExceptions.revokeAll)
+                    }
+                }
+                SettingsNote("Saved exceptions apply only to the exact destination origin and the warning reasons you approved. Deterministic blocks and WebKit warnings cannot be bypassed here.")
+            }
             Section("Website permissions") {
                 if workspace.permissions.records.isEmpty {
                     Text("No saved website permissions.")
@@ -229,12 +255,12 @@ struct AssistanceSettings: View {
                 LabeledContent("System notifications", value: workspace.downloads.notificationStatus)
                 if workspace.downloads.notificationStatus == "Off" {
                     HStack {
-                        SettingsNote("Interlinked also marks finished and failed downloads in the Toolbox without interrupting the page.")
+                        SettingsNote("Interlinked also marks finished and failed downloads in the page actions without interrupting the page.")
                         Spacer()
                         Button("Allow Notifications", action: workspace.downloads.requestNotificationPermission)
                     }
                 } else {
-                    SettingsNote("Finished and failed downloads stay in the Toolbox. System notifications appear only when macOS allows them.")
+                    SettingsNote("Finished and failed downloads stay in the page actions. System notifications appear only when macOS allows them.")
                 }
             }
         }
@@ -298,19 +324,16 @@ struct Toolbox: View {
     @State private var hovering = false
     var palette: Palette
     private var assistant: BrowserAssistance { workspace.assistance }
-    private var downloads: DownloadCenter { workspace.downloads }
     private var expanded: Bool {
-        hovering || workspace.commandKeyHeld || downloads.panelOpen || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
+        hovering || workspace.commandKeyHeld || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
     }
     private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 190 }
-    private var menuRows: CGFloat { assistant.criticalReadingMode == .onRequest ? 5 : 4 }
+    private var menuRows: CGFloat { assistant.criticalReadingMode == .onRequest ? 4 : 3 }
     private var width: CGFloat {
-        if downloads.panelOpen { return 390 }
         if assistant.filterPanelOpen || assistant.readingPanelOpen { return 340 }
         return expanded ? menuWidth : 108
     }
     private var height: CGFloat {
-        if downloads.panelOpen { return 360 }
         if assistant.filterPanelOpen { return 300 }
         if assistant.readingPanelOpen { return 150 }
         return expanded ? 44 + menuRows * 40 : 44
@@ -318,10 +341,7 @@ struct Toolbox: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if downloads.panelOpen {
-                DownloadsPanel(palette: palette)
-                    .transition(.opacity)
-            } else if assistant.filterPanelOpen {
+            if assistant.filterPanelOpen {
                 PersonalFilterPanel(palette: palette)
                     .transition(.opacity)
             } else if assistant.readingPanelOpen {
@@ -353,11 +373,6 @@ struct Toolbox: View {
                     HStack(spacing: 0) {
                         Image(systemName: "wrench.and.screwdriver")
                             .frame(width: 44, height: 44)
-                            .overlay(alignment: .topTrailing) {
-                                if downloads.unreadCount > 0 {
-                                    Circle().fill(.red).frame(width: 7, height: 7).offset(x: -5, y: 6)
-                                }
-                            }
                         Text("Toolbox")
                             .font(.system(size: 12, weight: .medium))
                             .padding(.trailing, 16)
@@ -379,14 +394,193 @@ struct Toolbox: View {
         .animation(reduceMotion ? nil : Metrics.morph, value: width)
         .animation(reduceMotion ? nil : Metrics.morph, value: height)
         .animation(reduceMotion ? nil : Metrics.morph, value: assistant.filterPanelOpen)
-        .animation(reduceMotion ? nil : Metrics.morph, value: downloads.panelOpen)
         .animation(reduceMotion ? nil : Metrics.morph, value: assistant.appliedFilterCount)
     }
 
     private func closeActivePanel() {
-        if downloads.panelOpen { downloads.closePanel() }
-        else if assistant.filterPanelOpen { assistant.closeFilters() }
+        if assistant.filterPanelOpen { assistant.closeFilters() }
         else if assistant.panel != nil { assistant.closePanel() }
+    }
+}
+
+struct PageActions: View {
+    @Environment(Workspace.self) private var workspace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var palette: Palette
+    var available: CGSize
+    private var assistant: BrowserAssistance { workspace.assistance }
+    private var downloads: DownloadCenter { workspace.downloads }
+    private var sharing: Bool { assistant.panel == .permission }
+    private var historyOpen: Bool { workspace.pageHistoryOpen }
+    private var browser: WKWebView? { workspace.activePane.flatMap(workspace.hosts.existingBrowser) }
+    private var historyCount: Int {
+        guard let browser else { return 0 }
+        return browser.backForwardList.backList.count + browser.backForwardList.forwardList.count + (browser.backForwardList.currentItem == nil ? 0 : 1)
+    }
+    private var width: CGFloat {
+        if historyOpen { return min(330, available.width - 36) }
+        if downloads.panelOpen { return min(390, available.width - 36) }
+        if sharing { return min(370, available.width - 36) }
+        return 132
+    }
+    private var height: CGFloat {
+        if historyOpen { return min(max(140, CGFloat(historyCount) * 44 + 58), available.height - 36) }
+        if downloads.panelOpen { return min(360, available.height - 36) }
+        if sharing { return min(335, available.height - 36) }
+        return 44
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            if historyOpen {
+                PageHistoryPanel(palette: palette) { workspace.pageHistoryOpen = false }
+                    .transition(.opacity)
+            } else if downloads.panelOpen {
+                DownloadsPanel(palette: palette)
+                    .transition(.opacity)
+            } else if sharing {
+                AssistanceView(palette: palette)
+                    .transition(.opacity)
+            } else {
+                HStack(spacing: 0) {
+                    pageAction("History", symbol: "clock.arrow.circlepath") {
+                        downloads.closePanel()
+                        if assistant.panel != nil { assistant.closePanel() }
+                        workspace.pageHistoryOpen.toggle()
+                    }
+                    .accessibilityIdentifier("page-history-button")
+                    .help("Page history")
+
+                    pageAction("Downloads", symbol: downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle") {
+                        workspace.pageHistoryOpen = false
+                        assistant.closeFilters()
+                        if assistant.panel != nil { assistant.closePanel() }
+                        downloads.togglePanel()
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if downloads.unreadCount > 0 {
+                            Circle().fill(.red).frame(width: 7, height: 7).offset(x: -7, y: 7)
+                        }
+                    }
+                    .accessibilityLabel(downloads.activeCount == 0 ? "Downloads" : "Downloads, \(downloads.activeCount) active")
+                    .accessibilityIdentifier("downloads-button")
+                    .help("Downloads · ⌘J")
+
+                    pageAction("Share page", symbol: assistant.shared ? "square.and.arrow.up.fill" : "square.and.arrow.up") {
+                        workspace.pageHistoryOpen = false
+                        downloads.closePanel()
+                        assistant.requestSharing()
+                    }
+                    .accessibilityIdentifier("share-page-button")
+                    .help(assistant.shared ? "Page shared with Jev" : "Share this page with Jev")
+                }
+                .padding(.horizontal, 0)
+                .transition(.opacity)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topTrailing)
+        .foregroundStyle(palette.text)
+        .modifier(PageGlass(radius: 14))
+        .onExitCommand(perform: closePanel)
+        .animation(reduceMotion ? nil : Metrics.morph, value: width)
+        .animation(reduceMotion ? nil : Metrics.morph, value: height)
+        .animation(reduceMotion ? nil : Metrics.morph, value: downloads.panelOpen)
+        .animation(reduceMotion ? nil : Metrics.morph, value: sharing)
+        .animation(reduceMotion ? nil : Metrics.morph, value: historyOpen)
+    }
+
+    private func pageAction(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func closePanel() {
+        if historyOpen { workspace.pageHistoryOpen = false }
+        else if downloads.panelOpen { downloads.closePanel() }
+        else if sharing { assistant.closePanel() }
+    }
+}
+
+private struct PageHistoryPanel: View {
+    @Environment(Workspace.self) private var workspace
+    var palette: Palette
+    var close: () -> Void
+    private var browser: WKWebView? { workspace.activePane.flatMap(workspace.hosts.existingBrowser) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ToolboxPanelHeader(title: "History", close: close)
+            if let browser {
+                let back = browser.backForwardList.backList
+                let current = browser.backForwardList.currentItem
+                let forward = browser.backForwardList.forwardList
+                if back.isEmpty && forward.isEmpty {
+                    Text("No other pages in this tab yet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.textDim)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(Array(back.enumerated()), id: \.offset) { _, item in
+                                historyRow(item, browser: browser)
+                            }
+                            if let current {
+                                historyRow(current, browser: browser, current: true)
+                            }
+                            ForEach(Array(forward.enumerated()), id: \.offset) { _, item in
+                                historyRow(item, browser: browser)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Open a page to see its history.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.textDim)
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func historyRow(_ item: WKBackForwardListItem, browser: WKWebView, current: Bool = false) -> some View {
+        Button {
+            guard !current else { return }
+            browser.go(to: item)
+            close()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: current ? "circle.fill" : "clock")
+                    .font(.system(size: current ? 6 : 12))
+                    .foregroundStyle(current ? palette.accent : palette.textDim)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title ?? CompactLine.host(item.url.absoluteString))
+                        .font(.system(size: 11, weight: current ? .semibold : .medium))
+                        .lineLimit(1)
+                    Text(CompactLine.host(item.url.absoluteString))
+                        .font(.system(size: 9))
+                        .foregroundStyle(palette.textDim)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(current ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: 9))
+        }
+        .disabled(current)
+        .accessibilityLabel(current ? "Current page, \(item.title ?? item.url.absoluteString)" : item.title ?? item.url.absoluteString)
     }
 }
 
@@ -730,13 +924,6 @@ struct PageTools: View {
                 .accessibilityLabel(assistant.savedInVault ? "Update saved page in Vault" : "Save page to Vault")
                 .help(assistant.vaultStatus.isEmpty ? "Save page to Vault" : assistant.vaultStatus)
                 .accessibilityIdentifier("page-vault-button")
-            toolboxButton("Downloads", symbol: workspace.downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle") {
-                assistant.closeFilters()
-                if assistant.panel != nil { assistant.closePanel() }
-                workspace.downloads.togglePanel()
-            }
-            .accessibilityLabel(workspace.downloads.activeCount == 0 ? "Downloads" : "Downloads, \(workspace.downloads.activeCount) active")
-            .accessibilityIdentifier("downloads-button")
             if assistant.criticalReadingMode == .onRequest {
                 toolboxButton("Critical Reading", symbol: "text.magnifyingglass") {
                     workspace.downloads.closePanel()

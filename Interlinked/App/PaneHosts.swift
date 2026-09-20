@@ -30,9 +30,9 @@ final class PaneHosts {
             return existing
         }
         let config = WKWebViewConfiguration()
-        let coordinator = BrowserCoordinator(pane: pane, workspace: workspace)
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         NavigationSafety.configure(config.preferences)
+        PopupPolicy.configure(config.preferences)
         config.userContentController.addUserScript(WKUserScript(
             source: PageTextBridge.install,
             injectionTime: .atDocumentEnd,
@@ -42,7 +42,45 @@ final class PaneHosts {
         if #available(macOS 12.3, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
-        let view = WKWebView(frame: .zero, configuration: config)
+        return registerBrowser(for: pane, workspace: workspace, configuration: config)
+    }
+
+    func popupBrowser(
+        for pane: PaneID,
+        workspace: Workspace,
+        configuration: WKWebViewConfiguration,
+        openerURL: URL?,
+        kind: NavigationKind
+    ) -> WKWebView {
+        if let existing = browsers[pane] { return existing }
+        NavigationSafety.configure(configuration.preferences)
+        PopupPolicy.configure(configuration.preferences)
+        return registerBrowser(
+            for: pane,
+            workspace: workspace,
+            configuration: configuration,
+            openerURL: openerURL,
+            initialNavigationKind: kind,
+            isPopup: true
+        )
+    }
+
+    private func registerBrowser(
+        for pane: PaneID,
+        workspace: Workspace,
+        configuration: WKWebViewConfiguration,
+        openerURL: URL? = nil,
+        initialNavigationKind: NavigationKind? = nil,
+        isPopup: Bool = false
+    ) -> WKWebView {
+        let coordinator = BrowserCoordinator(
+            pane: pane,
+            workspace: workspace,
+            openerURL: openerURL,
+            initialNavigationKind: initialNavigationKind,
+            isPopup: isPopup
+        )
+        let view = WKWebView(frame: .zero, configuration: configuration)
         view.allowsBackForwardNavigationGestures = true
         view.allowsMagnification = true
         view.navigationDelegate = coordinator
@@ -284,10 +322,24 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var observations: [NSKeyValueObservation] = []
     private var lastURL: URL?
     private var updateScheduled = false
+    private let openerURL: URL?
+    private var initialNavigationKind: NavigationKind?
+    private let isPopup: Bool
+    private var navigationChainStart: URL?
+    private var receivedServerRedirect = false
 
-    init(pane: PaneID, workspace: Workspace) {
+    init(
+        pane: PaneID,
+        workspace: Workspace,
+        openerURL: URL? = nil,
+        initialNavigationKind: NavigationKind? = nil,
+        isPopup: Bool = false
+    ) {
         self.pane = pane
         self.workspace = workspace
+        self.openerURL = openerURL
+        self.initialNavigationKind = initialNavigationKind
+        self.isPopup = isPopup
     }
 
     func observe(_ view: WKWebView) {
@@ -335,6 +387,7 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        finishNavigationChain()
         update(webView)
         workspace?.hosts.loadFavicon(webView, pane: pane)
         workspace?.hosts.restoreScrollIfNeeded(webView, pane: pane)
@@ -342,6 +395,7 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        finishNavigationChain()
         workspace?.assistance.committed(pane)
         update(webView)
     }
@@ -357,20 +411,26 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         preferences: WKWebpagePreferences,
         decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
     ) {
-        if navigationAction.shouldPerformDownload {
-            decisionHandler(.download, preferences)
-            return
-        }
         guard let destination = navigationAction.request.url else {
             decisionHandler(.cancel, preferences)
             return
         }
-        let source = navigationAction.sourceFrame.request.url ?? webView.url
-        let kind = navigationKind(navigationAction.navigationType)
+        let source = navigationAction.sourceFrame.request.url ?? openerURL ?? webView.url
+        let actionKind = navigationKind(navigationAction.navigationType)
+        let kind = initialNavigationKind ?? (navigationAction.shouldPerformDownload && actionKind == .other ? .download : actionKind)
+        initialNavigationKind = nil
+        if navigationAction.targetFrame?.isMainFrame != false, navigationChainStart == nil {
+            navigationChainStart = destination
+            receivedServerRedirect = false
+        }
         let preliminary = NavigationSafety.review(destination: destination, source: source, kind: kind)
-        let inspectLink = kind == .link && source.map { !NavigationSafety.sameSite($0, destination) } == true
-        guard preliminary.disposition != .allow || inspectLink else {
-            decisionHandler(.allow, preferences)
+        let inspectLink = actionKind == .link && source.map { !NavigationSafety.sameSite($0, destination) } == true
+        if preliminary.disposition == .allow, !inspectLink {
+            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
+            return
+        }
+        if preliminary.disposition == .warn, workspace?.navigationExceptions.contains(preliminary) == true, !inspectLink {
+            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
             return
         }
         Task { @MainActor [weak self, weak webView] in
@@ -381,14 +441,19 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
             let linkText = inspectLink ? await PageTextBridge.navigationLinkText(webView, destination: destination) : nil
             let review = NavigationSafety.review(destination: destination, source: source, kind: kind, linkText: linkText)
             guard review.disposition != .allow else {
-                decisionHandler(.allow, preferences)
+                decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
+                return
+            }
+            guard workspace?.navigationExceptions.contains(review) != true else {
+                decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
                 return
             }
             let advice = review.disposition == .warn
                 ? await workspace?.assistance.navigationAdvice(review)
                 : nil
             let allowed = await confirmNavigation(review, advice: advice, window: webView.window)
-            decisionHandler(allowed ? .allow : .cancel, preferences)
+            if !allowed { finishNavigationChain() }
+            decisionHandler(allowed ? (navigationAction.shouldPerformDownload ? .download : .allow) : .cancel, preferences)
         }
     }
 
@@ -414,17 +479,76 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         alert.informativeText = details.joined(separator: "\n\n")
         alert.addButton(withTitle: blocked ? "OK" : "Go Back")
         if !blocked { alert.addButton(withTitle: "Continue") }
+        if !blocked, review.exceptionKey != nil {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Always allow this origin for these warnings"
+        }
         guard !blocked else {
             if let window { await withCheckedContinuation { continuation in alert.beginSheetModal(for: window) { _ in continuation.resume() } } }
             else { alert.runModal() }
             return false
         }
+        let allowed: Bool
         if let window {
-            return await withCheckedContinuation { continuation in
+            allowed = await withCheckedContinuation { continuation in
                 alert.beginSheetModal(for: window) { continuation.resume(returning: $0 == .alertSecondButtonReturn) }
             }
+        } else {
+            allowed = alert.runModal() == .alertSecondButtonReturn
         }
-        return alert.runModal() == .alertSecondButtonReturn
+        if allowed, alert.suppressionButton?.state == .on {
+            workspace?.navigationExceptions.allow(review)
+        }
+        return allowed
+    }
+
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        receivedServerRedirect = true
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        guard navigationResponse.isForMainFrame,
+              receivedServerRedirect,
+              let start = navigationChainStart,
+              let destination = navigationResponse.response.url,
+              !NavigationSafety.sameSite(start, destination) else {
+            decisionHandler(.allow)
+            return
+        }
+        let review = NavigationSafety.review(destination: destination, source: start, kind: .redirect)
+        if review.disposition == .allow || workspace?.navigationExceptions.contains(review) == true {
+            decisionHandler(.allow)
+            return
+        }
+        Task { @MainActor [weak self, weak webView] in
+            guard let self else {
+                decisionHandler(.cancel)
+                return
+            }
+            let advice = review.disposition == .warn
+                ? await workspace?.assistance.navigationAdvice(review)
+                : nil
+            let allowed = await confirmNavigation(review, advice: advice, window: webView?.window)
+            if !allowed { finishNavigationChain() }
+            decisionHandler(allowed ? .allow : .cancel)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finishNavigationChain()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        finishNavigationChain()
+    }
+
+    private func finishNavigationChain() {
+        navigationChainStart = nil
+        receivedServerRedirect = false
     }
 
     func webView(
@@ -450,31 +574,20 @@ final class BrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         guard navigationAction.targetFrame == nil,
-              let url = navigationAction.request.url else { return nil }
+              navigationAction.request.url != nil else { return nil }
         let source = navigationAction.sourceFrame.request.url ?? webView.url
-        let kind = navigationKind(navigationAction.navigationType)
-        let preliminary = NavigationSafety.review(destination: url, source: source, kind: kind)
-        let inspectLink = kind == .link && source.map { !NavigationSafety.sameSite($0, url) } == true
-        guard preliminary.disposition != .allow || inspectLink else {
-            workspace?.openAddress(url.absoluteString)
-            return nil
-        }
-        Task { @MainActor [weak self, weak webView] in
-            guard let self, let webView else { return }
-            let linkText = inspectLink ? await PageTextBridge.navigationLinkText(webView, destination: url) : nil
-            let review = NavigationSafety.review(destination: url, source: source, kind: kind, linkText: linkText)
-            if review.disposition == .allow {
-                workspace?.openAddress(url.absoluteString)
-                return
-            }
-            let advice = review.disposition == .warn
-                ? await workspace?.assistance.navigationAdvice(review)
-                : nil
-            if await confirmNavigation(review, advice: advice, window: webView.window) {
-                workspace?.openAddress(url.absoluteString)
-            }
-        }
-        return nil
+        let actionKind = navigationKind(navigationAction.navigationType)
+        let childKind: NavigationKind = [.link, .form].contains(actionKind) ? actionKind : .popup
+        return workspace?.openPopup(
+            configuration: configuration,
+            openerURL: source,
+            kind: childKind
+        )
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        guard isPopup else { return }
+        _ = workspace?.closePane(pane)
     }
 
     func webView(

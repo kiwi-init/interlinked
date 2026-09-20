@@ -2,7 +2,7 @@ import Foundation
 import WebKit
 
 enum NavigationKind: Sendable {
-    case link, form, reload, history, other
+    case link, form, popup, download, redirect, reload, history, other
 }
 
 struct NavigationReview: Equatable, Sendable {
@@ -20,7 +20,11 @@ struct NavigationReview: Equatable, Sendable {
         case mixedScriptHostname = "The destination hostname mixes writing systems and may be visually misleading."
         case publicIPAddress = "The destination uses a public IP address instead of a hostname."
         case unusualPort = "The destination uses an unusual network port."
+        case invalidPort = "The destination uses a port outside the valid network range."
         case crossOriginForm = "This form sends data to a different site."
+        case crossOriginPopup = "This popup opens a site different from the page that requested it."
+        case crossOriginDownload = "This download comes from a site different from the page that requested it."
+        case crossSiteRedirect = "The redirect chain changes to a different site."
         case misleadingLinkText = "The visible link names a different site than its destination."
         case invalidWebDestination = "The destination is not a valid HTTP or HTTPS website."
     }
@@ -30,6 +34,12 @@ struct NavigationReview: Equatable, Sendable {
     var destinationOrigin: String
     var linkText: String?
     var reasons: [Reason]
+
+    var exceptionKey: NavigationExceptionKey? {
+        guard disposition == .warn, !reasons.isEmpty,
+              destinationOrigin.hasPrefix("http://") || destinationOrigin.hasPrefix("https://") else { return nil }
+        return NavigationExceptionKey(origin: destinationOrigin, reasons: reasons.map(\.rawValue).sorted())
+    }
 
     var advisoryEvidence: String {
         var lines = ["Destination origin: \(destinationOrigin)"]
@@ -79,14 +89,30 @@ enum NavigationSafety {
             if host.contains("xn--") { add(.encodedHostname) }
             if mixesWritingSystems(host) { add(.mixedScriptHostname) }
             if isIPAddress(host), !isLocalHost(host) { add(.publicIPAddress) }
-            if let port = destination.port, !isLocalHost(host),
-               !((scheme == "https" && port == 443) || (scheme == "http" && port == 80)) {
-                add(.unusualPort)
+            if let port = destination.port {
+                if !(1...65_535).contains(port) {
+                    add(.invalidPort, .block)
+                } else if !isLocalHost(host),
+                          !((scheme == "https" && port == 443) || (scheme == "http" && port == 80)) {
+                    add(.unusualPort)
+                }
             }
         }
 
         if kind == .form, let source, isWeb(source), isWeb(destination), !sameSite(source, destination) {
             add(.crossOriginForm)
+        }
+
+        if kind == .popup, let source, isWeb(source), isWeb(destination), !sameSite(source, destination) {
+            add(.crossOriginPopup)
+        }
+
+        if kind == .download, let source, isWeb(source), isWeb(destination), !sameSite(source, destination) {
+            add(.crossOriginDownload)
+        }
+
+        if kind == .redirect, let source, isWeb(source), isWeb(destination), !sameSite(source, destination) {
+            add(.crossSiteRedirect)
         }
 
         if let claimed = claimedHost(in: linkText), let actual = destination.host,
@@ -169,5 +195,14 @@ enum NavigationSafety {
     private static func cleanText(_ text: String) -> String {
         text.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) ? " " : String($0) }
             .joined().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+}
+
+enum PopupPolicy {
+    static func configure(_ preferences: WKPreferences) {
+        // WebKit retains user-gesture state for script-created windows. Keeping
+        // this false blocks delayed and unsolicited window.open calls before the
+        // UI delegate is asked to create a tab.
+        preferences.javaScriptCanOpenWindowsAutomatically = false
     }
 }

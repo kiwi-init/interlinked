@@ -33,6 +33,18 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("Authorization", "").startswith("Digest "):
                 return self.send_bytes(b"Digest authentication completed.\n", "text/plain")
             return self.challenge('Digest realm="Interlinked fixture", nonce="interlinked", algorithm=MD5, qop="auth"')
+        if path == "/popup/child":
+            return self.popup_child("GET", "")
+        if path == "/popup/blocked":
+            return self.send_bytes(b"<!doctype html><title>Blocked popup opened</title><h1>Blocked popup opened</h1>", "text/html; charset=utf-8")
+        if path == "/navigation/target":
+            return self.send_bytes(b"<!doctype html><title>Navigation completed</title><h1>Navigation completed</h1>", "text/html; charset=utf-8")
+        if path == "/redirect/cross-site":
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{PORT}/navigation/target")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path in {"/download/known", "/download/duplicate"}:
             return self.download(PAYLOAD, "fixture.txt", include_length=True)
         if path == "/download/unknown":
@@ -62,6 +74,25 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         self.send_error(404)
+
+    def do_POST(self):
+        if self.path == "/popup/post":
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8", errors="replace")
+            return self.popup_child("POST", body)
+        self.send_error(404)
+
+    def popup_child(self, method, body):
+        escaped = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        page = f"""<!doctype html>
+<meta charset="utf-8"><title>{method} popup child</title>
+<h1>{method} popup child</h1><p id="body">{escaped}</p>
+<button id="close">Close this popup</button>
+<script>
+  if (window.opener) window.opener.postMessage({{kind: 'popup', method: {method!r}, body: {body!r}}}, '*');
+  document.querySelector('#close').onclick = () => window.close();
+</script>""".encode()
+        return self.send_bytes(page, "text/html; charset=utf-8")
 
     def challenge(self, value):
         body = b"Authentication required.\n"

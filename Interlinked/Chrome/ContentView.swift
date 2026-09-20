@@ -16,6 +16,10 @@ struct ContentView: View {
                 Toolbox(palette: palette)
                     .padding(18)
             }
+            .overlay(alignment: .topTrailing) {
+                PageActions(palette: palette, available: geometry.size)
+                    .padding(18)
+            }
         }
         .background(palette.pane)
         .background(WindowChrome())

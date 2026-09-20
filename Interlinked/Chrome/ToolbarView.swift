@@ -9,8 +9,8 @@ struct PageHandle: View {
     private var hovering: Bool { workspace.quickSwitchOpen || workspace.commandKeyHeld }
 
     private var pane: PaneID? { workspace.activePane }
-    private var expanded: Bool { workspace.assistance.panel == .permission || workspace.overviewOpen || hovering || workspace.editing != nil }
-    private var showsTabs: Bool { workspace.assistance.panel != .permission && !workspace.overviewOpen && (hovering || workspace.editing != nil) && voiceCaption == nil }
+    private var expanded: Bool { workspace.overviewOpen || hovering || workspace.editing != nil }
+    private var showsTabs: Bool { !workspace.overviewOpen && (hovering || workspace.editing != nil) && voiceCaption == nil }
     private var identity: String {
         guard let pane else { return "All tabs" }
         let label = workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
@@ -46,9 +46,6 @@ struct PageHandle: View {
     }
     private var controlsHeight: CGFloat { 76 + tabsHeight }
     private var size: CGSize {
-        if workspace.assistance.panel == .permission {
-            return CGSize(width: min(370, available.width - 36), height: min(335, available.height - 36))
-        }
         if workspace.overviewOpen { return overviewSize }
         if voiceCaption != nil { return CGSize(width: min(340, available.width - 36), height: 44) }
         if showsTabs {
@@ -67,7 +64,6 @@ struct PageHandle: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            if workspace.assistance.panel == .permission { AssistanceView(palette: palette) }
             if showsTabs {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
@@ -350,13 +346,16 @@ struct PageGlass: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let backing = scheme == .dark ? Color.black : Color.white
-        let opacity = reduceTransparency || contrast == .increased ? 1.0 : 0.76
+        // Keep a small neutral scrim for legibility over arbitrary web content.
+        // The previous 76% backing hid most of the system glass and read as an
+        // opaque black or white panel instead of translucent chrome.
+        let opacity = reduceTransparency || contrast == .increased ? 1.0 : (scheme == .dark ? 0.44 : 0.38)
         let readable = content.background(backing.opacity(opacity), in: shape)
         Group {
             if reduceTransparency {
                 readable
             } else if #available(macOS 26.0, *) {
-                readable.glassEffect(.regular.interactive(), in: shape)
+                readable.glassEffect(.clear.interactive(), in: shape)
             } else {
                 readable.background(.ultraThinMaterial, in: shape)
             }

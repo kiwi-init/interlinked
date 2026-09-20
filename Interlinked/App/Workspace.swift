@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import WebKit
 
 enum LineTarget: Hashable {
     case pane(PaneID)
@@ -58,7 +59,9 @@ final class Workspace {
     let assistance = BrowserAssistance()
     let downloads = DownloadCenter()
     let permissions = WebsitePermissionStore()
+    let navigationExceptions = NavigationExceptionStore()
     var overviewOpen = false
+    var pageHistoryOpen = false
     var quickSwitchOpen = false
     var commandKeyHeld = false
 
@@ -124,6 +127,21 @@ final class Workspace {
         keep()
     }
 
+    func openPopup(configuration: WKWebViewConfiguration, openerURL: URL?, kind: NavigationKind) -> WKWebView? {
+        openTab(kind: .browser)
+        guard let pane = activePane else { return nil }
+        surfaces.setLine(pane, "about:blank")
+        let view = hosts.popupBrowser(
+            for: pane,
+            workspace: self,
+            configuration: configuration,
+            openerURL: openerURL,
+            kind: kind
+        )
+        keep()
+        return view
+    }
+
     func closeTab(_ id: TabID) {
         if activeTab?.id == id { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
@@ -137,7 +155,8 @@ final class Workspace {
     }
 
     func escape() {
-        if downloads.panelOpen { downloads.closePanel() }
+        if pageHistoryOpen { pageHistoryOpen = false }
+        else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if editing != nil { discardLine() }
@@ -684,7 +703,7 @@ final class Workspace {
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53, let self,
-               self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
+               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
                self.editing != nil || self.overviewOpen {
                 self.escape()
                 return nil

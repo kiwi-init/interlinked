@@ -52,6 +52,25 @@
   <a href="/download/duplicate" download>Duplicate filename</a>
 </section>
 
+<section>
+  <h2>Popup semantics</h2>
+  <a href="/popup/child?source=target-blank" target="_blank">GET target-blank popup</a>
+  <form action="/popup/post" method="post" target="_blank">
+    <input name="fixture" value="post-body-preserved">
+    <button type="submit">POST target-blank popup</button>
+  </form>
+  <button id="script-popup">User-initiated script popup</button>
+  <button id="blocked-popup">Try delayed popup</button>
+  <output id="popups">No popup result yet.</output>
+</section>
+
+<section>
+  <h2>Navigation safety</h2>
+  <a id="suspicious-link" href="http://localhost:8765/navigation/target">Continue at paypal.com</a>
+  <a href="/redirect/cross-site">Cross-site redirect chain</a>
+  <output>Both links should pause before the destination loads. The first has misleading visible text. The second changes site during a redirect.</output>
+</section>
+
 <script>
   for (const input of document.querySelectorAll('input[type=file]')) {
     input.addEventListener('change', () => {
@@ -81,6 +100,18 @@
     if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this WebKit build.'; return; }
     try { permissions.textContent = `Notification permission: ${await Notification.requestPermission()}`; }
     catch (error) { permissions.textContent = `Notifications failed: ${error.name}: ${error.message}`; }
+  };
+  const popups = document.querySelector('#popups');
+  window.addEventListener('message', event => {
+    if (event.data?.kind === 'popup') popups.textContent = `${event.data.method} child kept its opener. Body: ${event.data.body || '(empty)'}`;
+  });
+  document.querySelector('#script-popup').onclick = () => window.open('/popup/child?source=script', '_blank');
+  document.querySelector('#blocked-popup').onclick = () => {
+    popups.textContent = 'Waiting for a popup that should be blocked…';
+    setTimeout(() => {
+      const child = window.open('/popup/blocked', '_blank');
+      popups.textContent = child ? 'Unexpected: delayed popup opened.' : 'Delayed popup was blocked.';
+    }, 750);
   };
 </script>
 </html>

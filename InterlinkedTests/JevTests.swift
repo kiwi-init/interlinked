@@ -24,13 +24,24 @@ private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
     let vaultIDs: [UUID]?
     let memberGroups: [[String]]?
     let advice: String?
+    let adviceDelay: Duration
+    let adviceUnavailable: Bool
     private(set) var vaultInputCount = 0
 
-    init(label: String? = nil, vaultIDs: [UUID]? = nil, memberGroups: [[String]]? = nil, advice: String? = nil) {
+    init(
+        label: String? = nil,
+        vaultIDs: [UUID]? = nil,
+        memberGroups: [[String]]? = nil,
+        advice: String? = nil,
+        adviceDelay: Duration = .zero,
+        adviceUnavailable: Bool = false
+    ) {
         self.label = label
         self.vaultIDs = vaultIDs
         self.memberGroups = memberGroups
         self.advice = advice
+        self.adviceDelay = adviceDelay
+        self.adviceUnavailable = adviceUnavailable
     }
 
     func pageLabel(page: PageMetadata, candidates: [LabelCandidate]) async throws -> String? { label }
@@ -39,7 +50,11 @@ private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
         return vaultIDs
     }
     func relatedPageGroups(pages: [ResearchPage]) async throws -> [[String]]? { memberGroups }
-    func navigationAdvice(_ review: NavigationReview) async throws -> String? { advice }
+    func navigationAdvice(_ review: NavigationReview) async throws -> String? {
+        if adviceDelay != .zero { try? await Task.sleep(for: adviceDelay) }
+        if adviceUnavailable { throw CancellationError() }
+        return advice
+    }
 }
 
 private final class JevURLProtocol: URLProtocol {
@@ -251,6 +266,41 @@ final class BrowserIntelligenceTests: XCTestCase {
 
         XCTAssertEqual(decision?.source, .appleIntelligence)
         XCTAssertEqual(decision?.value, [ResearchGroup(id: "one", title: "First", members: ["one", "two"])])
+    }
+
+    func testNavigationAdviceRetainsTheWarningWhenAppleIntelligenceIsUnavailable() async throws {
+        let local = FixtureLocalIntelligence(adviceUnavailable: true)
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
+            local: local
+        )
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://person:secret@example.test")),
+            source: nil,
+            kind: .link
+        )
+        let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(50))
+        XCTAssertNil(advice)
+        XCTAssertEqual(review.disposition, .warn)
+    }
+
+    func testNavigationAdviceDeadlineDoesNotWaitForTheModel() async throws {
+        let local = FixtureLocalIntelligence(advice: "Too late", adviceDelay: .seconds(2))
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
+            local: local
+        )
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://person:secret@example.test")),
+            source: nil,
+            kind: .link
+        )
+        let clock = ContinuousClock()
+        let start = clock.now
+        let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(40))
+        XCTAssertNil(advice)
+        XCTAssertLessThan(start.duration(to: clock.now), .milliseconds(500))
+        XCTAssertEqual(review.disposition, .warn)
     }
 }
 

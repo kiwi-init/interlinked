@@ -22,13 +22,13 @@ Favicons are fetched once per hostname, shared across tabs, and saved in `~/Libr
 
 Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
 
-Links that open a new browser window become a new Interlinked tab. File uploads use the macOS open panel and keep each input's multiple-selection, directory, and accepted-type rules. JavaScript alert, confirm, and prompt calls use native sheets. HTTP Basic and Digest credentials last for the session; client-certificate requests are cancelled with an explanation.
+Links and forms that open a new browser window become a new Interlinked tab. The tab uses WebKit's supplied configuration, so opener messaging and POST bodies stay intact, and `window.close()` closes that child tab. Interlinked allows target-blank links, forms, and script popups tied to a user action. WebKit blocks delayed or otherwise non-user-initiated script popups before Interlinked creates a tab. File uploads use the macOS open panel and keep each input's multiple-selection, directory, and accepted-type rules. JavaScript alert, confirm, and prompt calls use native sheets. HTTP Basic and Digest credentials last for the session; client-certificate requests are cancelled with an explanation.
 
 HTTP and HTTPS links sent by macOS open in delivery order. A cold launch reuses the untouched blank page for the first link. Every remaining link opens once in a new tab, with the last delivered link active. Interlinked ignores non-web and malformed URLs.
 
-Downloads use the standard macOS save panel and appear in the Toolbox with their origin, destination, byte progress, cancel, resume when the server permits it, failure details, and Reveal in Finder. They keep running after their tab closes. Interlinked never opens a downloaded file automatically. It records an interrupted state if the app quits during a transfer.
+Downloads use the standard macOS save panel and appear in the top-right page actions with their origin, destination, byte progress, cancel, resume when the server permits it, failure details, and Reveal in Finder. They keep running after their tab closes. Interlinked never opens a downloaded file automatically. It records an interrupted state if the app quits during a transfer.
 
-Camera, microphone, and location choices belong to the exact requesting origin and can be revoked in Settings. Location prompting requires macOS 27 or later. WebKit does not expose website notification permission to embedded macOS browsers, so Interlinked cannot grant those requests. Download completion and failure mark the Toolbox and can use macOS notifications when enabled in Settings.
+Camera, microphone, and location choices belong to the exact requesting origin and can be revoked in Settings. Location prompting requires macOS 27 or later. WebKit does not expose website notification permission to embedded macOS browsers, so Interlinked cannot grant those requests. Download completion and failure mark the top-right page actions and can use macOS notifications when enabled in Settings.
 
 ## Find and save
 
@@ -42,7 +42,7 @@ On supported Macs, Apple Intelligence handles page-label selection, first-pass V
 
 When AI replaces the deterministic page label with its selected label, the page handle briefly picks up a spectrum glow. Deterministic labels and names you type yourself do not trigger it.
 
-WebKit's fraudulent-site warning is explicitly enabled. Interlinked also checks destinations before navigation and can block active-content URLs or warn about embedded credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, and misleading link text. Apple Intelligence may explain an existing warning from sanitized origins and deterministic warning facts, but it cannot override the browser's decision. Paths, queries, fragments, and credentials are not included in that model prompt.
+WebKit's fraudulent-site warning is explicitly enabled. Interlinked also checks destinations before navigation and can block active-content URLs and invalid ports, or warn about embedded credentials, HTTPS downgrades, encoded hostnames, unusual ports, unexpected cross-site forms, popups, downloads, redirect chains, and misleading link text. Apple Intelligence may explain an existing warning from sanitized origins and deterministic warning facts, but it cannot override the browser's decision. Paths, queries, fragments, credentials, and form values are not included in that model prompt. A warning exception must be explicitly selected, applies only to the exact destination origin and warning reasons, and can be revoked in Settings.
 
 Critical reading checks public pages after they load. It highlights source paragraphs in yellow without moving the page. Hover or click a highlighted paragraph to see its evaluation beside the text; the note has previous/next controls. Click elsewhere to hide the note. In **Run only when asked** mode, use the bottom-right **Critical reading** button or choose **Page → Critical Reading…** in the macOS menu bar. The button stays out of the way in **Always on** mode. Critical reading identifies possible loaded wording, emotional pressure, unsupported certainty, opinion presented as fact, financial interests, political bias, and text that is probably AI-generated. AI authorship, financial-interest, and political-bias classifications are pattern-based guesses. It does not verify factual claims or infer an author's intent.
 
@@ -105,7 +105,9 @@ xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Deb
   -derivedDataPath build -destination 'platform=macOS' test
 ```
 
-The local browser-capability fixture covers file inputs, JavaScript dialogs, HTTP authentication, permission requests, and known-length, unknown-length, cancelled, failed, and duplicate-name downloads:
+The navigation warning UI test lives in the `Interlinked UI Tests` scheme because macOS must grant Xcode Automation access before it can drive the app.
+
+The local browser-capability fixture covers file inputs, JavaScript dialogs, HTTP authentication, permission requests, downloads, popup semantics, and navigation warnings:
 
 ```sh
 python3 test-fixtures/server.py
