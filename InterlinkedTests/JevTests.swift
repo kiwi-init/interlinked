@@ -341,6 +341,12 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(PassageDecisions.findings(response, passages: passages), [.init(passage: passages[3], signal: .pressure)])
         XCTAssertTrue(PassageDecisions.classificationInstruction.contains("Default to none"))
         XCTAssertTrue(PassageDecisions.Signal.pressure.explanation.contains("normal deadline"))
+        XCTAssertEqual(PassageDecisions.Signal.financialInterest.rawValue, "financial_interest")
+        XCTAssertEqual(PassageDecisions.Signal.financialInterest.label, "Possible financial interest")
+        XCTAssertTrue(PassageDecisions.Signal.financialInterest.explanation.contains("concrete reason"))
+        XCTAssertEqual(PassageDecisions.Signal.politicalBias.rawValue, "political_bias")
+        XCTAssertEqual(PassageDecisions.Signal.politicalBias.label, "Possible political bias")
+        XCTAssertTrue(PassageDecisions.Signal.politicalBias.explanation.contains("partisan political framing"))
     }
     func testReadingFiltersFragmentsBoundsEvidenceAndBatchesLongPages() {
         let passages = [PagePassage(id: "short", text: "Too good."),
