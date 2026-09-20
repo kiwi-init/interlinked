@@ -99,6 +99,17 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.tests
         GENERATE_INFOPLIST_FILE: YES
+  InterlinkedUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: InterlinkedUITests
+    dependencies:
+      - target: Interlinked
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.ui-tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Interlinked:
     build:
@@ -114,3 +125,12 @@ schemes:
         - InterlinkedTests
     archive:
       config: TestFlight
+  Interlinked UI Tests:
+    build:
+      targets:
+        Interlinked: all
+        InterlinkedUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - InterlinkedUITests

@@ -26,6 +26,43 @@ protocol LocalBrowserIntelligence: Sendable {
     func navigationAdvice(_ review: NavigationReview) async throws -> String?
 }
 
+private final class NavigationAdviceRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var pendingResult: String??
+    private var resolved = false
+
+    func wait() async -> String? {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if let pendingResult {
+                lock.unlock()
+                continuation.resume(returning: pendingResult)
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func resolve(_ result: String?) {
+        lock.lock()
+        guard !resolved else {
+            lock.unlock()
+            return
+        }
+        resolved = true
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: result)
+        } else {
+            pendingResult = .some(result)
+            lock.unlock()
+        }
+    }
+}
+
 struct UnavailableLocalIntelligence: LocalBrowserIntelligence {
     func pageLabel(page: PageMetadata, candidates: [LabelCandidate]) async throws -> String? { nil }
     func vaultMatches(query: String, visits: [HistoryVisit]) async throws -> [UUID]? { nil }
@@ -125,16 +162,16 @@ actor BrowserIntelligence {
     }
 
     func navigationAdvice(_ review: NavigationReview, timeout: Duration = .milliseconds(1_500)) async -> String? {
-        await withTaskGroup(of: String?.self) { group in
-            group.addTask { try? await self.local.navigationAdvice(review) }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
-            }
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
+        let race = NavigationAdviceRace()
+        let model = Task { race.resolve(try? await self.local.navigationAdvice(review)) }
+        let deadline = Task {
+            try? await Task.sleep(for: timeout)
+            race.resolve(nil)
         }
+        let result = await race.wait()
+        model.cancel()
+        deadline.cancel()
+        return result
     }
 }
 
