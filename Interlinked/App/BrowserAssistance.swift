@@ -29,6 +29,10 @@ final class BrowserAssistance {
     var vaultStatus = ""
     var cacheStatus = ""
     var lastDecisionStatus = ""
+    var filterPanelOpen = false
+    var filterDraft = ""
+    var filterStatus = ""
+    var filterBusy = false
     var findScores: [String: Double] = [:]
     var exactMatched = false
     var groups: [ResearchGroup] = []
@@ -37,6 +41,7 @@ final class BrowserAssistance {
     private(set) var labelEffect: JevLabelEffect?
     private(set) var grants: [PaneID: String] = [:]
     let history = BrowsingHistory()
+    let personalFilters = PersonalFilters()
     var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.bool(forKey: "jev.labels")
     var criticalReadingMode = CriticalReadingMode()
@@ -48,6 +53,7 @@ final class BrowserAssistance {
     @ObservationIgnored private var nextPanel: Panel?
     @ObservationIgnored private var readingResults: [PaneID: ReadingResult] = [:]
     @ObservationIgnored private var readingInFlight: [PaneID: String] = [:]
+    @ObservationIgnored private var filterResults: [PaneID: [UUID: Int]] = [:]
 
     init(service: JevService = JevService()) {
         self.service = service
@@ -57,6 +63,16 @@ final class BrowserAssistance {
     var canShare: Bool { current?.publicWebPage == true }
     var shared: Bool { workspace?.activePane.map { grants[$0] == metadata[$0]?.document && grants[$0] != nil } ?? false }
     var origin: String { current?.origin ?? "" }
+    var currentFilterHost: String { PersonalFilters.site(current?.host ?? "") }
+    var currentFilters: [PersonalFilterRule] { personalFilters.rules(for: currentFilterHost) }
+    var appliedFilterCount: Int {
+        guard let pane = workspace?.activePane else { return 0 }
+        return filterResults[pane]?.values.reduce(0, +) ?? 0
+    }
+    func filterCount(_ id: UUID) -> Int {
+        guard let pane = workspace?.activePane else { return 0 }
+        return filterResults[pane]?[id] ?? 0
+    }
     private(set) var hasKey = false
     var usesIncludedJev: Bool { JevRuntime.includesJev }
     var hasJevAccess: Bool { usesIncludedJev || hasKey }
@@ -97,12 +113,13 @@ final class BrowserAssistance {
     }
 
     func committed(_ pane: PaneID) {
-        for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)"] { cancel(key) }
+        for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)", "filters-\(pane.rawValue)"] { cancel(key) }
         metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); grants.removeValue(forKey: pane)
         readingResults.removeValue(forKey: pane); readingInFlight.removeValue(forKey: pane)
+        filterResults.removeValue(forKey: pane)
         if labelEffect?.pane == pane { labelEffect = nil }
         cancel("groups"); groups = []
-        if workspace?.activePane == pane { closePanel() }
+        if workspace?.activePane == pane { closePanel(); closeFilters() }
     }
     func loaded(_ pane: PaneID, view: WKWebView) {
         let key = "metadata-\(pane.rawValue)", revision = token("metadata-\(pane.rawValue)"), url = view.url
@@ -120,6 +137,7 @@ final class BrowserAssistance {
                     self.grants[pane] = page.document
                     self.selectLabel(pane, page: page)
                 }
+                self.applyPersonalFilters(pane: pane, page: page, view: view)
                 self.startAutomaticReading(pane: pane, page: page, view: view)
             } catch { /* The address and normal browsing remain available. */ }
         }
@@ -129,6 +147,8 @@ final class BrowserAssistance {
         for pane in metadata.keys where !workspace.paneAlive(pane) { committed(pane) }
     }
     func changedTab() {
+        filterPanelOpen = false; filterBusy = false; filterStatus = ""
+        for key in Array(tasks.keys) where key.hasPrefix("filters-") { cancel(key) }
         if criticalReadingMode == .automatic, panel == .reading {
             cancel("reading")
             if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
@@ -141,6 +161,7 @@ final class BrowserAssistance {
 
     func activated(_ pane: PaneID) {
         guard let view = workspace?.hosts.existingBrowser(pane) else { return }
+        if let page = metadata[pane] { applyPersonalFilters(pane: pane, page: page, view: view) }
         guard criticalReadingMode == .automatic else {
             PageTextBridge.clear(view)
             readingResults.removeValue(forKey: pane)
@@ -168,6 +189,9 @@ final class BrowserAssistance {
         labels = metadata.mapValues { ContextLabels.candidates($0).first?.text ?? $0.host }
         Task { await service.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
+        if let pane = workspace?.activePane, let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) {
+            applyPersonalFilters(pane: pane, page: page, view: view)
+        }
     }
     func clearHistory() {
         cancel("history"); history.clear(); historyResults = []; historyStatus = "Vault cleared."
@@ -248,6 +272,7 @@ final class BrowserAssistance {
     }
 
     func openFind() {
+        closeFilters()
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
         panel = .find
         findChanged()
@@ -257,6 +282,104 @@ final class BrowserAssistance {
         if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
         busy = false; matches = []; findings = []; status = ""
         if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
+    }
+
+    func openFilters() {
+        workspace?.discardLine(); workspace?.setOverviewOpen(false)
+        if panel != nil { closePanel() }
+        filterPanelOpen = true
+        filterStatus = appliedFilterCount > 0 ? hiddenFilterSummary : "Filters run only on \(currentFilterHost)."
+    }
+
+    func closeFilters() {
+        filterPanelOpen = false; filterDraft = ""; filterStatus = ""
+    }
+
+    func addPersonalFilter() {
+        guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage,
+              let view = workspace?.hosts.existingBrowser(pane),
+              personalFilters.add(filterDraft, host: page.host) != nil else {
+            filterStatus = currentFilterHost.isEmpty ? "Open a public website first." : "Describe what you want to hide."
+            return
+        }
+        filterDraft = ""
+        applyPersonalFilters(pane: pane, page: page, view: view)
+    }
+
+    func togglePersonalFilter(_ id: UUID) {
+        personalFilters.toggle(id); reapplyPersonalFilters()
+    }
+
+    func removePersonalFilter(_ id: UUID) {
+        personalFilters.remove(id); reapplyPersonalFilters()
+    }
+
+    private var hiddenFilterSummary: String {
+        let count = appliedFilterCount
+        return count == 1 ? "1 page item hidden on \(currentFilterHost)." : "\(count) page items hidden on \(currentFilterHost)."
+    }
+
+    private func reapplyPersonalFilters() {
+        guard let pane = workspace?.activePane, let page = metadata[pane],
+              let view = workspace?.hosts.existingBrowser(pane) else { return }
+        applyPersonalFilters(pane: pane, page: page, view: view)
+    }
+
+    private func applyPersonalFilters(pane: PaneID, page: PageMetadata, view: WKWebView) {
+        let rules = personalFilters.rules(for: page.host).filter(\.isEnabled)
+        let key = "filters-\(pane.rawValue)", revision = token(key)
+        if workspace?.activePane == pane { filterBusy = !rules.isEmpty }
+        tasks[key] = Task { [weak self, weak view] in
+            guard let self, let view else { return }
+            await PageTextBridge.clearFilters(view)
+            guard self.accepts(key, revision), self.metadata[pane]?.document == page.document else { return }
+            guard page.publicWebPage, !rules.isEmpty else {
+                self.filterResults[pane] = [:]
+                if self.workspace?.activePane == pane {
+                    self.filterBusy = false
+                    self.filterStatus = rules.isEmpty ? "No filters on this site." : "Filters are unavailable on this page."
+                }
+                return
+            }
+            do {
+                let extract = try await PageTextBridge.extractFilterCandidates(view)
+                guard self.accepts(key, revision), extract.document == page.document,
+                      extract.url == view.url?.absoluteString else { return }
+                var selected: [UUID: [PageFilterCandidate]] = [:]
+                var usedJev = false
+                for rule in rules {
+                    var matches = PersonalFilterDecisions.localMatches(description: rule.description,
+                                                                       candidates: extract.candidates)
+                    if matches.isEmpty, self.enabled, self.hasJevAccess {
+                        for candidates in PersonalFilterDecisions.batches(extract.candidates) {
+                            let response = try await self.service.decide(
+                                PersonalFilterDecisions.request(description: rule.description, candidates: candidates))
+                            try Task.checkCancellation()
+                            matches.append(contentsOf: PersonalFilterDecisions.matches(response, candidates: candidates))
+                            usedJev = true
+                        }
+                    }
+                    selected[rule.id] = matches
+                }
+                guard self.accepts(key, revision), self.metadata[pane]?.document == page.document,
+                      view.url?.absoluteString == extract.url else { return }
+                let counts = await PageTextBridge.applyFilterCandidates(selected, document: extract.document, view: view)
+                guard self.accepts(key, revision), let counts else { return }
+                self.filterResults[pane] = counts
+                if usedJev { self.grants[pane] = page.document; self.lastDecisionStatus = "Jev decision received for Personal Filters" }
+                if self.workspace?.activePane == pane {
+                    self.filterBusy = false
+                    let result = self.appliedFilterCount > 0 ? self.hiddenFilterSummary : "No matching page content found."
+                    self.filterStatus = extract.truncated ? result + " This page exceeded the safe scan limit." : result
+                }
+            } catch {
+                guard self.accepts(key, revision) else { return }
+                self.filterResults[pane] = [:]
+                if self.workspace?.activePane == pane {
+                    self.filterBusy = false; self.filterStatus = self.errorMessage(error)
+                }
+            }
+        }
     }
     func findChanged() {
         cancel("find"); cancel("exact"); matches = []; findScores = [:]; matchIndex = 0; busy = false; exactMatched = false

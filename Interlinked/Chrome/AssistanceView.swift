@@ -138,6 +138,109 @@ struct AssistanceSettings: View {
     }
 }
 
+struct PersonalFilterTools: View {
+    @Environment(Workspace.self) private var workspace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var palette: Palette
+    private var assistant: BrowserAssistance { workspace.assistance }
+
+    var body: some View {
+        @Bindable var assistant = assistant
+        VStack(alignment: .trailing, spacing: 8) {
+            if assistant.filterPanelOpen {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Personal Filters").font(.system(size: 13, weight: .semibold))
+                            Text(assistant.currentFilterHost.isEmpty ? "Open a website" : assistant.currentFilterHost)
+                                .font(.system(size: 10)).foregroundStyle(palette.textDim)
+                        }
+                        Spacer()
+                        if assistant.filterBusy { ProgressView().controlSize(.mini) }
+                        Button(action: assistant.closeFilters) {
+                            Image(systemName: "xmark").frame(width: 24, height: 24)
+                        }.accessibilityLabel("Close Personal Filters")
+                    }
+
+                    if assistant.currentFilters.isEmpty {
+                        Text("No filters on this site.")
+                            .font(.system(size: 11)).foregroundStyle(palette.textDim)
+                    } else {
+                        ScrollView {
+                            VStack(spacing: 6) {
+                                ForEach(assistant.currentFilters) { rule in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Button { assistant.togglePersonalFilter(rule.id) } label: {
+                                            Image(systemName: rule.isEnabled ? "checkmark.circle.fill" : "circle")
+                                                .foregroundStyle(rule.isEnabled ? palette.accent : palette.textDim)
+                                                .frame(width: 20, height: 20)
+                                        }
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(rule.description).font(.system(size: 11, weight: .medium)).lineLimit(2)
+                                            let count = assistant.filterCount(rule.id)
+                                            Text(count == 1 ? "1 page item hidden" : "\(count) page items hidden")
+                                                .font(.system(size: 9)).foregroundStyle(palette.textDim)
+                                        }
+                                        Spacer(minLength: 4)
+                                        Button { assistant.removePersonalFilter(rule.id) } label: {
+                                            Image(systemName: "trash").frame(width: 20, height: 20)
+                                        }.accessibilityLabel("Delete filter")
+                                    }
+                                    .padding(8)
+                                    .background(palette.hover, in: RoundedRectangle(cornerRadius: 9))
+                                }
+                            }
+                        }.frame(maxHeight: 150)
+                    }
+
+                    HStack(spacing: 6) {
+                        WorkInput(text: $assistant.filterDraft, placeholder: "Describe something to hide…",
+                                  identifier: "personal-filter-input", fontSize: 11, palette: palette,
+                                  submit: assistant.addPersonalFilter, cancel: assistant.closeFilters)
+                            .frame(height: 25)
+                        Button(action: assistant.addPersonalFilter) {
+                            Image(systemName: "arrow.up").frame(width: 28, height: 28)
+                                .background(palette.hover, in: Circle())
+                        }
+                        .disabled(assistant.filterDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel("Add Personal Filter")
+                    }
+                    Text(assistant.filterStatus.isEmpty ? "Saved on this Mac and applied only to this site." : assistant.filterStatus)
+                        .font(.system(size: 9)).foregroundStyle(palette.textDim).lineLimit(2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(palette.text)
+                .padding(12)
+                .frame(width: 340)
+                .modifier(PageGlass(radius: 14))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            Button {
+                assistant.filterPanelOpen ? assistant.closeFilters() : assistant.openFilters()
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .topTrailing) {
+                        if assistant.appliedFilterCount > 0 {
+                            Circle().fill(palette.accent).frame(width: 7, height: 7).padding(7)
+                        }
+                    }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.text)
+            .modifier(PageGlass(radius: 14))
+            .accessibilityLabel("Personal Filters")
+            .accessibilityValue(assistant.appliedFilterCount == 0 ? "No page items hidden" : "\(assistant.appliedFilterCount) page items hidden")
+            .accessibilityIdentifier("personal-filter-button")
+            .help(assistant.appliedFilterCount == 0 ? "Personal Filters" : "\(assistant.appliedFilterCount) page items hidden")
+        }
+        .animation(reduceMotion ? nil : Metrics.morph, value: assistant.filterPanelOpen)
+        .animation(reduceMotion ? nil : Metrics.morph, value: assistant.appliedFilterCount)
+    }
+}
+
 
 struct PageTools: View {
     @Environment(Workspace.self) private var workspace

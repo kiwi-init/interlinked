@@ -297,6 +297,44 @@ final class JevServiceTests: XCTestCase {
         XCTAssertFalse(sensitive.publicWebPage)
         XCTAssertTrue(page().publicWebPage)
     }
+    func testPersonalFiltersMatchVisibleHeadingsLocallyAndPersistPerSite() throws {
+        let passages = [
+            PagePassage(id: "news", text: "Latest from our changelog", role: "heading"),
+            PagePassage(id: "feed", text: "A repository you follow was updated.", role: "passage")
+        ]
+        XCTAssertEqual(PersonalFilterDecisions.localMatches(
+            description: "idgaf about this latest from our changelog bs", passages: passages
+        ).map(\.id), ["news"])
+        let media = [PageFilterCandidate(id: "image", text: "Hero", role: "image", context: ""),
+                     PageFilterCandidate(id: "video", text: "Film", role: "video", context: "")]
+        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "all images and videos", candidates: media).map(\.id),
+                       ["image", "video"])
+        let words = [PageFilterCandidate(id: "pace", text: "pace", role: "text token", context: "We must pace the frontier")]
+        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "the word pace", candidates: words).map(\.id), ["pace"])
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = directory.appendingPathComponent("filters.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let filters = PersonalFilters(file: file)
+        let rule = try XCTUnwrap(filters.add("Hide the changelog", host: "www.github.com"))
+        XCTAssertEqual(filters.rules(for: "github.com").map(\.id), [rule.id])
+        filters.toggle(rule.id)
+        XCTAssertEqual(PersonalFilters(file: file).rules(for: "www.github.com").first?.isEnabled, false)
+    }
+    func testPersonalFilterSemanticMatchesRequireHighConfidenceAndOriginalIDs() {
+        let candidates = [PageFilterCandidate(id: "card", text: "Product announcements", role: "heading", context: ""),
+                          PageFilterCandidate(id: "feed", text: "Your activity", role: "heading", context: "")]
+        let response = JevResponse(answers: [
+            "card": JevAnswer(type: "noul", noul: PersonalFilterDecisions.matchThreshold),
+            "feed": JevAnswer(type: "noul", noul: PersonalFilterDecisions.matchThreshold - 0.01),
+            "invented": JevAnswer(type: "noul", noul: 1)
+        ])
+        XCTAssertEqual(PersonalFilterDecisions.matches(response, candidates: candidates), [candidates[0]])
+        let request = PersonalFilterDecisions.request(description: "Hide product news", candidates: candidates)
+        XCTAssertEqual(Set(request.questions.keys), Set(candidates.map(\.id)))
+        XCTAssertTrue(request.state.contains("Hide product news"))
+        XCTAssertTrue(request.state.contains("text"))
+    }
 }
 
 @MainActor final class PageTextBridgeTests: XCTestCase, WKNavigationDelegate {
@@ -398,5 +436,116 @@ final class JevServiceTests: XCTestCase {
         XCTAssertTrue(fresh.passages.contains { $0.text == "Changed cancellation terms." })
         let wrongDocument = await PageTextBridge.highlight(fresh.passages[0], document: "old-document", view: view)
         XCTAssertFalse(wrongDocument)
+    }
+    func testPersonalFilterHidesItsCardWithoutAffectingReadingClearOrThePage() async throws {
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.navigationDelegate = self
+        finished = expectation(description: "Personal filter fixture loaded")
+        view.loadHTMLString("""
+            <html><body><main>
+              <article id='feed'><h1>Home</h1><p>Your repository activity remains visible.</p></article>
+              <section id='changelog' style='border:1px solid #333;border-radius:12px;padding:12px'>
+                <h2>Latest from our changelog</h2><p>Weekly product announcements.</p>
+              </section>
+            </main></body></html>
+            """, baseURL: URL(string: "https://github.com/"))
+        await fulfillment(of: [finished!], timeout: 10)
+        let extract = try await PageTextBridge.extract(view)
+        let heading = try XCTUnwrap(extract.passages.first { $0.text == "Latest from our changelog" })
+        let rule = UUID()
+        let counts = await PageTextBridge.applyFilters([rule: [heading]], document: extract.document, view: view)
+        XCTAssertEqual(counts?[rule], 1)
+        let hidden = try await view.callAsyncJavaScript(
+            "return {card:getComputedStyle(document.getElementById('changelog')).display,feed:getComputedStyle(document.getElementById('feed')).display,scrollY};",
+            arguments: [:], in: nil, contentWorld: .defaultClient) as? [String: Any]
+        XCTAssertEqual(hidden?["card"] as? String, "none")
+        XCTAssertNotEqual(hidden?["feed"] as? String, "none")
+        XCTAssertEqual(hidden?["scrollY"] as? Double, 0)
+
+        PageTextBridge.clear(view)
+        let stillHidden = try await view.callAsyncJavaScript(
+            "return getComputedStyle(document.getElementById('changelog')).display;",
+            arguments: [:], in: nil, contentWorld: .defaultClient)
+        XCTAssertEqual(stillHidden as? String, "none")
+        await PageTextBridge.clearFilters(view)
+        let restored = try await view.callAsyncJavaScript(
+            "return getComputedStyle(document.getElementById('changelog')).display;",
+            arguments: [:], in: nil, contentWorld: .defaultClient)
+        XCTAssertNotEqual(restored as? String, "none")
+    }
+    func testPersonalFilterCanHideImagesAndVideosAsLocalMediaTargets() async throws {
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.navigationDelegate = self
+        finished = expectation(description: "Media filter fixture loaded")
+        view.loadHTMLString("""
+            <html><body><main><h1>Products</h1>
+              <picture id='picture'><img id='hero' alt='Hero product' style='display:block;width:120px;height:80px'></picture>
+              <video id='movie' aria-label='Product film' style='display:block;width:120px;height:80px'></video>
+              <p id='details'>Product details stay visible.</p>
+            </main></body></html>
+            """, baseURL: URL(string: "https://store.example/"))
+        await fulfillment(of: [finished!], timeout: 10)
+        let extract = try await PageTextBridge.extractFilterCandidates(view)
+        let media = extract.candidates.filter { $0.role == "image" || $0.role == "video" }
+        XCTAssertEqual(Set(media.map(\.role)), ["image", "video"])
+        let rule = UUID()
+        let counts = await PageTextBridge.applyFilterCandidates([rule: media], document: extract.document, view: view)
+        XCTAssertEqual(counts?[rule], 2)
+        let state = try await view.callAsyncJavaScript(
+            "return {picture:getComputedStyle(document.getElementById('picture')).display,video:getComputedStyle(document.getElementById('movie')).display,details:getComputedStyle(document.getElementById('details')).display,scrollY};",
+            arguments: [:], in: nil, contentWorld: .defaultClient) as? [String: Any]
+        XCTAssertEqual(state?["picture"] as? String, "none")
+        XCTAssertEqual(state?["video"] as? String, "none")
+        XCTAssertNotEqual(state?["details"] as? String, "none")
+        XCTAssertEqual(state?["scrollY"] as? Double, 0)
+        let dynamic = try await view.callAsyncJavaScript("""
+            const image=document.createElement('img');image.id='dynamic';image.alt='Loaded later';document.body.append(image);
+            return getComputedStyle(image).display;
+            """, arguments: [:], in: nil, contentWorld: .defaultClient)
+        XCTAssertEqual(dynamic as? String, "none")
+    }
+    func testPersonalFilterRedactsRequestedWordsWithoutRewritingPageText() async throws {
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.navigationDelegate = self
+        finished = expectation(description: "Word filter fixture loaded")
+        view.loadHTMLString("<html><body><h1>We Must Pace the Frontier</h1><p>Pace matters, but pacemaker must remain.</p></body></html>",
+                            baseURL: URL(string: "https://essay.example/"))
+        await fulfillment(of: [finished!], timeout: 10)
+        let extract = try await PageTextBridge.extractFilterCandidates(view)
+        let matches = PersonalFilterDecisions.localMatches(description: "the word pace", candidates: extract.candidates)
+            .filter { $0.role == "text token" }
+        let rule = UUID()
+        let counts = await PageTextBridge.applyFilterCandidates([rule: matches], document: extract.document, view: view)
+        XCTAssertEqual(counts?[rule], 2)
+        let state = try await view.callAsyncJavaScript("""
+            return {text:document.body.innerText,
+                    filterStyles:Array.from(document.querySelectorAll('style')).filter(style=>style.id.startsWith('interlinked-personal-filters-')).length,
+                    highlights:CSS.highlights.size,scrollY};
+            """, arguments: [:], in: nil, contentWorld: .defaultClient) as? [String: Any]
+        XCTAssertTrue((state?["text"] as? String)?.contains("We Must Pace the Frontier") == true)
+        XCTAssertEqual(state?["filterStyles"] as? Int, 1)
+        XCTAssertEqual(state?["highlights"] as? Int, 1)
+        XCTAssertEqual(state?["scrollY"] as? Double, 0)
+    }
+    func testPersonalFilterExposesSemanticTextRangesWithoutAKeywordParser() async throws {
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.navigationDelegate = self
+        finished = expectation(description: "Semantic text fixture loaded")
+        view.loadHTMLString("<html><body><article><p>September 2026</p><p>The essay remains readable.</p></article></body></html>",
+                            baseURL: URL(string: "https://essay.example/"))
+        await fulfillment(of: [finished!], timeout: 10)
+        let extract = try await PageTextBridge.extractFilterCandidates(view)
+        let date = try XCTUnwrap(extract.candidates.first { $0.text == "September 2026" && $0.role == "text range" })
+        let response = JevResponse(answers: [date.id: JevAnswer(type: "noul", noul: 0.96)])
+        XCTAssertEqual(PersonalFilterDecisions.matches(response, candidates: [date]), [date])
+
+        let rule = UUID()
+        let counts = await PageTextBridge.applyFilterCandidates([rule: [date]], document: extract.document, view: view)
+        XCTAssertEqual(counts?[rule], 1)
+        let state = try await view.callAsyncJavaScript("return {text:document.body.innerText,highlights:CSS.highlights.size,scrollY};",
+                                                       arguments: [:], in: nil, contentWorld: .defaultClient) as? [String: Any]
+        XCTAssertTrue((state?["text"] as? String)?.contains("September 2026") == true)
+        XCTAssertEqual(state?["highlights"] as? Int, 1)
+        XCTAssertEqual(state?["scrollY"] as? Double, 0)
     }
 }

@@ -75,7 +75,7 @@ struct AboutView: View {
 
     private var safetyAndPrivacy: some View {
         aboutSection("Safety and privacy") {
-            statement("What AI receives", "Critical Reading sends readable text from public pages. Meaning search sends your query and extracted page text. Address-field searches automatically send the typed query and relevant excerpts from up to 24 pages you chose to save in the Vault. Optional label refinement sends page titles, descriptions, and locally generated label choices.")
+            statement("What AI receives", "Critical Reading sends readable text from public pages. Meaning search sends your query and extracted page text. Address-field searches automatically send the typed query and relevant excerpts from up to 24 pages you chose to save in the Vault. Optional label refinement sends page titles, descriptions, and locally generated label choices. Personal Filters first try an exact local match; when that is not enough, they send the filter description with addressable text ranges, page elements, controls, and media labels to Jev. Jev returns candidate IDs. It cannot send executable page code.")
 
             statement("What stays out", "Interlinked excludes forms and form values, password fields, editable pages, cookies, and local pages from AI reading tools. Critical Reading does not send the page URL. Ordinary browsing, exact find, local page labels, and Vault storage do not use the AI service.")
 
@@ -85,9 +85,9 @@ struct AboutView: View {
 
             statement("Five-day AI cache", "Interlinked stores a hash of each exact Jev request and its response on this Mac for up to five days. It does not store page text, queries, URLs, or credentials in this cache. Changed page text, model versions, and classification rules produce a different hash and cannot reuse an older result.")
 
-            statement("Data on this Mac", (JevRuntime.includesJev ? "This build does not need or store an OpenRouter key. " : "Your OpenRouter key is stored in macOS Keychain. ") + "Vault pages are saved only when you choose the Vault button, in a local file readable only by your macOS account. Vault stores the URL and extracted text, not screenshots, cookies, or form contents.")
+            statement("Data on this Mac", (JevRuntime.includesJev ? "This build does not need or store an OpenRouter key. " : "Your OpenRouter key is stored in macOS Keychain. ") + "Vault pages are saved only when you choose the Vault button, in a local file readable only by your macOS account. Vault stores the URL and extracted text, not screenshots, cookies, or form contents. Personal Filter descriptions are stored in a separate local file readable only by your macOS account and are scoped to the website where you created them.")
 
-            statement("Your controls", "Settings can turn Jev off, run Critical Reading only when asked, disable AI page labels, clear the five-day AI cache, or clear the Vault. Local builds that use a personal OpenRouter key can also remove it. Navigating or reloading ends a page-sharing grant and cancels stale results.")
+            statement("Your controls", "Settings can turn Jev off, run Critical Reading only when asked, disable AI page labels, clear the five-day AI cache, or clear the Vault. Each Personal Filter can be paused or deleted from its own panel. Local builds that use a personal OpenRouter key can also remove it. Navigating or reloading ends a page-sharing grant and cancels stale results.")
 
             Text("AI classifications can be wrong. Read the highlighted source text and decide for yourself.")
                 .font(.callout.weight(.semibold))
