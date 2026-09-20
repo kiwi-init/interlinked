@@ -62,6 +62,7 @@ struct InterlinkedApp: App {
         }
         .windowResizability(.contentSize)
         Settings { AssistanceSettings().environment(workspace) }
+            .windowResizability(.contentSize)
     }
 }
 
