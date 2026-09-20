@@ -226,6 +226,101 @@ final class WebsitePermissionTests: XCTestCase {
     }
 }
 
+final class ExternalURLRoutingTests: XCTestCase {
+    func testColdLaunchReusesTheBlankPageThenOpensRemainingURLsInOrder() throws {
+        let first = try XCTUnwrap(URL(string: "https://example.com/first"))
+        let second = try XCTUnwrap(URL(string: "http://localhost:8765/second"))
+
+        XCTAssertEqual(
+            ExternalURLRouting.routes(for: [first, second], canReuseActivePage: true),
+            [
+                ExternalURLRoute(url: first, destination: .reuseActivePage),
+                ExternalURLRoute(url: second, destination: .newPage),
+            ]
+        )
+    }
+
+    func testRunningAppOpensEveryDeliveredURLOnceInANewPage() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.com/repeated"))
+        XCTAssertEqual(
+            ExternalURLRouting.routes(for: [url, url], canReuseActivePage: false),
+            [
+                ExternalURLRoute(url: url, destination: .newPage),
+                ExternalURLRoute(url: url, destination: .newPage),
+            ]
+        )
+    }
+
+    func testInvalidAndNonWebURLsAreIgnored() throws {
+        let valid = try XCTUnwrap(URL(string: "https://example.com"))
+        let inputs = [
+            try XCTUnwrap(URL(string: "file:///tmp/private")),
+            try XCTUnwrap(URL(string: "mailto:person@example.com")),
+            try XCTUnwrap(URL(string: "https:///missing-host")),
+            valid,
+        ]
+        XCTAssertEqual(
+            ExternalURLRouting.routes(for: inputs, canReuseActivePage: true),
+            [ExternalURLRoute(url: valid, destination: .reuseActivePage)]
+        )
+    }
+}
+
+final class BrowserLifecycleTests: XCTestCase {
+    func testMemoryPolicyScalesAtTenFiftyAndOneHundredTabs() {
+        XCTAssertEqual(TabMemoryPolicy.discardCount(liveCount: 10, pressure: .warning), 2)
+        XCTAssertEqual(TabMemoryPolicy.discardCount(liveCount: 50, pressure: .warning), 12)
+        XCTAssertEqual(TabMemoryPolicy.discardCount(liveCount: 100, pressure: .warning), 25)
+        XCTAssertEqual(TabMemoryPolicy.discardCount(liveCount: 10, pressure: .critical), 6)
+        XCTAssertEqual(TabMemoryPolicy.discardCount(liveCount: 50, pressure: .critical), 30)
+        XCTAssertEqual(TabMemoryPolicy.discardCount(liveCount: 100, pressure: .critical), 60)
+    }
+
+    func testDiscardCandidatesAreOldestFirstAndSkipEveryProtectedTab() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        let candidates = [
+            TabMemoryCandidate(pane: PaneID(1), lastUsed: start.addingTimeInterval(1)),
+            TabMemoryCandidate(pane: PaneID(2), lastUsed: start.addingTimeInterval(2), protections: .media),
+            TabMemoryCandidate(pane: PaneID(3), lastUsed: start.addingTimeInterval(3), protections: .upload),
+            TabMemoryCandidate(pane: PaneID(4), lastUsed: start.addingTimeInterval(4), protections: .download),
+            TabMemoryCandidate(pane: PaneID(5), lastUsed: start.addingTimeInterval(5), protections: .unsavedForm),
+            TabMemoryCandidate(pane: PaneID(6), lastUsed: start.addingTimeInterval(6), protections: .active),
+            TabMemoryCandidate(pane: PaneID(7), lastUsed: start.addingTimeInterval(7)),
+        ]
+        XCTAssertEqual(TabMemoryPolicy.orderedDiscardCandidates(candidates), [PaneID(1), PaneID(7)])
+    }
+
+    func testRapidLifecycleChangesKeepRecoveryBoundToTheRightPage() throws {
+        var ledger = TabLifecycleLedger()
+        let start = Date(timeIntervalSince1970: 2_000)
+        for value in 1...100 {
+            ledger.register(PaneID(UInt64(value)), at: start.addingTimeInterval(Double(value)))
+        }
+        for value in stride(from: 100, through: 1, by: -1) {
+            ledger.touch(PaneID(UInt64(value)), at: start.addingTimeInterval(Double(200 - value)))
+        }
+        for value in stride(from: 10, through: 100, by: 10) {
+            let pane = PaneID(UInt64(value))
+            let url = try XCTUnwrap(URL(string: "https://example.com/\(value)"))
+            ledger.suspend(pane, recovery: BrowserRecovery(
+                cause: .webContentTerminated,
+                url: url,
+                scrollY: Double(value),
+                occurredAt: start.addingTimeInterval(300 + Double(value))
+            ))
+        }
+
+        XCTAssertEqual(ledger.panes.count, 100)
+        XCTAssertEqual(ledger.recoveries.count, 10)
+        XCTAssertEqual(ledger.takeRecovery(PaneID(50))?.url.absoluteString, "https://example.com/50")
+        XCTAssertNil(ledger.recoveries[PaneID(50)])
+
+        for value in 1...50 { ledger.close(PaneID(UInt64(value))) }
+        XCTAssertEqual(ledger.panes.count, 50)
+        XCTAssertEqual(ledger.recoveries.count, 5)
+    }
+}
+
 final class DownloadRecordTests: XCTestCase {
     func testDuplicateFilenamesGetANewDestinationWithoutOverwriting() {
         let directory = URL(fileURLWithPath: "/tmp/downloads", isDirectory: true)

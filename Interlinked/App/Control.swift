@@ -6,6 +6,7 @@ import WebKit
 enum Control {
     static let writeCommands = [
         "new-tab [kind]",
+        "open-url URL",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -136,6 +137,15 @@ enum Control {
                 kind = .blank
             }
             workspace.openTab(kind: kind)
+            return ok()
+
+        case "open-url":
+            guard let written = words.first,
+                  let url = URL(string: written),
+                  ExternalURLRouting.webURL(url) != nil else {
+                return error("open-url needs one HTTP or HTTPS URL")
+            }
+            workspace.openExternalURLs([url])
             return ok()
 
         case "kind":

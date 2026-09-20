@@ -653,4 +653,23 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(state?["highlights"] as? Int, 1)
         XCTAssertEqual(state?["scrollY"] as? Double, 0)
     }
+
+    func testBackgroundDiscardProbeFailsClosedForUnsavedForms() async throws {
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        view.navigationDelegate = self
+        finished = expectation(description: "Discard safeguard fixture loaded")
+        view.loadHTMLString("""
+            <html><body style='height:2000px'>
+              <input id='title' value=''><div id='editor' contenteditable='true'></div>
+            </body></html>
+            """, baseURL: URL(string: "https://fixture.example/discard"))
+        await fulfillment(of: [finished!], timeout: 10)
+
+        var probe = BrowserDiscardProbe.decode(try await view.evaluateJavaScript(BrowserDiscardProbe.script))
+        XCTAssertEqual(probe, BrowserDiscardProbe(safe: true, scrollY: 0))
+
+        _ = try await view.evaluateJavaScript("document.getElementById('title').value = 'unfinished'")
+        probe = BrowserDiscardProbe.decode(try await view.evaluateJavaScript(BrowserDiscardProbe.script))
+        XCTAssertEqual(probe?.safe, false)
+    }
 }

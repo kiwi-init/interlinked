@@ -166,6 +166,10 @@ final class Workspace {
         } else {
             openTab()
         }
+        hosts.startMemoryPressureMonitoring(workspace: self)
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            openExternalURLs(appDelegate.takePendingWebURLs())
+        }
         #if !TESTFLIGHT
             control = ControlServer()
             control?.start { [weak self] request in
@@ -179,6 +183,7 @@ final class Workspace {
     func stop() {
         downloads.prepareForTermination()
         assistance.history.save()
+        hosts.stopMemoryPressureMonitoring()
         keyMonitor.map(NSEvent.removeMonitor)
         flagsMonitor.map(NSEvent.removeMonitor)
         mouseMonitor.map(NSEvent.removeMonitor)
@@ -190,6 +195,41 @@ final class Workspace {
     func resumeDownload(_ id: UUID) {
         let webView = activePane.flatMap(hosts.existingBrowser)
         downloads.resume(id, in: webView)
+    }
+
+    func openExternalURLs(_ urls: [URL]) {
+        let routes = ExternalURLRouting.routes(
+            for: urls,
+            canReuseActivePage: activePane.map(canReuseForExternalURL) ?? false
+        )
+        guard !routes.isEmpty else { return }
+        if editing != nil { discardLine() }
+        for route in routes {
+            if route.destination == .newPage { openTab(kind: .browser) }
+            guard let pane = activePane else { continue }
+            surfaces.setKind(pane, .browser)
+            surfaces.setLine(pane, route.url.absoluteString)
+            navigate(pane, route.url.absoluteString)
+        }
+        keep()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func recoverPane(_ pane: PaneID) {
+        guard let recovery = hosts.beginRecovery(pane) else { return }
+        surfaces.setKind(pane, .browser)
+        surfaces.setLine(pane, recovery.url.absoluteString)
+        if activePane == pane { navigate(pane, recovery.url.absoluteString) }
+        keep()
+    }
+
+    func reloadActivePage() {
+        guard let pane = activePane else { return }
+        if hosts.recovery(for: pane) != nil {
+            recoverPane(pane)
+        } else {
+            hosts.existingBrowser(pane)?.reload()
+        }
     }
 
 
@@ -263,7 +303,10 @@ final class Workspace {
         assistance.changedTab()
         overviewOpen = false
         active = index
-        if let pane = activePane { assistance.activated(pane) }
+        if let pane = activePane {
+            hosts.touch(pane)
+            assistance.activated(pane)
+        }
         restoreFocus()
         keep()
     }
@@ -275,7 +318,10 @@ final class Workspace {
         overviewOpen = false
         let count = tabs.count
         active = ((active + step) % count + count) % count
-        if let pane = activePane { assistance.activated(pane) }
+        if let pane = activePane {
+            hosts.touch(pane)
+            assistance.activated(pane)
+        }
         restoreFocus()
         keep()
     }
@@ -307,6 +353,7 @@ final class Workspace {
         guard let index = tabs.firstIndex(where: { $0.contains(pane) }) else { return }
         active = index
         tabs[index].active = pane
+        hosts.touch(pane)
         assistance.activated(pane)
         keep()
     }
@@ -316,6 +363,7 @@ final class Workspace {
         if overviewOpen { overviewOpen = false }
         if quickSwitchOpen { quickSwitchOpen = false }
         if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
+        hosts.touch(pane)
         if activePane != pane { activatePane(pane) }
     }
 
@@ -596,6 +644,13 @@ final class Workspace {
         if case .listening(let heard, _) = voice.state { return heard.isEmpty }
         if case .starting = voice.state { return true }
         return false
+    }
+
+    private func canReuseForExternalURL(_ pane: PaneID) -> Bool {
+        let line = surfaces.line(pane).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.isEmpty || line == "about:blank" else { return false }
+        guard let url = hosts.existingBrowser(pane)?.url else { return true }
+        return url.absoluteString == "about:blank"
     }
 
     private func takePane() -> PaneID {

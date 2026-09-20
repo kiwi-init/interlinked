@@ -16,13 +16,15 @@ Type an address or search words. Three Bing results appear above the input after
 
 Click a page icon to switch directly. Click the current page's favicon for a searchable overview with previews. Right-click a preview to rename or close its tab.
 
-The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state while WebKit can throttle their rendering.
+The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state while WebKit can throttle their rendering. When macOS reports memory pressure, Interlinked pauses the oldest eligible background pages. It skips the active page and any page with playing media, an open file picker, an active download, or unsaved form work. Returning to a paused page shows why it was paused and lets you restore its URL and scroll position. A crashed WebContent process gets the same in-page recovery treatment instead of leaving a blank tab.
 
 Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
 Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
 
 Links that open a new browser window become a new Interlinked tab. File uploads use the macOS open panel and keep each input's multiple-selection, directory, and accepted-type rules. JavaScript alert, confirm, and prompt calls use native sheets. HTTP Basic and Digest credentials last for the session; client-certificate requests are cancelled with an explanation.
+
+HTTP and HTTPS links sent by macOS open in delivery order. A cold launch reuses the untouched blank page for the first link. Every remaining link opens once in a new tab, with the last delivered link active. Interlinked ignores non-web and malformed URLs.
 
 Downloads use the standard macOS save panel and appear in the Toolbox with their origin, destination, byte progress, cancel, resume when the server permits it, failure details, and Reveal in Finder. They keep running after their tab closes. Interlinked never opens a downloaded file automatically. It records an interrupted state if the app quits during a transfer.
 
@@ -88,6 +90,7 @@ The script stops if Xcode cannot provision that managed capability or if the sig
 build/Build/Products/Debug/interlinked state
 build/Build/Products/Debug/interlinked overview show
 build/Build/Products/Debug/interlinked new-tab
+build/Build/Products/Debug/interlinked open-url https://example.com
 build/Build/Products/Debug/interlinked edit
 build/Build/Products/Debug/interlinked type paper.design
 build/Build/Products/Debug/interlinked commit
@@ -109,5 +112,15 @@ python3 test-fixtures/server.py
 ```
 
 Then open `http://127.0.0.1:8765` in Interlinked.
+
+The background-tab policy was profiled on 2026-09-20 with the Debug build on an 8 GB M2 MacBook Air. Each tab loaded the local capability fixture. The figures add resident memory for Interlinked and the WebKit GPU, network, and page processes created during the run.
+
+| Loaded tabs | Aggregate RSS |
+| ---: | ---: |
+| 10 | 429.5 MiB |
+| 50 | 1,432.2 MiB |
+| 100 | 2,373.7 MiB |
+
+These are pre-pressure measurements. On a warning, the policy targets 75 percent of live pages with a floor of eight. On a critical event, it targets 40 percent with a floor of three. Protected pages stay live even when that prevents the target.
 
 `project.yml` defines the Xcode project. After changing it, regenerate with `xcodegen generate`. The generated project is checked in so normal builds only need Xcode. Build products and local validation output belong in the ignored `build/` directory.
