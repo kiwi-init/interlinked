@@ -72,9 +72,8 @@ final class PaneHosts {
 
     @discardableResult
     func focus(_ pane: PaneID) -> Bool {
-        guard let page = browsers[pane], let window = page.window else { return false }
+        guard let page = browsers[pane], page.window != nil else { return false }
         page.focus()
-        window.makeFirstResponder(page.nativeView)
         return true
     }
 
