@@ -101,6 +101,43 @@ final class CommandKeyStateTests: XCTestCase {
     }
 }
 
+final class CopiedPageURLFeedbackTests: XCTestCase {
+    func testCopiedFeedbackRequiresAnActualCopiedURL() {
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: nil, current: nil))
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: nil, current: "https://example.com"))
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: "https://example.com", current: nil))
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: "https://a.example", current: "https://b.example"))
+        XCTAssertTrue(CopiedPageURLFeedback.isShowing(copied: "https://example.com/", current: "https://example.com/"))
+    }
+}
+
+final class NewTabPageTests: XCTestCase {
+    func testEmptyLinesAreNewTabs() {
+        XCTAssertTrue(NewTabPage.matches(line: ""))
+        XCTAssertTrue(NewTabPage.matches(line: "   \n"))
+        XCTAssertFalse(NewTabPage.matches(line: "about:blank"))
+        XCTAssertFalse(NewTabPage.matches(line: "https://example.com"))
+    }
+
+    func testNewTabHandleStaysExpandedWithoutHover() {
+        XCTAssertTrue(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, identityOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+        ))
+        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
+            overviewOpen: true, identityOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+        ))
+        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, identityOpen: false, hovering: false, editing: false, isNewTab: false, voiceActive: false
+        ))
+        XCTAssertTrue(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, identityOpen: false, hovering: true, editing: false, isNewTab: false, voiceActive: false
+        ))
+        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, identityOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: true
+        ))
+    }
+}
+
 final class PageURLCopyShortcutTests: XCTestCase {
     func testOnlyExactCommandShiftCMatches() {
         XCTAssertTrue(PageURLCopyShortcut.matches(

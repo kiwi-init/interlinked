@@ -7,21 +7,36 @@ struct LineEditor: View {
 
     var body: some View {
         WorkInput(text: Binding(
-                get: { workspace.editing?.text ?? workspace.activePane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? "" },
+                get: {
+                    if let text = workspace.editing?.text { return text }
+                    if workspace.isEmptyActivePage { return "" }
+                    return workspace.activePane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? ""
+                },
                 set: {
                     if workspace.editing == nil { workspace.editActiveLine() }
                     workspace.editing?.text = $0
                 }
             ), placeholder: workspace.editing?.tab == nil ? "Search or address" : "Tab name",
                       identifier: "line-editor", fontSize: 12, palette: palette,
-                      submit: workspace.submitLine, cancel: workspace.discardLine,
+                      submit: workspace.submitLine,
+                      cancel: {
+                          workspace.discardLine()
+                          workspace.beginEmptyPageEditingIfNeeded()
+                      },
                       moveSelection: workspace.moveSearchSelection,
-                      autofocus: workspace.editing != nil,
-                      beginEditing: { if workspace.editing == nil { workspace.editActiveLine() } })
+                      autofocus: workspace.editing != nil || (workspace.isEmptyActivePage && !workspace.overviewOpen && !workspace.identityOpen),
+                      beginEditing: {
+                          if workspace.editing == nil, !workspace.overviewOpen, !workspace.identityOpen {
+                              workspace.editActiveLine()
+                          }
+                      })
             .id(workspace.editing?.target ?? workspace.activePane.map(LineTarget.pane))
             .frame(height: 22)
         .foregroundStyle(palette.text)
-        .onExitCommand { workspace.discardLine() }
+        .onExitCommand {
+            workspace.discardLine()
+            workspace.beginEmptyPageEditingIfNeeded()
+        }
     }
 }
 

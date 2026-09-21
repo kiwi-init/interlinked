@@ -72,6 +72,34 @@ struct PageURLCopyShortcut {
     }
 }
 
+enum CopiedPageURLFeedback {
+    /// Optional strings compare equal when both are nil, so a new tab would
+    /// otherwise show "Copied" without a copy ever happening.
+    static func isShowing(copied: String?, current: String?) -> Bool {
+        guard let copied, let current else { return false }
+        return copied == current
+    }
+}
+
+enum NewTabPage {
+    static func matches(line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+enum PageHandleExpansion {
+    static func showsOpenWork(
+        overviewOpen: Bool,
+        identityOpen: Bool,
+        hovering: Bool,
+        editing: Bool,
+        isNewTab: Bool,
+        voiceActive: Bool
+    ) -> Bool {
+        !overviewOpen && !identityOpen && !voiceActive && (hovering || editing || isNewTab)
+    }
+}
+
 enum ToolboxShortcut: Equatable {
     case filters
     case find

@@ -157,6 +157,7 @@ enum Control {
                 kind = .blank
             }
             workspace.openTab(kind: kind)
+            workspace.beginEmptyPageEditingIfNeeded()
             return ok()
 
         case "open-url":
