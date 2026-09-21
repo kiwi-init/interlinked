@@ -58,7 +58,7 @@ protocol PageJavaScriptEvaluating: AnyObject {
         },
         extract() {
           const root = document.body;
-          const passages = [];
+          const passages = [], limit = 1000; let truncated = false;
           const elements = Array.from(root.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,[role="heading"],blockquote,pre,td,a,button,[role="button"],[role="link"],img,video'));
           const seen = new Set();
           for (const node of elements) {
@@ -67,11 +67,12 @@ protocol PageJavaScriptEvaluating: AnyObject {
             const role = node.matches('img') ? 'image' : node.matches('video') ? 'video' : node.matches('a,[role="link"]') ? 'link' : node.matches('button,[role="button"]') ? 'button' : node.matches('h1,h2,h3,h4,h5,h6,[role="heading"]') ? 'heading' : 'passage';
             const text = nodeText(node), media = role==='image' || role==='video';
             if (!text.length || (!media && seen.has(text))) continue;
+            if (passages.length>=limit) { truncated=true; continue; }
             if (!ids.has(node)) ids.set(node, 'p'+(++next));
             const id = ids.get(node); nodes.set(id,node); if (!media) seen.add(text);
             passages.push({id,text,role});
           }
-          return {document:documentID,url:location.href,passages,truncated:false};
+          return {document:documentID,url:location.href,passages,truncated};
         },
         extractFilterCandidates() {
           filterCandidates.clear();
@@ -142,7 +143,7 @@ protocol PageJavaScriptEvaluating: AnyObject {
           const ranges=[]; let active;
           for (const item of items) {
             const node=nodes.get(item.id);
-            if (!node?.isConnected || clean(node.innerText)!==item.text) return false;
+            if (!node?.isConnected || nodeText(node)!==item.text) return false;
             const range=window.document.createRange(); range.selectNodeContents(node); ranges.push(range);
             if (item.id===current) active={node,range};
           }
@@ -236,7 +237,7 @@ protocol PageJavaScriptEvaluating: AnyObject {
           window.addEventListener('resize',resized);
           const resize=new ResizeObserver(schedule);resize.observe(window.document.body);
           const mutations=new MutationObserver(()=>{
-            if (items.some(item=>!nodes.get(item.id)?.isConnected || clean(nodes.get(item.id).innerText)!==item.text)) this.clear();
+            if (items.some(item=>!nodes.get(item.id)?.isConnected || nodeText(nodes.get(item.id))!==item.text)) this.clear();
             else schedule();
           });
           items.forEach(item=>mutations.observe(nodes.get(item.id),{childList:true,characterData:true,subtree:true}));

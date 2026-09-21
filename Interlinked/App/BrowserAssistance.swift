@@ -113,13 +113,17 @@ final class BrowserAssistance {
     }
 
     func committed(_ pane: PaneID) {
+        let wasActive = workspace?.activePane == pane
         for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)", "filters-\(pane.rawValue)"] { cancel(key) }
         metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); grants.removeValue(forKey: pane)
         readingResults.removeValue(forKey: pane); readingInFlight.removeValue(forKey: pane)
         filterResults.removeValue(forKey: pane)
         if labelEffect?.pane == pane { labelEffect = nil }
         cancel("groups"); groups = []
-        if workspace?.activePane == pane { closePanel(); closeFilters() }
+        if wasActive {
+            filterBusy = false
+            closePanel(); closeFilters()
+        }
     }
     func loaded(_ pane: PaneID, page view: ChromiumPage) {
         let key = "metadata-\(pane.rawValue)", revision = token("metadata-\(pane.rawValue)"), url = view.url
@@ -176,6 +180,7 @@ final class BrowserAssistance {
         criticalReadingMode.save()
         for key in Array(tasks.keys) { cancel(key) }
         readingInFlight.removeAll()
+        filterBusy = false
         if !enabled || criticalReadingMode == .onRequest {
             readingResults.removeAll()
             if panel == .reading { closePanel() }
@@ -194,11 +199,9 @@ final class BrowserAssistance {
     }
     func clearHistory() {
         cancel("history"); history.clear(); historyResults = []; historyStatus = "Vault cleared."
-        Task { await intelligence.reset() }
     }
     func forgetVisit(_ id: UUID) {
         cancel("history"); history.remove(id); historyResults.removeAll { $0.id == id }
-        Task { await intelligence.reset() }
     }
     func clearDecisionCache() {
         cacheStatus = "Clearing…"
@@ -228,9 +231,12 @@ final class BrowserAssistance {
         } catch { status = errorMessage(error) }
     }
     func revokePage() {
-        if let pane = workspace?.activePane { grants.removeValue(forKey: pane); cancel("label-\(pane.rawValue)") }
+        if let pane = workspace?.activePane {
+            grants.removeValue(forKey: pane)
+            readingInFlight.removeValue(forKey: pane)
+            cancel("label-\(pane.rawValue)")
+        }
         cancel("find"); cancel("reading"); cancel("groups"); busy = false; matches = []; findings = []; groups = []
-        Task { await intelligence.reset() }
     }
     private func selectLabel(_ pane: PaneID, page: PageMetadata) {
         let key = "label-\(pane.rawValue)", revision = token("label-\(pane.rawValue)")
@@ -259,9 +265,16 @@ final class BrowserAssistance {
         let key = "vault", revision = token("vault"), url = view.url
         vaultStatus = "Saving page…"
         tasks[key] = Task { [weak self, weak view] in
-            guard let self, let view else { return }
+            guard let self else { return }
+            defer {
+                if self.accepts(key, revision), self.vaultStatus == "Saving page…" {
+                    self.vaultStatus = "The page changed before it could be saved."
+                }
+            }
+            guard let view else { return }
             do {
                 let page = try await PageTextBridge.metadata(view)
+                guard self.accepts(key, revision), view.url == url else { return }
                 guard page.publicWebPage else { self.vaultStatus = "Local, editable, and password pages are not saved."; return }
                 let extract = try await PageTextBridge.extract(view)
                 guard self.accepts(key, revision), view.url == url, page.document == extract.document else { return }
@@ -280,11 +293,15 @@ final class BrowserAssistance {
         findChanged()
     }
     func closePanel() {
+        let wasFinding = panel == .find
         cancel("find"); cancel("exact"); cancel("reading"); panel = nil; nextPanel = nil
         readingPanelOpen = false
         if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
         busy = false; matches = []; findings = []; status = ""
-        if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
+        if let pane = workspace?.activePane, let view = workspace?.hosts.existingBrowser(pane) {
+            if wasFinding { view.stopFinding() }
+            PageTextBridge.clear(view)
+        }
     }
 
     func openFilters() {
@@ -333,7 +350,13 @@ final class BrowserAssistance {
         let key = "filters-\(pane.rawValue)", revision = token(key)
         if workspace?.activePane == pane { filterBusy = !rules.isEmpty }
         tasks[key] = Task { [weak self, weak view] in
-            guard let self, let view else { return }
+            guard let self else { return }
+            defer {
+                if self.accepts(key, revision), self.workspace?.activePane == pane {
+                    self.filterBusy = false
+                }
+            }
+            guard let view else { return }
             await PageTextBridge.clearFilters(view)
             guard self.accepts(key, revision), self.metadata[pane]?.document == page.document else { return }
             guard page.publicWebPage, !rules.isEmpty else {
@@ -386,7 +409,10 @@ final class BrowserAssistance {
     }
     func findChanged() {
         cancel("find"); cancel("exact"); matches = []; findScores = [:]; matchIndex = 0; busy = false; exactMatched = false
-        if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
+        if let pane = workspace?.activePane, let view = workspace?.hosts.existingBrowser(pane) {
+            view.stopFinding()
+            PageTextBridge.clear(view)
+        }
         guard panel == .find else { return }
         if query.isEmpty { status = "Find in this page"; return }
         exactFind(backwards: false)
@@ -453,22 +479,47 @@ final class BrowserAssistance {
     }
     private func runPassages(reading: Bool) {
         let key = reading ? "reading" : "find", revision = token(reading ? "reading" : "find")
-        guard let pane = workspace?.activePane, let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) else { return }
+        guard let pane = workspace?.activePane else {
+            busy = false
+            if reading { readingInFlight.removeAll() }
+            return
+        }
+        guard let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) else {
+            busy = false
+            if reading { readingInFlight.removeValue(forKey: pane) }
+            status = "The page changed. Run the search or check again."
+            return
+        }
         let query = query
         if reading { readingInFlight[pane] = page.document }
         busy = true; status = reading ? "Checking selected passages…" : "Finding related passages…"
         tasks[key] = Task { [weak self, weak view] in
-            guard let self, let view else { return }
+            guard let self else { return }
+            defer {
+                if self.accepts(key, revision) {
+                    self.busy = false
+                    if reading { self.readingInFlight.removeValue(forKey: pane) }
+                }
+            }
+            guard let view else {
+                if self.accepts(key, revision) { self.status = "The page changed. Run the search or check again." }
+                return
+            }
             do {
                 try self.requireReady()
                 try await Task.sleep(for: .milliseconds(400))
                 let extract = try await PageTextBridge.extract(view)
-                guard self.accepts(key, revision), extract.document == page.document, extract.url == view.url?.absoluteString else { return }
-                let candidates = reading ? PassageDecisions.readingCandidates(extract.passages) : extract.passages
+                guard self.accepts(key, revision) else { return }
+                guard extract.document == page.document, extract.url == view.url?.absoluteString else {
+                    self.status = "The page changed. Run the search or check again."
+                    return
+                }
+                let candidates = reading
+                    ? PassageDecisions.readingCandidates(extract.passages)
+                    : PassageDecisions.candidates(query: query, passages: extract.passages)
                 guard !candidates.isEmpty else {
-                    self.busy = false; self.status = "No readable passages found. Exact find still works."
+                    self.status = "No readable passages found. Exact find still works."
                     if reading {
-                        self.readingInFlight.removeValue(forKey: pane)
                         self.readingResults[pane] = ReadingResult(document: page.document, findings: [], status: self.status)
                     }
                     return
@@ -483,23 +534,31 @@ final class BrowserAssistance {
                             : "Checking passage batch \(index + 1) of \(batches.count)…"
                         let partial = try await self.intelligence.criticalReading(batch)
                         try Task.checkCancellation()
-                        guard self.accepts(key, revision), self.workspace?.activePane == pane,
-                              self.grants[pane] == page.document, view.url?.absoluteString == extract.url else { return }
+                        guard self.accepts(key, revision) else { return }
+                        guard self.workspace?.activePane == pane, self.grants[pane] == page.document,
+                              view.url?.absoluteString == extract.url else {
+                            self.status = "The page changed. Run the search or check again."
+                            return
+                        }
                         readingFindings.append(contentsOf: partial.value)
                     }
                 } else {
                     meaningDecision = try await self.intelligence.meaningFind(query: query, passages: candidates).value
                 }
-                guard self.accepts(key, revision), self.workspace?.activePane == pane, self.grants[pane] == page.document,
-                      view.url?.absoluteString == extract.url else { return }
-                self.resultDocument = extract.document; self.busy = false
+                guard self.accepts(key, revision) else { return }
+                guard self.workspace?.activePane == pane, self.grants[pane] == page.document,
+                      view.url?.absoluteString == extract.url else {
+                    self.status = "The page changed. Run the search or check again."
+                    return
+                }
+                self.resultDocument = extract.document
                 self.lastDecisionStatus = "Jev decision received for " + (reading ? "reading" : "find")
-                let coverage = "Checked \(candidates.count) passages" + (extract.truncated ? "; page coverage is limited." : ".")
+                let limited = extract.truncated || candidates.count < extract.passages.count
+                let coverage = "Checked \(candidates.count) passages" + (limited ? "; page coverage is limited." : ".")
                 if reading {
                     self.findings = readingFindings
                     self.status = (self.findings.isEmpty ? "No clear signals selected. " : "Possible wording signals. ") + coverage
                     let shown = await PageTextBridge.annotate(self.findings, document: extract.document, view: view)
-                    self.readingInFlight.removeValue(forKey: pane)
                     if !self.accepts(key, revision) || self.panel != .reading { return }
                     if shown {
                         self.readingResults[pane] = ReadingResult(document: extract.document, findings: self.findings, status: self.status)
@@ -515,8 +574,7 @@ final class BrowserAssistance {
                 }
             } catch {
                 guard self.accepts(key, revision) else { return }
-                if reading { self.readingInFlight.removeValue(forKey: pane) }
-                self.busy = false; self.status = self.errorMessage(error)
+                self.status = self.errorMessage(error)
             }
         }
     }
