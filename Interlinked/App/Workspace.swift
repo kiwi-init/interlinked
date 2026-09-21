@@ -670,7 +670,10 @@ final class Workspace {
         if quickSwitchOpen { quickSwitchOpen = false }
         if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
         hosts.touch(pane)
-        if activePane != pane { activatePane(pane) }
+        if activePane != pane {
+            activatePane(pane)
+            beginEmptyPageEditingIfNeeded()
+        }
     }
 
     @discardableResult
@@ -691,6 +694,47 @@ final class Workspace {
 
     func closeActive() {
         if let pane = activePane { _ = closePane(pane) }
+    }
+
+    // MARK: - Split view
+
+    var isSplit: Bool { activeTab?.isSplit ?? false }
+
+    /// Opens a new page beside the focused one. It takes focus.
+    func splitActive() {
+        guard let pane = activePane, activeTab?.canSplit == true else { return }
+        if editing != nil { discardLine() }
+        overviewOpen = false
+        let new = takePane()
+        guard tabs[active].split(pane, axis: .columns, new: new, id: SplitID(nextSplit)) else { return }
+        nextSplit += 1
+        surfaces.setKind(new, .browser)
+        assistance.changedTab()
+        keep()
+        editActiveLine()
+    }
+
+    /// Leaves split view without losing a page: the pane beside the focused
+    /// one moves to its own tab, right after this one.
+    func unsplit() {
+        guard let tab = activeTab, let other = tab.otherPane, let pane = activePane else { return }
+        if editing != nil { discardLine() }
+        tabs[active].close(other)
+        tabs[active].active = pane
+        tabs.insert(Tab(id: TabID(nextTab), pane: other), at: active + 1)
+        nextTab += 1
+        keep()
+        restoreFocus()
+    }
+
+    func toggleSplitView() {
+        isSplit ? unsplit() : splitActive()
+    }
+
+    func focusOtherPane() {
+        guard let other = activeTab?.otherPane else { return }
+        clickPane(other)
+        restoreFocus()
     }
 
     func dropTab(_ dragged: TabID, slot: Int) {
@@ -1002,10 +1046,13 @@ final class Workspace {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             self?.synchronizeCommandKeyState()
             guard !PageControlRegion.contains(event) else { return event }
-            guard let self, let pane = self.activePane, let browser = self.hosts.existingBrowser(pane),
-                  browser.window === event.window, let root = event.window?.contentView,
+            // In split view either page can be clicked; the one clicked leads.
+            guard let self, let tab = self.activeTab, let root = event.window?.contentView,
                   let hit = root.hitTest(root.convert(event.locationInWindow, from: nil)),
-                  hit === browser.nativeView || hit.isDescendant(of: browser.nativeView) else { return event }
+                  let pane = tab.panes.first(where: { pane in
+                      guard let browser = self.hosts.existingBrowser(pane), browser.window === event.window else { return false }
+                      return hit === browser.nativeView || hit.isDescendant(of: browser.nativeView)
+                  }) else { return event }
             self.clickPane(pane)
             return event // Let links, selection and form controls receive the original click.
         }
@@ -1119,6 +1166,10 @@ final class Workspace {
             assistance.moveMatch(-1)
         case ("j", .command):
             toggleDownloads()
+        case ("\\", .command):
+            toggleSplitView()
+        case ("\\", [.command, .option]):
+            focusOtherPane()
         case ("s", [.command, .shift]):
             sharingScreenMode.toggle()
         case ("w", .command):

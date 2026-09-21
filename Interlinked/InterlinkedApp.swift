@@ -28,6 +28,12 @@ struct InterlinkedApp: App {
                     .keyboardShortcut("s", modifiers: [.command, .control])
             }
             CommandMenu("Tab") {
+                Button(workspace.isSplit ? "Move Side Page to Its Own Tab" : "Split View") { workspace.toggleSplitView() }
+                    .keyboardShortcut("\\", modifiers: .command)
+                Button("Focus Other Page") { workspace.focusOtherPane() }
+                    .keyboardShortcut("\\", modifiers: [.command, .option])
+                    .disabled(!workspace.isSplit)
+                Divider()
                 Button("Next Tab") { workspace.cycleTabs(1) }
                     .keyboardShortcut("]", modifiers: .command)
                 Button("Previous Tab") { workspace.cycleTabs(-1) }

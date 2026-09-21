@@ -7,6 +7,7 @@ enum Control {
         "new-tab [kind]",
         "open-url URL",
         "sharing-mode on|off|state|check",
+        "split-view on|off|other|state",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -423,6 +424,21 @@ enum Control {
             default:
                 return error("builtins takes state, blocking on|off, or dark off|system|always")
             }
+
+        case "split-view":
+            switch words.first ?? "state" {
+            case "on": if !workspace.isSplit { workspace.splitActive() }
+            case "off": workspace.unsplit()
+            case "other": workspace.focusOtherPane()
+            case "state": break
+            default: return error("split-view takes on, off, other, or state")
+            }
+            return json([
+                "split": workspace.isSplit,
+                "panes": workspace.activeTab?.panes.map { Int($0.rawValue) } ?? [],
+                "active": workspace.activePane.map { Int($0.rawValue) } ?? 0,
+                "tabs": workspace.tabs.count,
+            ])
 
         case "sharing-mode":
             switch words.first ?? "state" {

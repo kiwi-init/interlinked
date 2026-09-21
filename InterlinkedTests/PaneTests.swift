@@ -271,6 +271,29 @@ final class PaneTests: XCTestCase {
     }
 }
 
+final class SplitViewTests: XCTestCase {
+    func testATabSplitsIntoTwoPagesAtMost() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertFalse(tab.isSplit)
+        XCTAssertTrue(tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1)))
+        XCTAssertEqual(tab.panes, [PaneID(1), PaneID(2)])
+        XCTAssertEqual(tab.active, PaneID(2))
+        XCTAssertEqual(tab.otherPane, PaneID(1))
+        XCTAssertFalse(tab.canSplit)
+        XCTAssertFalse(tab.split(PaneID(2), axis: .rows, new: PaneID(3), id: SplitID(2)))
+        XCTAssertEqual(tab.panes.count, Tab.maxPanes)
+    }
+
+    func testClosingOnePageOfASplitKeepsTheOther() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        _ = tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        XCTAssertTrue(tab.close(PaneID(2)))
+        XCTAssertEqual(tab.panes, [PaneID(1)])
+        XCTAssertEqual(tab.active, PaneID(1))
+        XCTAssertNil(tab.otherPane)
+    }
+}
+
 final class IntentTests: XCTestCase {
     func testBrowserCommands() {
         XCTAssertEqual(Intent.command("new tab"), "new-tab")

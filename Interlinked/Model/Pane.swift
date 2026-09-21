@@ -373,10 +373,19 @@ extension Pane: Codable {
 }
 
 struct Tab: Codable, Equatable, Identifiable {
+    /// Split view shows two pages side by side, never more.
+    static let maxPanes = 2
+
     var id: TabID
     var root: Pane
     var active: PaneID
     var name: String?
+
+    var panes: [PaneID] { root.leaves() }
+    var isSplit: Bool { panes.count > 1 }
+    var canSplit: Bool { panes.count < Self.maxPanes }
+    /// The pane beside the focused one in split view.
+    var otherPane: PaneID? { panes.first { $0 != active } }
 
     init(id: TabID, pane: PaneID) {
         self.id = id
@@ -389,6 +398,7 @@ struct Tab: Codable, Equatable, Identifiable {
 
     @discardableResult
     mutating func split(_ target: PaneID, axis: SplitAxis, new: PaneID, id: SplitID) -> Bool {
+        guard canSplit else { return false }
         if root.split(target, axis: axis, new: new, id: id) {
             active = new
             return true

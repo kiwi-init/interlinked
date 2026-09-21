@@ -48,7 +48,7 @@ struct ContentView: View {
         // in the window; opacity alone leaves Chromium's child view visible.
         Group {
             if let tab = workspace.activeTab {
-                BrowserPage(pane: tab.active, palette: palette)
+                SplitLayout(tab: tab, palette: palette)
                     .id(tab.id.rawValue)
             } else {
                 palette.pane

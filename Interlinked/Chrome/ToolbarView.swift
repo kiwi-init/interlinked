@@ -88,7 +88,7 @@ struct PageHandle: View {
             let tabsWidth = quickTabs.map { tab in
                 (workspace.title(tab) as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width + 96
             }.max() ?? 0
-            return CGSize(width: min(max(!workspace.searchResults.isEmpty ? 320 : 280, tabsWidth, textWidth + 76), available.width - 36),
+            return CGSize(width: min(max(!workspace.searchResults.isEmpty ? 320 : 312, tabsWidth, textWidth + 76), available.width - 36),
                           height: controlsHeight + resultsHeight)
         }
         let labelWidth = (identity as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
@@ -128,6 +128,10 @@ struct PageHandle: View {
                             }
                             .help("Downloads · ⌘J")
                         shareControl
+                        browserControl(workspace.isSplit ? "Move side page to its own tab" : "Split view",
+                                       symbol: workspace.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
+                                       id: "split-view-button", action: workspace.toggleSplitView)
+                            .help(workspace.isSplit ? "Move the other page to its own tab · ⌘\\" : "Split view · ⌘\\")
                         browserControl("New page", symbol: "plus", id: "new-page", action: workspace.newPage)
                         browserControl("Close page", symbol: "xmark", id: "browser-close") {
                             workspace.discardLine()

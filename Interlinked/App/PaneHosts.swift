@@ -209,7 +209,8 @@ final class PaneHosts {
         guard goal > 0 else { return }
         let candidates = browsers.map { pane, page in
             var protections: TabDiscardProtection = []
-            if pane == workspace.activePane { protections.insert(.active) }
+            // Both pages of a split are on screen.
+            if workspace.activeTab?.contains(pane) == true { protections.insert(.active) }
             if uploadPanes.contains(pane) { protections.insert(.upload) }
             if workspace.downloads.hasActiveDownload(for: page) { protections.insert(.download) }
             return TabMemoryCandidate(pane: pane, lastUsed: lifecycle.lastUsed[pane] ?? .distantPast,
