@@ -1,0 +1,23 @@
+#!/bin/sh
+# Fail unless the given app bundle carries Apple's managed browser passkey
+# entitlement (arbitrary relying parties). Used by script/testflight as the
+# #14 release gate and by hand to check approval status.
+# Usage: script/assert-passkey-entitlement /path/to/Interlinked.app
+set -eu
+
+app=${1:?Usage: assert-passkey-entitlement /path/to/Interlinked.app}
+key='com\.apple\.developer\.web-browser\.public-key-credential'
+
+value=$((codesign -d --entitlements :- "$app" 2>/dev/null | \
+  plutil -extract "$key" raw -o - - 2>/dev/null) || true)
+
+if [ "$value" = "true" ]; then
+  echo "Passkey entitlement present in $app."
+  exit 0
+fi
+
+echo "error: $app is missing com.apple.developer.web-browser.public-key-credential." >&2
+echo "iCloud Keychain passkeys for arbitrary sites stay unavailable until Apple" >&2
+echo "approves the managed entitlement request (issue #14) and the archive is" >&2
+echo "signed with Interlinked/InterlinkedPasskeys.entitlements." >&2
+exit 1

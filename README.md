@@ -85,6 +85,17 @@ Choose **Interlinked → About Interlinked** to inspect the exact Critical Readi
 
 Voice needs microphone and speech-recognition permission, which macOS asks for the first time.
 
+## Passkeys
+
+Pages render with Chromium (CEF Alloy runtime), so WebAuthn runs inside Chromium's credential UI. Full passkey support has one remaining gate:
+
+- **Apple approval (requested, pending).** iCloud Keychain passkeys for arbitrary sites need the managed `com.apple.developer.web-browser.public-key-credential` entitlement. Until Apple enables it for this team, signed builds cannot create or use iCloud Keychain passkeys, and `script/testflight` stops with instructions instead of shipping without them (`INTERLINKED_ALLOW_MISSING_PASSKEY_ENTITLEMENT=1` bypasses the gate for emergency releases only).
+- **What works without it.** Ordinary `script/run` builds stay ad-hoc signed and entitlement-free on purpose; local Chromium-profile credentials and USB security keys are expected to keep working there.
+
+To check any bundle: `script/assert-passkey-entitlement /path/to/Interlinked.app`. To build the provisioned variant once Apple approves: `script/run-passkeys` (signs with `Interlinked/InterlinkedPasskeys.entitlements`); while approval is pending, its signing failure is the status check.
+
+Manual validation (issue #14): register and authenticate on at least two independent providers, covering Touch ID success, cancellation, and fallback. The local fixture (`python3 test-fixtures/server.py`, then `http://127.0.0.1:8765`) has a Passkeys probe for platform-authenticator and conditional-mediation availability without needing a real ceremony. First use also needs the macOS grant under System Settings → Passkeys Access for Web Browsers (`tccutil reset WebBrowserPublicKeyCredential` resets it).
+
 ## Development
 
 `build/Build/Products/Debug/interlinked commands` lists the local control API. For example:
@@ -108,7 +119,7 @@ xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Deb
   -derivedDataPath build -destination 'platform=macOS' test
 ```
 
-The local browser-capability fixture covers downloads, popup behavior, forms, and navigation cases:
+The local browser-capability fixture covers downloads, popup behavior, forms, passkey capability probing, and navigation cases:
 
 ```sh
 python3 test-fixtures/server.py
