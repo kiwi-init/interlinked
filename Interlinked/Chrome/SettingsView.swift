@@ -24,7 +24,7 @@ private extension SettingsDestination {
 
     var summary: String {
         switch self {
-        case .general: "The site menu and downloads."
+        case .general: "The site menu, useful page information, and downloads."
         case .pages: "Blocking and dark pages, applied to every site you visit."
         case .intelligence: "Which models Interlinked uses, and when they run."
         case .sites: "Everything you have allowed, denied, or changed for a single site."
@@ -35,11 +35,11 @@ private extension SettingsDestination {
     /// Search matches what a pane contains, not only its name.
     var keywords: [String] {
         switch self {
-        case .general: ["site menu", "header", "downloads", "notifications"]
+        case .general: ["site menu", "header", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
         case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "critical reading", "always on", "labels", "meaning search"]
         case .sites: ["permissions", "camera", "microphone", "location", "grants", "exceptions", "revoke", "blocking off", "kept light", "navigation"]
-        case .privacy: ["cache", "activity", "audit", "export", "clear", "data", "signed in", "passwords"]
+        case .privacy: ["sharing screen mode", "screen sharing", "presenting", "blur", "cache", "activity", "audit", "export", "clear", "data", "signed in", "passwords"]
         }
     }
 
@@ -114,6 +114,7 @@ private struct GeneralSettingsPane: View {
 
     var body: some View {
         let downloads = workspace.downloads
+        @Bindable var usefulInfo = workspace.usefulInfo
         Form {
             Section {
                 Toggle(isOn: Binding(
@@ -127,6 +128,33 @@ private struct GeneralSettingsPane: View {
                 .accessibilityIdentifier("settings-site-menu")
             } header: {
                 SettingsHero(section: .general, firstSection: "Site menu")
+            }
+
+            Section {
+                Toggle(isOn: $usefulInfo.showsAddress) {
+                    Label {
+                        Text("Address")
+                        Text("A button above the toolbox copies the page's street address.")
+                    } icon: {
+                        Image(systemName: "map")
+                    }
+                }
+                .toggleStyle(PointingSwitch())
+                .accessibilityIdentifier("settings-useful-address")
+                Toggle(isOn: $usefulInfo.showsContact) {
+                    Label {
+                        Text("Contact")
+                        Text("Copies the page's phone number or email. With several, the button opens to let you choose.")
+                    } icon: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                }
+                .toggleStyle(PointingSwitch())
+                .accessibilityIdentifier("settings-useful-contact")
+            } header: {
+                Text("Useful information")
+            } footer: {
+                SettingsFooter("Found on this Mac from the page's own contact details. Nothing is sent to Jev or any model.")
             }
 
             Section("Downloads") {
@@ -502,6 +530,22 @@ private struct PrivacySettingsPane: View {
                 }
             } header: {
                 SettingsHero(section: .privacy, firstSection: "What leaves this Mac")
+            }
+
+            Section {
+                Toggle(isOn: Binding(
+                    get: { workspace.sharingScreenMode },
+                    set: { workspace.sharingScreenMode = $0 }
+                )) {
+                    Text("Sharing Screen Mode")
+                    Text("Blurs sensitive details on every page while you present or share your screen. ⇧⌘S turns it on or off.")
+                }
+                .toggleStyle(PointingSwitch())
+                .accessibilityIdentifier("settings-sharing-screen-mode")
+            } header: {
+                Text("Sharing Screen Mode")
+            } footer: {
+                SettingsFooter("Covers email addresses, phone numbers, card numbers, bank accounts (IBAN), CPF, CNPJ, and Social Security numbers, API keys and tokens, labeled passwords and ID numbers, and form fields that hold them. It runs inside the page before it appears, and nothing it finds leaves the page. Text in images is not covered.")
             }
 
             Section {

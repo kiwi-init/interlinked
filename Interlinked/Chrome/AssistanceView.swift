@@ -99,13 +99,14 @@ struct Toolbox: View {
     private var expanded: Bool {
         hovering || workspace.rightCommandKeyHeld || assistant.panel == .find || assistant.readingPanelOpen
     }
-    private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 190 }
+    private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 250 }
     private var menuRows: CGFloat {
-        CGFloat(assistant.criticalReadingMode == .onRequest ? 2 : 1)
+        CGFloat(assistant.criticalReadingMode == .onRequest ? 3 : 2)
     }
+    private var collapsedWidth: CGFloat { workspace.sharingScreenMode ? 136 : 108 }
     private var width: CGFloat {
         if assistant.readingPanelOpen { return 340 }
-        return expanded ? menuWidth : 108
+        return expanded ? menuWidth : collapsedWidth
     }
     private var height: CGFloat {
         if assistant.readingPanelOpen { return 176 }
@@ -142,16 +143,25 @@ struct Toolbox: View {
                     .accessibilityIdentifier("toolbox-settings-button")
                 } else {
                     HStack(spacing: 0) {
+                        if workspace.sharingScreenMode {
+                            // Always visible while it is on, so it is never forgotten.
+                            Image(systemName: "eye.slash.fill")
+                                .foregroundStyle(palette.accent)
+                                .frame(width: 28, height: 44)
+                                .padding(.leading, 8)
+                                .help("Sharing Screen Mode is on · ⇧⌘S")
+                        }
                         Image(systemName: "wrench.and.screwdriver")
-                            .frame(width: 44, height: 44)
+                            .frame(width: workspace.sharingScreenMode ? 28 : 44, height: 44)
                         Text("Toolbox")
                             .font(.system(size: 12, weight: .medium))
+                            .padding(.leading, workspace.sharingScreenMode ? 6 : 0)
                             .padding(.trailing, 16)
                     }
-                    .frame(width: 108, height: 44, alignment: .trailing)
+                    .frame(width: collapsedWidth, height: 44, alignment: .trailing)
                     .contentShape(Rectangle())
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Toolbox")
+                    .accessibilityLabel(workspace.sharingScreenMode ? "Toolbox, Sharing Screen Mode on" : "Toolbox")
                     .accessibilityHint("Hover or hold right Command to show page tools")
                 }
             }
@@ -463,6 +473,16 @@ struct PageTools: View {
                 .accessibilityIdentifier("page-reading-button")
                 .help(assistant.panel == .reading ? assistant.status : "Review wording in this page")
             }
+
+            toolboxButton(workspace.sharingScreenMode ? "Sharing Screen Mode On" : "Sharing Screen Mode",
+                          symbol: workspace.sharingScreenMode ? "eye.slash.fill" : "eye.slash",
+                          shortcut: .sharingScreen) {
+                workspace.sharingScreenMode.toggle()
+            }
+            .foregroundStyle(workspace.sharingScreenMode ? palette.accent : palette.text)
+            .accessibilityLabel(workspace.sharingScreenMode ? "Turn off Sharing Screen Mode" : "Turn on Sharing Screen Mode")
+            .accessibilityIdentifier("toolbox-sharing-screen-button")
+            .help("Blur emails, phone numbers, card and document numbers, keys, and passwords on every page")
         }
         .buttonStyle(.pointing)
         .font(.system(size: 12, weight: .medium))

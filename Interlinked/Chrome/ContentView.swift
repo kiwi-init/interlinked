@@ -13,8 +13,11 @@ struct ContentView: View {
                     .padding(18)
             }
             .overlay(alignment: .bottomTrailing) {
-                Toolbox(palette: palette)
-                    .padding(18)
+                VStack(alignment: .trailing, spacing: 10) {
+                    UsefulInfoStack(palette: palette)
+                    Toolbox(palette: palette)
+                }
+                .padding(18)
             }
             .overlay(alignment: .top) {
                 if workspace.siteMenu != nil {

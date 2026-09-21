@@ -71,6 +71,16 @@ final class Workspace {
     let navigationExceptions = NavigationExceptionStore()
     let browserHistory = BrowserHistoryStore()
     let builtIns = PageBuiltIns()
+    let usefulInfo = UsefulInfo()
+    /// Blurs emails, phone numbers, card and document numbers, keys, and
+    /// passwords on every page, for presenting or sharing the screen.
+    var sharingScreenMode = SharingScreenModePreference.enabled() {
+        didSet {
+            guard sharingScreenMode != oldValue else { return }
+            SharingScreenModePreference.set(sharingScreenMode)
+            hosts.forEachBrowser { $0.sharingScreenShield = sharingScreenMode }
+        }
+    }
     var usesSiteMenu = SiteMenuPreference.enabled() {
         didSet {
             SiteMenuPreference.set(usesSiteMenu)
@@ -358,7 +368,8 @@ final class Workspace {
     }
 
     func escape() {
-        if pageHistoryOpen { pageHistoryOpen = false }
+        if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
+        else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
@@ -442,6 +453,7 @@ final class Workspace {
         }
         UserDefaults.standard.removeObject(forKey: "newTab.savedSites")
         builtIns.start(workspace: self)
+        usefulInfo.workspace = self
         assistance.workspace = self
         downloads.refreshNotificationStatus()
         if ProcessInfo.processInfo.arguments.contains("-interlinked-ui-testing") {
@@ -962,6 +974,7 @@ final class Workspace {
     private func forgetClosed() {
         hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) }, downloads: downloads)
         builtIns.forget(keep: paneAlive)
+        usefulInfo.prune(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
         siteMenus = siteMenus.filter { paneAlive($0.key) }
         declinedSiteMenu = declinedSiteMenu.filter(paneAlive)
@@ -1008,7 +1021,7 @@ final class Workspace {
                 return event
             }
             if event.keyCode == 53,
-               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.panel != nil ||
+               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.panel != nil || self.usefulInfo.contactOpen ||
                self.editing != nil || self.overviewOpen {
                 self.escape()
                 return nil
@@ -1106,6 +1119,8 @@ final class Workspace {
             assistance.moveMatch(-1)
         case ("j", .command):
             toggleDownloads()
+        case ("s", [.command, .shift]):
+            sharingScreenMode.toggle()
         case ("w", .command):
             closeActive()
         case ("l", .command):

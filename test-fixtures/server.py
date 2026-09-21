@@ -27,6 +27,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_inbox()
         if path == "/public-article":
             return self.send_bytes((ROOT / "public-article.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/contact":
+            return self.send_bytes((ROOT / "contact.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/runtime":
             return self.send_bytes((ROOT / "runtime.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/history/a":

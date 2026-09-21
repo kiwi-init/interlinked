@@ -579,6 +579,11 @@ std::atomic_bool g_running(false);
   BOOL _canGoForward;
   BOOL _closing;
   BOOL _forcedDarkMode;
+  // The document-start script and the identifier Chromium assigned to it.
+  NSString *_documentStartSource;
+  NSString *_documentStartIdentifier;
+  int _documentStartRequest;
+  NSMutableSet<NSNumber *> *_documentStartPending;
   // Content blocking scripts registered for the next document, and the
   // navigation they were registered for.
   NSMutableArray<NSString *> *_blockingScriptIdentifiers;
@@ -608,6 +613,7 @@ std::atomic_bool g_running(false);
 - (void)didReceiveBindingCall:(NSData *)parameters;
 - (void)removeBlockingScript:(NSString *)identifier;
 - (void)applyForcedDarkMode;
+- (void)applyDocumentStartScript;
 - (void)failPendingRequests;
 - (void)didReceiveEvaluation:(int)identifier
                      success:(BOOL)success
@@ -1126,6 +1132,47 @@ std::atomic_bool g_running(false);
   _browser->GetHost()->ExecuteDevToolsMethod(0, "Emulation.setAutoDarkModeOverride", automatic);
 }
 
+#pragma mark - Document-start script
+
+- (void)setDocumentStartScript:(NSString *)source stopScript:(NSString *)stopScript {
+  if ((source == nil && _documentStartSource == nil) || [source isEqualToString:_documentStartSource]) {
+    return;
+  }
+  NSString *previous = _documentStartIdentifier;
+  _documentStartIdentifier = nil;
+  _documentStartSource = [source copy];
+  if (!_browser) {
+    return;
+  }
+  if (previous) {
+    [self removeBlockingScript:previous];
+  }
+  if (!source && stopScript.length > 0) {
+    [self evaluateJavaScript:stopScript completion:^(id result, NSError *error) {}];
+  }
+  [self applyDocumentStartScript];
+}
+
+- (void)applyDocumentStartScript {
+  _documentStartRequest = 0;
+  if (!_browser || !_documentStartSource) {
+    return;
+  }
+  // Blink only runs new-document scripts while the Page domain is enabled.
+  _browser->GetHost()->ExecuteDevToolsMethod(0, "Page.enable", nullptr);
+  CefRefPtr<CefDictionaryValue> parameters = CefDictionaryValue::Create();
+  parameters->SetString("source", CefFromNSString(_documentStartSource));
+  parameters->SetBool("runImmediately", true);
+  _documentStartRequest = _browser->GetHost()->ExecuteDevToolsMethod(
+      0, "Page.addScriptToEvaluateOnNewDocument", parameters);
+  if (_documentStartRequest != 0) {
+    if (!_documentStartPending) {
+      _documentStartPending = [NSMutableSet set];
+    }
+    [_documentStartPending addObject:@(_documentStartRequest)];
+  }
+}
+
 #pragma mark - Content blocking
 
 static NSString *const ILCosmeticsWorld = @"interlinked-cosmetics";
@@ -1307,6 +1354,7 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   _browser = browser;
   _client->ObserveDevTools(browser);
   [self applyForcedDarkMode];
+  [self applyDocumentStartScript];
   [self updateBrowserVisibility];
   NSString *pendingURLString = _pendingURL.absoluteString;
   NSString *createdURLString = NSStringFromCef(browser->GetMainFrame()->GetURL());
@@ -1379,6 +1427,24 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
                      success:(BOOL)success
                         bytes:(const void *)bytes
                        length:(size_t)length {
+  if ([_documentStartPending containsObject:@(identifier)]) {
+    [_documentStartPending removeObject:@(identifier)];
+    NSDictionary *reply = success && length > 0
+        ? [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:bytes length:length] options:0 error:nil]
+        : nil;
+    NSString *script = [reply isKindOfClass:NSDictionary.class] ? reply[@"identifier"] : nil;
+    if (![script isKindOfClass:NSString.class]) {
+      return;
+    }
+    if (identifier == _documentStartRequest && _documentStartSource) {
+      _documentStartRequest = 0;
+      _documentStartIdentifier = script;
+    } else {
+      // Turned off or replaced before Chromium answered.
+      [self removeBlockingScript:script];
+    }
+    return;
+  }
   NSNumber *generation = _blockingScriptRequests[@(identifier)];
   if (generation) {
     [_blockingScriptRequests removeObjectForKey:@(identifier)];

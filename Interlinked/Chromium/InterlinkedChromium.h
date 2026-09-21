@@ -121,6 +121,10 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 - (instancetype)initWithFrame:(NSRect)frameRect;
 - (nullable instancetype)initWithCoder:(NSCoder *)coder;
 
+/// A script that runs at the start of every document in this view, before
+/// the page paints, and immediately in the current one. Setting nil removes
+/// it; |stopScript| then runs in the current document to undo its effects.
+- (void)setDocumentStartScript:(nullable NSString *)source stopScript:(nullable NSString *)stopScript;
 - (void)navigateToURL:(NSURL *)URL NS_SWIFT_NAME(navigate(to:));
 - (void)goBack;
 - (void)goForward;

@@ -6,6 +6,7 @@ enum Control {
     static let writeCommands = [
         "new-tab [kind]",
         "open-url URL",
+        "sharing-mode on|off|state|check",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -57,7 +58,7 @@ enum Control {
         switch command {
         case "commands":
             return json([
-                "reads": ["state", "commands", "identity", "measure-frames [pane]", "site-menu"],
+                "reads": ["state", "commands", "identity", "measure-frames [pane]", "site-menu", "useful-info"],
                 "writes": writeCommands,
             ])
 
@@ -422,6 +423,34 @@ enum Control {
             default:
                 return error("builtins takes state, blocking on|off, or dark off|system|always")
             }
+
+        case "sharing-mode":
+            switch words.first ?? "state" {
+            case "on": workspace.sharingScreenMode = true
+            case "off": workspace.sharingScreenMode = false
+            case "state": break
+            case "check":
+                // Writes what the active page covers, for fixtures.
+                guard let view = workspace.activePane.flatMap(workspace.hosts.existingBrowser) else { return error("no loaded web page") }
+                Task { @MainActor in
+                    let covered = try? await view.evaluateJavaScript("globalThis.__interlinkedShield?.covered() ?? null")
+                    let output = ProcessInfo.processInfo.environment["INTERLINKED_SHIELD_REPORT"] ?? "/tmp/interlinked-shield-report.json"
+                    try? json(["enabled": workspace.sharingScreenMode, "covered": covered ?? NSNull()]).write(toFile: output, atomically: true, encoding: .utf8)
+                }
+            default: return error("sharing-mode takes on, off, state, or check")
+            }
+            return json(["enabled": workspace.sharingScreenMode])
+
+        case "useful-info":
+            let info = workspace.usefulInfo
+            let found = workspace.activePane.flatMap { info.contacts[$0] }
+            return json([
+                "address_enabled": info.showsAddress,
+                "contact_enabled": info.showsContact,
+                "address": found?.address ?? "",
+                "phones": found?.phones ?? [],
+                "emails": found?.emails ?? [],
+            ])
 
         case "quit":
             workspace.quit()

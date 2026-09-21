@@ -67,6 +67,14 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
         set { nativeView.forcedDarkMode = newValue }
     }
     var rendersDark: Bool { forcedDarkMode }
+    /// Blurs sensitive text in every document this page loads.
+    var sharingScreenShield = false {
+        didSet {
+            guard sharingScreenShield != oldValue else { return }
+            nativeView.setDocumentStartScript(sharingScreenShield ? SharingScreenShield.script : nil,
+                                              stopScript: SharingScreenShield.stopScript)
+        }
+    }
 
     init(initialURL: URL) {
         nativeView = ILChromiumView(frame: .zero, initialURL: initialURL)

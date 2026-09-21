@@ -50,6 +50,11 @@ struct InterlinkedApp: App {
                     .disabled(!workspace.assistance.shared)
                 Button("Downloads") { workspace.toggleDownloads() }
                 .keyboardShortcut("j", modifiers: .command)
+                Toggle("Sharing Screen Mode", isOn: Binding(
+                    get: { workspace.sharingScreenMode },
+                    set: { workspace.sharingScreenMode = $0 }
+                ))
+                .keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
                 Button("Connection Details") { workspace.toggleIdentity() }
                     .disabled(workspace.currentPageURL == nil)

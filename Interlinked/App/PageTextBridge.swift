@@ -54,6 +54,40 @@ extension PageJavaScriptEvaluating {
             breadcrumbs:Array.from(document.querySelectorAll('[aria-label*="readcrumb"] a,[itemprop="itemListElement"] [itemprop="name"]')).slice(0,5).map(n=>clean(n.textContent).slice(0,60)),
             sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]')};
         },
+        contacts() {
+          const out={structuredAddresses:[],addressElements:[],phones:[],emails:[],text:''};
+          const add=(list,value)=>{ value=clean(value); if (value && list.length<8 && !list.includes(value)) list.push(value); };
+          const lines=node=>(node.innerText||node.textContent||'').split('\n').map(clean).filter(Boolean).join(', ');
+          const postal=a=>typeof a==='string' ? a : a && typeof a==='object'
+            ? [a.streetAddress,a.addressLocality,a.addressRegion,a.postalCode,typeof a.addressCountry==='string'?a.addressCountry:a.addressCountry?.name]
+                .filter(v=>typeof v==='string' && v.trim()).join(', ')
+            : '';
+          const visit=(node,depth)=>{
+            if (!node || typeof node!=='object' || depth>6) return;
+            if (Array.isArray(node)) { node.forEach(n=>visit(n,depth+1)); return; }
+            if (node['@type']==='PostalAddress') add(out.structuredAddresses,postal(node));
+            else if (node.address) [].concat(node.address).forEach(a=>add(out.structuredAddresses,postal(a)));
+            [].concat(node.telephone||[]).forEach(t=>typeof t==='string' && add(out.phones,t));
+            [].concat(node.email||[]).forEach(e=>typeof e==='string' && add(out.emails,e.replace(/^mailto:/i,'')));
+            for (const key in node) if (key!=='address' && node[key] && typeof node[key]==='object') visit(node[key],depth+1);
+          };
+          document.querySelectorAll('script[type="application/ld+json"]').forEach(s=>{ try { visit(JSON.parse(s.textContent),0); } catch {} });
+          document.querySelectorAll('[itemtype*="PostalAddress"]').forEach(n=>add(out.structuredAddresses,lines(n)));
+          document.querySelectorAll('[itemprop="telephone"]').forEach(n=>add(out.phones,n.getAttribute('content')||n.textContent));
+          document.querySelectorAll('[itemprop="email"]').forEach(n=>add(out.emails,(n.getAttribute('content')||n.textContent).replace(/^mailto:/i,'')));
+          document.querySelectorAll('a[href^="tel:" i]').forEach(a=>{ try { add(out.phones,decodeURIComponent(a.getAttribute('href').slice(4))); } catch {} });
+          document.querySelectorAll('a[href^="mailto:" i]').forEach(a=>{ try { add(out.emails,decodeURIComponent(a.getAttribute('href').slice(7).split('?')[0])); } catch {} });
+          document.querySelectorAll('address').forEach(n=>{ if (!excluded(n)) add(out.addressElements,lines(n)); });
+          const regions=document.querySelectorAll('footer,address,[class*="contact" i],[id*="contact" i],[class*="address" i],[class*="location" i],[itemtype*="LocalBusiness"],[itemtype*="Organization"]');
+          const seen=new Set(); let text='';
+          for (const node of regions) {
+            if (excluded(node) || [...seen].some(s=>s.contains(node))) continue;
+            seen.add(node); text+=(node.innerText||'')+'\n';
+            if (text.length>8000) break;
+          }
+          out.text=text.slice(0,8000);
+          return out;
+        },
         navigationLink(destination) {
           if (!lastLink || Date.now()-lastLink.at>5000) return null;
           try { if (new URL(lastLink.href,location.href).href!==new URL(destination,location.href).href) return null; }
@@ -466,6 +500,9 @@ extension PageJavaScriptEvaluating {
     static func activateSiteMenuItem<View: PageJavaScriptEvaluating>(_ view: View, id: String) async -> Bool {
         (try? await execute(view, body: "return globalThis.interlinkedContext?.activateSiteMenuItem(id) ?? false;",
                             arguments: ["id": id])) as? Bool ?? false
+    }
+    static func contacts<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageContactSignals {
+        try await value(view, call: "return interlinkedContext.contacts();", type: PageContactSignals.self)
     }
     static func extract<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageExtract {
         try await value(view, call: "return interlinkedContext.extract();", type: PageExtract.self)

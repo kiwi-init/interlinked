@@ -32,6 +32,7 @@ final class PaneHosts {
         let initialURL = address(from: workspace.surfaces.line(pane))
         let page = ChromiumPage(initialURL: initialURL)
         page.forcedDarkMode = workspace.builtIns.darkens(initialURL)
+        page.sharingScreenShield = workspace.sharingScreenMode
         page.delegate = coordinator
         coordinators[pane] = coordinator
         browsers[pane] = page
@@ -58,6 +59,7 @@ final class PaneHosts {
 
     func existingBrowser(_ pane: PaneID) -> ChromiumPage? { browsers[pane] }
     func forEachBrowser(_ body: (ChromiumPage) -> Void) { browsers.values.forEach(body) }
+    func pane(of page: ChromiumPage) -> PaneID? { browsers.first { $0.value === page }?.key }
     func touch(_ pane: PaneID) { lifecycle.touch(pane) }
     func recovery(for pane: PaneID) -> BrowserRecovery? { lifecycle.recoveries[pane] }
 
@@ -265,6 +267,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         if urlChanged {
             lastURL = page.url
             workspace.assistance.committed(pane)
+            workspace.usefulInfo.committed(pane)
             workspace.builtIns.apply(to: page)
         }
         workspace.hosts.updatePage(page, pane: pane)
@@ -283,6 +286,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     func chromiumPageDidCommit(_ page: ChromiumPage) {
         workspace?.builtIns.navigated(pane)
         workspace?.assistance.committed(pane)
+        workspace?.usefulInfo.committed(pane)
         workspace?.noteSiteMenuDocumentChanged(pane)
         update(page)
     }
@@ -292,6 +296,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         workspace?.hosts.loadFavicon(page, pane: pane, workspace: workspace)
         workspace?.hosts.restoreScrollIfNeeded(page, pane: pane)
         workspace?.assistance.loaded(pane, page: page)
+        workspace?.usefulInfo.loaded(pane, page: page)
         workspace?.browserHistory.record(page.url, title: page.title)
         workspace?.captureSiteMenu(pane)
     }

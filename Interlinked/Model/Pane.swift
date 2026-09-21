@@ -103,12 +103,14 @@ enum PageHandleExpansion {
 enum ToolboxShortcut: Equatable {
     case find
     case reading
+    case sharingScreen
     case settings
 
     var label: String {
         switch self {
         case .find: "⌘F"
         case .reading: ""
+        case .sharingScreen: "⇧⌘S"
         case .settings: "⌘,"
         }
     }
