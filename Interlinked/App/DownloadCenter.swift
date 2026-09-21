@@ -110,6 +110,26 @@ final class DownloadCenter {
         download.page?.cancelDownload(download.identifier)
     }
 
+    /// Marks every active download owned by `page` as interrupted and asks
+    /// Chromium to stop it. Must run before the page's delegate is cleared
+    /// and its browser is closed; afterwards no `OnDownloadUpdated` reaches
+    /// us, so without this the record would stay stuck as downloading.
+    func interruptDownloads(for page: ChromiumPage) {
+        let targets = active.filter { $0.value.page === page }
+        guard !targets.isEmpty else { return }
+        for (id, download) in targets {
+            let key = ChromiumDownloadKey(page: ObjectIdentifier(page), identifier: download.identifier)
+            download.page?.cancelDownload(download.identifier)
+            update(id) {
+                $0.state = .interrupted
+                $0.message = "The tab was closed before this download finished."
+                $0.finishedAt = Date()
+            }
+            active.removeValue(forKey: id)
+            recordIDs.removeValue(forKey: key)
+        }
+    }
+
     func reveal(_ id: UUID) {
         guard let url = records.first(where: { $0.id == id })?.destination else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])

@@ -740,7 +740,7 @@ final class Workspace {
     }
 
     private func forgetClosed() {
-        hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) })
+        hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) }, downloads: downloads)
         builtIns.forget(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
         if let editing {

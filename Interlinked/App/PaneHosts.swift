@@ -40,10 +40,10 @@ final class PaneHosts {
         return page
     }
 
-    func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind) {
+    func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind, downloads: DownloadCenter) {
         let tracked = Set(browsers.keys).union(lifecycle.panes)
         for pane in tracked where !keep(pane) || kinds(pane) != .browser {
-            removeBrowser(pane)
+            removeBrowser(pane, downloads: downloads)
             lifecycle.close(pane)
             uploadPanes.remove(pane)
             pendingScroll.removeValue(forKey: pane)
@@ -196,7 +196,7 @@ final class PaneHosts {
             occurredAt: Date()
         ))
         pageURLs[pane] = url
-        removeBrowser(pane)
+        removeBrowser(pane, downloads: workspace.downloads)
     }
 
     func restoreScrollIfNeeded(_ page: ChromiumPage, pane: PaneID) {
@@ -226,7 +226,7 @@ final class PaneHosts {
             lifecycle.suspend(pane, recovery: BrowserRecovery(cause: .memoryPressure, url: url,
                                                                scrollY: probe.scrollY, occurredAt: Date()))
             pageURLs[pane] = url
-            removeBrowser(pane)
+            removeBrowser(pane, downloads: workspace.downloads)
             discarded += 1
         }
     }
@@ -236,11 +236,14 @@ final class PaneHosts {
         return BrowserDiscardProbe.decode(value)
     }
 
-    private func removeBrowser(_ pane: PaneID) {
+    private func removeBrowser(_ pane: PaneID, downloads: DownloadCenter) {
         guard let page = browsers.removeValue(forKey: pane) else {
             coordinators.removeValue(forKey: pane)
             return
         }
+        // Cancel first while the client is still attached; the completion
+        // callback can no longer reach DownloadCenter once we detach below.
+        downloads.interruptDownloads(for: page)
         page.delegate = nil
         page.close()
         coordinators.removeValue(forKey: pane)
