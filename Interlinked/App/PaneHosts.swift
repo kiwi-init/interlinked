@@ -186,6 +186,19 @@ final class PaneHosts {
         memorySource = nil
     }
 
+    func handleWebContentTermination(_ page: ChromiumPage, pane: PaneID, workspace: Workspace) {
+        guard browsers[pane] === page else { return }
+        let url = page.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
+        lifecycle.suspend(pane, recovery: BrowserRecovery(
+            cause: .webContentTerminated,
+            url: url,
+            scrollY: 0,
+            occurredAt: Date()
+        ))
+        pageURLs[pane] = url
+        removeBrowser(pane)
+    }
+
     func restoreScrollIfNeeded(_ page: ChromiumPage, pane: PaneID) {
         guard let y = pendingScroll.removeValue(forKey: pane), y > 0 else { return }
         page.evaluateJavaScript("window.scrollTo(0, \(y))")
@@ -282,10 +295,107 @@ final class BrowserCoordinator: ChromiumPageDelegate {
 
     func chromiumPage(_ page: ChromiumPage, didFail message: String) { update(page) }
 
+    func chromiumPage(
+        _ page: ChromiumPage,
+        decideNavigationTo destination: URL,
+        source: URL?,
+        kind: NavigationKind,
+        completion: @escaping (Bool) -> Void
+    ) -> Bool {
+        guard let workspace else { return false }
+        let preliminary = NavigationSafety.review(destination: destination, source: source, kind: kind)
+        let inspectLink = kind == .link && source.map { !NavigationSafety.sameSite($0, destination) } == true
+        if preliminary.disposition == .allow, !inspectLink { return false }
+        if preliminary.disposition == .warn,
+           workspace.navigationExceptions.contains(preliminary), !inspectLink { return false }
+        Task { @MainActor [weak self, weak page] in
+            guard let self, let page, let workspace = self.workspace,
+                  workspace.hosts.existingBrowser(self.pane) === page else {
+                completion(false)
+                return
+            }
+            let linkText = inspectLink ? await PageTextBridge.navigationLinkText(page, destination: destination) : nil
+            let review = NavigationSafety.review(
+                destination: destination,
+                source: source,
+                kind: kind,
+                linkText: linkText
+            )
+            completion(await self.allow(review, page: page, workspace: workspace))
+        }
+        return true
+    }
+
+    func chromiumPage(
+        _ page: ChromiumPage,
+        decidePermissionFor originValue: String,
+        kind: WebsitePermissionKind,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard workspace != nil, let origin = BrowserPrompts.permissionOrigin(originValue) else {
+            completion(false)
+            return
+        }
+        Task { @MainActor [weak self, weak page] in
+            guard let self, let page, let workspace = self.workspace,
+                  workspace.hosts.existingBrowser(self.pane) === page else {
+                completion(false)
+                return
+            }
+            let decision = await BrowserPrompts.requestPermission(
+                origin: origin,
+                kind: kind,
+                store: workspace.permissions,
+                window: page.window
+            )
+            completion(decision == .allow)
+        }
+    }
+
+    func chromiumPage(
+        _ page: ChromiumPage,
+        decideDownloadFrom source: URL?,
+        to destination: URL,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard workspace != nil else {
+            completion(false)
+            return
+        }
+        let review = NavigationSafety.review(destination: destination, source: source, kind: .download)
+        Task { @MainActor [weak self, weak page] in
+            guard let self, let page, let workspace = self.workspace,
+                  workspace.hosts.existingBrowser(self.pane) === page else {
+                completion(false)
+                return
+            }
+            completion(await self.allow(review, page: page, workspace: workspace))
+        }
+    }
+
+    func chromiumPage(_ page: ChromiumPage, didRejectCertificateAt url: URL, error: String) {
+        Task { @MainActor [weak page] in
+            await BrowserPrompts.showCertificateError(url: url, error: error, window: page?.window)
+        }
+    }
+
+    func chromiumPageWebContentProcessDidTerminate(_ page: ChromiumPage) {
+        DispatchQueue.main.async { [weak self, weak page] in
+            guard let self, let page, let workspace = self.workspace else { return }
+            workspace.hosts.handleWebContentTermination(page, pane: self.pane, workspace: workspace)
+        }
+    }
+
     func chromiumPage(_ page: ChromiumPage, requestedPopup url: URL, userGesture: Bool) {
         // Pages must not open file:, data:, or custom-scheme tabs on their own.
-        guard userGesture, let url = ExternalURLRouting.webURL(url) else { return }
-        workspace?.openAddress(url.absoluteString)
+        guard userGesture, let destination = ExternalURLRouting.webURL(url), workspace != nil else { return }
+        let review = NavigationSafety.review(destination: destination, source: page.url, kind: .popup)
+        Task { @MainActor [weak self, weak page] in
+            guard let self, let page, let workspace = self.workspace,
+                  workspace.hosts.existingBrowser(self.pane) === page,
+                  await self.allow(review, page: page, workspace: workspace) else { return }
+            workspace.openAddress(destination.absoluteString)
+        }
     }
 
     func chromiumPage(_ page: ChromiumPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String) {
@@ -301,4 +411,17 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     }
 
     func chromiumPageDidClose(_ page: ChromiumPage) {}
+
+    private func allow(_ review: NavigationReview, page: ChromiumPage, workspace: Workspace) async -> Bool {
+        if review.disposition == .allow || workspace.navigationExceptions.contains(review) { return true }
+        let advice = review.disposition == .warn
+            ? await workspace.assistance.navigationAdvice(review)
+            : nil
+        return await BrowserPrompts.confirmNavigation(
+            review,
+            advice: advice,
+            store: workspace.navigationExceptions,
+            window: page.window
+        )
+    }
 }

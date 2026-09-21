@@ -4,6 +4,22 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class ILChromiumView;
 
+typedef NS_ENUM(NSInteger, ILNavigationKind) {
+    ILNavigationKindLink,
+    ILNavigationKindForm,
+    ILNavigationKindRedirect,
+    ILNavigationKindReload,
+    ILNavigationKindHistory,
+    ILNavigationKindOther,
+};
+
+typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
+    ILWebsitePermissionKindCamera,
+    ILWebsitePermissionKindMicrophone,
+    ILWebsitePermissionKindCameraAndMicrophone,
+    ILWebsitePermissionKindLocation,
+};
+
 @protocol ILChromiumViewDelegate <NSObject>
 - (void)chromiumViewDidCreateBrowser:(ILChromiumView *)view;
 - (void)chromiumView:(ILChromiumView *)view didChangeURL:(nullable NSURL *)url;
@@ -30,6 +46,23 @@ NS_ASSUME_NONNULL_BEGIN
            cancelled:(BOOL)cancelled
          interrupted:(BOOL)interrupted;
 - (void)chromiumView:(ILChromiumView *)view didBlockRequests:(NSInteger)count;
+- (BOOL)chromiumView:(ILChromiumView *)view
+    decideNavigationToURL:(NSURL *)URL
+                sourceURL:(nullable NSURL *)sourceURL
+                     kind:(ILNavigationKind)kind
+               completion:(void (^)(BOOL allow))completion;
+- (void)chromiumView:(ILChromiumView *)view
+    decidePermissionForOrigin:(NSString *)origin
+                         kind:(ILWebsitePermissionKind)kind
+                   completion:(void (^)(BOOL allow))completion;
+- (void)chromiumView:(ILChromiumView *)view
+    decideDownloadFromURL:(nullable NSURL *)sourceURL
+                    toURL:(NSURL *)URL
+               completion:(void (^)(BOOL allow))completion;
+- (void)chromiumView:(ILChromiumView *)view
+    didRejectCertificateAtURL:(NSURL *)URL
+                        error:(NSString *)error;
+- (void)chromiumViewWebContentProcessDidTerminate:(ILChromiumView *)view;
 - (void)chromiumViewDidClose:(ILChromiumView *)view;
 @end
 
