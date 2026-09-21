@@ -226,16 +226,6 @@ actor BrowserIntelligence {
         )
     }
 
-    func personalFilterMatches(
-        description: String,
-        candidates: [PageFilterCandidate]
-    ) async throws -> IntelligenceDecision<[PageFilterCandidate]> {
-        let response = try await observed(source: .jev, action: "Personal filter") {
-            try await jev.decide(PersonalFilterDecisions.request(description: description, candidates: candidates))
-        }
-        return IntelligenceDecision(value: PersonalFilterDecisions.matches(response, candidates: candidates), source: .jev)
-    }
-
     func vaultMatches(
         query: String,
         visits: [HistoryVisit]

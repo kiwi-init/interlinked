@@ -15,30 +15,12 @@ extension PageJavaScriptEvaluating {
     static let install = #"""
     if (!globalThis.interlinkedContext) {
       const documentID = crypto.randomUUID();
-      const ids = new WeakMap(), nodes = new Map(), filterCandidates = new Map(); let next = 0;
-      let stopReading, filterStyle; let lastLink;
+      const ids = new WeakMap(), nodes = new Map(); let next = 0;
+      let stopReading, lastLink;
       let siteMenuNode, siteMenuPrevious, siteMenuSpacer;
       let siteMenuExtras=[];
-      const filteredNodes = new Set(), previousDisplays = new WeakMap();
-      const filterHighlightNames = new Set();
       const clean = value => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
       const excluded = node => node.closest('form,input,textarea,select,[contenteditable],[hidden],[aria-hidden="true"],script,style');
-      const filterTarget = source => {
-        if (source.matches('img')) return source.closest('picture') || source;
-        if (source.matches('video')) return source;
-        let node=source, best=source;
-        for (let depth=0; node && depth<9; depth++,node=node.parentElement) {
-          if (node===document.body || node===document.documentElement || node.matches('main,[role="main"]')) break;
-          const r=node.getBoundingClientRect(), text=clean(node.innerText), style=getComputedStyle(node);
-          if (!r.width || !r.height || r.height>innerHeight*.92 || r.width*r.height>innerWidth*innerHeight*.78 || text.length>8000) break;
-          best=node;
-          const bordered=parseFloat(style.borderTopWidth)>0 || parseFloat(style.borderLeftWidth)>0;
-          const rounded=parseFloat(style.borderTopLeftRadius)>2;
-          const semantic=node.matches('article,section,aside,[role="region"],[data-testid]');
-          if (depth>0 && node.childElementCount>1 && (bordered || rounded || semantic)) return node;
-        }
-        return best;
-      };
       const nodeText = node => {
         if (node.matches('img')) return clean(node.getAttribute('alt') || node.getAttribute('aria-label') || node.getAttribute('title')) || 'Image';
         if (node.matches('video')) return clean(node.getAttribute('aria-label') || node.getAttribute('title')) || 'Video';
@@ -82,70 +64,6 @@ extension PageJavaScriptEvaluating {
             passages.push({id,text,role});
           }
           return {document:documentID,url:location.href,passages,truncated};
-        },
-        extractFilterCandidates() {
-          filterCandidates.clear();
-          let serial=0;
-          const groups={media:[],phrases:[],elements:[],tokens:[]};
-          const stage=(bucket,target,text,role,context='')=>{
-            text=clean(text).slice(0,320);context=clean(context).slice(0,360);
-            if (!text) return;
-            const id='f'+(++serial);
-            groups[bucket].push({id,text,role,context,target});
-          };
-          const mediaSelector='img,picture,video,canvas,svg,[role="img"],[role="video"],object[type^="image/"],object[type^="video/"],embed[type^="image/"],embed[type^="video/"],iframe[src*="youtube"],iframe[src*="vimeo"]';
-          for (const node of document.querySelectorAll(mediaSelector)) {
-            if (excluded(node) || !node.getClientRects().length || node.closest(mediaSelector)!==node) continue;
-            const role=node.matches('video,[role="video"],object[type^="video/"],embed[type^="video/"],iframe')?'video':'image';
-            const label=nodeText(node)==='Image'||nodeText(node)==='Video' ? '' : nodeText(node);
-            stage('media',{kind:'element',node,role},label || role,role,label);
-          }
-          for (const node of document.querySelectorAll('body,body *')) {
-            if (excluded(node) || !node.getClientRects().length || getComputedStyle(node).backgroundImage==='none') continue;
-            stage('media',{kind:'element',node,role:'image'},clean(node.getAttribute('aria-label')||node.getAttribute('title'))||'background image','image','background image');
-          }
-          const blockSelector='article,section,aside,li,h1,h2,h3,h4,h5,h6,[role="heading"],blockquote,pre,td,a,button,[role="button"],[role="link"],p';
-          for (const node of document.querySelectorAll(blockSelector)) {
-            if (excluded(node) || !node.getClientRects().length || node.matches(mediaSelector)) continue;
-            if (node.querySelector('article,section,aside,li,h1,h2,h3,h4,h5,h6,blockquote,pre,td,p') && !node.matches('article,section,aside')) continue;
-            const text=nodeText(node);if (!text) continue;
-            const role=node.matches('a,[role="link"]')?'link':node.matches('button,[role="button"]')?'button':node.matches('h1,h2,h3,h4,h5,h6,[role="heading"]')?'heading':node.matches('article,section,aside')?'section':'content block';
-            stage('elements',{kind:'element',node,role},text,role,text);
-          }
-          const sentenceSegmenter=globalThis.Intl?.Segmenter ? new Intl.Segmenter(undefined,{granularity:'sentence'}) : null;
-          const wordSegmenter=globalThis.Intl?.Segmenter ? new Intl.Segmenter(undefined,{granularity:'word'}) : null;
-          const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
-          let textNode;
-          while (textNode=walker.nextNode()) {
-            const parent=textNode.parentElement,raw=textNode.data;
-            if (!parent || excluded(parent) || !parent.getClientRects().length || !clean(raw)) continue;
-            const sentences=sentenceSegmenter ? Array.from(sentenceSegmenter.segment(raw)) : [{segment:raw,index:0}];
-            for (const sentence of sentences) {
-              const source=sentence.segment,start=sentence.index;
-              const leading=source.search(/\S/);if (leading<0) continue;
-              const trailing=source.length-(source.match(/\s*$/)?.[0].length||0);
-              const from=start+leading,to=start+trailing,visible=raw.slice(from,to);
-              if (!clean(visible)) continue;
-              const range=document.createRange();range.setStart(textNode,from);range.setEnd(textNode,to);
-              stage('phrases',{kind:'range',range,role:'text range'},visible,'text range',visible);
-              if (!wordSegmenter) continue;
-              for (const word of wordSegmenter.segment(visible)) {
-                if (!word.isWordLike) continue;
-                const token=word.segment;
-                if (token.length<2 && !/\d/.test(token)) continue;
-                const wordRange=document.createRange(),wordStart=from+word.index;
-                wordRange.setStart(textNode,wordStart);wordRange.setEnd(textNode,wordStart+token.length);
-                stage('tokens',{kind:'range',range:wordRange,role:'text token'},token,'text token',visible);
-              }
-            }
-          }
-          const limits={media:400,phrases:700,elements:700,tokens:700};
-          const chosen=[];
-          for (const key of ['media','phrases','elements','tokens']) chosen.push(...groups[key].slice(0,limits[key]));
-          for (const item of chosen) filterCandidates.set(item.id,item.target);
-          return {document:documentID,url:location.href,
-            candidates:chosen.map(({id,text,role,context})=>({id,text,role,context})),
-            truncated:Object.keys(groups).some(key=>groups[key].length>limits[key])};
         },
         highlight(items, current, document, scroll = true) {
           if (document!==documentID) return false;
@@ -257,125 +175,6 @@ extension PageJavaScriptEvaluating {
           };
           select(index);
           return true;
-        },
-        clearFilters() {
-          for (const node of filteredNodes) if (node?.isConnected) {
-            const previous=previousDisplays.get(node);
-            if (!previous || (!previous.value && !previous.priority)) node.style.removeProperty('display');
-            else node.style.setProperty('display',previous.value,previous.priority);
-            delete node.dataset.interlinkedFiltered;
-          }
-          filteredNodes.clear();
-          filterStyle?.remove();filterStyle=null;
-          for (const name of filterHighlightNames) globalThis.CSS?.highlights?.delete(name);
-          filterHighlightNames.clear();
-          return true;
-        },
-        applyFilters(groups, documentToken) {
-          if (documentToken!==documentID) return null;
-          this.clearFilters();
-          const counts={},css=[];
-          const resolved=groups.map(group=>{
-            const targets=new Set();
-            for (const item of group.items || []) {
-              const node=nodes.get(item.id);
-              if (!node?.isConnected || nodeText(node)!==item.text) continue;
-              targets.add(filterTarget(node));
-            }
-            const media=new Set(group.media || []);
-            if (media.has('image')) {
-              document.querySelectorAll('img,picture,canvas,svg,[role="img"],object[type^="image/"],embed[type^="image/"]').forEach(node=>targets.add(node.matches('img') ? node.closest('picture') || node : node));
-              for (const node of document.querySelectorAll('body,body *')) if (getComputedStyle(node).backgroundImage!=='none') targets.add(node);
-              css.push('img,picture,canvas,svg,[role="img"],object[type^="image/"],embed[type^="image/"]{display:none!important}html body,html body *{background-image:none!important}');
-            }
-            if (media.has('video')) {
-              document.querySelectorAll('video,[role="video"],object[type^="video/"],embed[type^="video/"],iframe[src*="youtube"],iframe[src*="vimeo"]').forEach(node=>targets.add(node));
-              css.push('video,[role="video"],object[type^="video/"],embed[type^="video/"],iframe[src*="youtube"],iframe[src*="vimeo"]{display:none!important}');
-            }
-            let wordCount=0;
-            if ((group.words || []).length && globalThis.CSS?.highlights && globalThis.Highlight) {
-              const ranges=[];
-              for (const word of group.words) {
-                const escaped=Array.from(word).map(char=>'\\^$.*+?()[]{}|'.includes(char)?'\\'+char:char).join('');
-                const pattern=new RegExp('(?<![\\p{L}\\p{N}_])'+escaped+'(?![\\p{L}\\p{N}_])','giu');
-                const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
-                let textNode;
-                while (textNode=walker.nextNode()) {
-                  const parent=textNode.parentElement;
-                  if (!parent || excluded(parent) || !parent.getClientRects().length) continue;
-                  pattern.lastIndex=0;let match;
-                  while (match=pattern.exec(textNode.data)) {
-                    const range=document.createRange();range.setStart(textNode,match.index);range.setEnd(textNode,match.index+match[0].length);
-                    ranges.push(range);wordCount++;
-                  }
-                }
-              }
-              if (ranges.length) {
-                const name='interlinked-word-'+group.rule.toLowerCase();
-                CSS.highlights.set(name,new Highlight(...ranges));filterHighlightNames.add(name);
-                css.push('::highlight('+name+'){color:transparent!important;text-shadow:none!important}');
-              }
-            }
-            return {rule:group.rule,targets,wordCount};
-          });
-          if (css.length) {
-            filterStyle=document.createElement('style');filterStyle.id='interlinked-personal-filters-'+documentID;
-            filterStyle.textContent=css.join('\n');document.head.append(filterStyle);
-          }
-          for (const group of resolved) {
-            const targets=group.targets;
-            for (const node of targets) {
-              if (!filteredNodes.has(node)) {
-                previousDisplays.set(node,{value:node.style.getPropertyValue('display'),priority:node.style.getPropertyPriority('display')});
-                node.style.setProperty('display','none','important');
-                node.dataset.interlinkedFiltered='true';
-                filteredNodes.add(node);
-              }
-            }
-            counts[group.rule]=targets.size+group.wordCount;
-          }
-          return counts;
-        },
-        applyFilterCandidates(groups, documentToken) {
-          if (documentToken!==documentID) return null;
-          this.clearFilters();
-          const counts={},css=[];
-          const availableRoles=new Map();
-          for (const target of filterCandidates.values()) if (target.kind==='element' && (target.role==='image'||target.role==='video'))
-            availableRoles.set(target.role,(availableRoles.get(target.role)||0)+1);
-          for (const group of groups) {
-            const elements=new Set(),ranges=[],selectedRoles=new Map();
-            for (const item of group.items || []) {
-              const target=filterCandidates.get(item.id);
-              if (!target) continue;
-              if (target.kind==='range') {
-                if (target.range.startContainer?.isConnected) ranges.push(target.range.cloneRange());
-              } else if (target.node?.isConnected) {
-                elements.add(filterTarget(target.node));
-                if (target.role==='image'||target.role==='video') selectedRoles.set(target.role,(selectedRoles.get(target.role)||0)+1);
-              }
-            }
-            if ((selectedRoles.get('image')||0)>=(availableRoles.get('image')||Infinity))
-              css.push('img,picture,canvas,svg,[role="img"],object[type^="image/"],embed[type^="image/"]{display:none!important}html body,html body *{background-image:none!important}');
-            if ((selectedRoles.get('video')||0)>=(availableRoles.get('video')||Infinity))
-              css.push('video,[role="video"],object[type^="video/"],embed[type^="video/"],iframe[src*="youtube"],iframe[src*="vimeo"]{display:none!important}');
-            for (const node of elements) {
-              if (filteredNodes.has(node)) continue;
-              previousDisplays.set(node,{value:node.style.getPropertyValue('display'),priority:node.style.getPropertyPriority('display')});
-              node.style.setProperty('display','none','important');node.dataset.interlinkedFiltered='true';filteredNodes.add(node);
-            }
-            if (ranges.length && globalThis.CSS?.highlights && globalThis.Highlight) {
-              const name='interlinked-filter-'+group.rule.toLowerCase();
-              CSS.highlights.set(name,new Highlight(...ranges));filterHighlightNames.add(name);
-              css.push('::highlight('+name+'){color:transparent!important;text-shadow:none!important}');
-            }
-            counts[group.rule]=elements.size+ranges.length;
-          }
-          if (css.length) {
-            filterStyle=document.createElement('style');filterStyle.id='interlinked-personal-filters-'+documentID;
-            filterStyle.textContent=css.join('\n');document.head.append(filterStyle);
-          }
-          return counts;
         },
         siteMenu() {
           try {
@@ -625,9 +424,6 @@ extension PageJavaScriptEvaluating {
     static func extract<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageExtract {
         try await value(view, call: "return interlinkedContext.extract();", type: PageExtract.self)
     }
-    static func extractFilterCandidates<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageFilterExtract {
-        try await value(view, call: "return interlinkedContext.extractFilterCandidates();", type: PageFilterExtract.self)
-    }
     static func navigationLinkText<View: PageJavaScriptEvaluating>(_ view: View, destination: URL) async -> String? {
         (try? await execute(view, body: "return globalThis.interlinkedContext?.navigationLink(destination) ?? null;",
                             arguments: ["destination": destination.absoluteString])) as? String
@@ -664,56 +460,6 @@ extension PageJavaScriptEvaluating {
     static func clear<View: PageJavaScriptEvaluating>(_ view: View?) {
         guard let view else { return }
         Task { _ = try? await view.interlinkedEvaluate("globalThis.interlinkedContext?.clear()", arguments: [:]) }
-    }
-
-    static func clearFilters<View: PageJavaScriptEvaluating>(_ view: View?) async {
-        guard let view else { return }
-        _ = try? await execute(view, body: "return globalThis.interlinkedContext?.clearFilters() ?? false;")
-    }
-
-    static func applyFilters<View: PageJavaScriptEvaluating>(
-        _ matches: [UUID: [PagePassage]], document: String, view: View
-    ) async -> [UUID: Int]? {
-        let groups: [[String: Any]] = matches.map { rule, passages in
-            return ["rule": rule.uuidString,
-                    "items": passages.map { ["id": $0.id, "text": $0.text] },
-                    "media": [], "words": []]
-        }
-        let raw: Any?
-        do {
-            raw = try await execute(view,
-                body: "return globalThis.interlinkedContext?.applyFilters(groups, document) ?? null;",
-                arguments: ["groups": groups, "document": document])
-        } catch {
-            return nil
-        }
-        guard let values = raw as? [String: Any] else { return nil }
-        return Dictionary(uniqueKeysWithValues: values.compactMap { key, value in
-            guard let id = UUID(uuidString: key), let count = value as? NSNumber else { return nil }
-            return (id, count.intValue)
-        })
-    }
-
-    static func applyFilterCandidates<View: PageJavaScriptEvaluating>(
-        _ matches: [UUID: [PageFilterCandidate]], document: String, view: View
-    ) async -> [UUID: Int]? {
-        let groups: [[String: Any]] = matches.map { rule, candidates in
-            ["rule": rule.uuidString,
-             "items": candidates.map { ["id": $0.id, "text": $0.text] }]
-        }
-        let raw: Any?
-        do {
-            raw = try await execute(view,
-                body: "return globalThis.interlinkedContext?.applyFilterCandidates(groups, document) ?? null;",
-                arguments: ["groups": groups, "document": document])
-        } catch {
-            return nil
-        }
-        guard let values = raw as? [String: Any] else { return nil }
-        return Dictionary(uniqueKeysWithValues: values.compactMap { key, value in
-            guard let id = UUID(uuidString: key), let count = value as? NSNumber else { return nil }
-            return (id, count.intValue)
-        })
     }
 
     static func annotate<View: PageJavaScriptEvaluating>(

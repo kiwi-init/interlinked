@@ -708,49 +708,4 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(decoded?.httpOnlyCookieNames, [])
         XCTAssertEqual(decoded?.publicWebPage, false)
     }
-    func testPersonalFiltersMatchVisibleHeadingsLocallyAndPersistPerSite() throws {
-        let passages = [
-            PagePassage(id: "news", text: "Latest from our changelog", role: "heading"),
-            PagePassage(id: "feed", text: "A repository you follow was updated.", role: "passage")
-        ]
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(
-            description: "idgaf about this latest from our changelog bs", passages: passages
-        ).map(\.id), ["news"])
-        let media = [PageFilterCandidate(id: "image", text: "Hero", role: "image", context: ""),
-                     PageFilterCandidate(id: "video", text: "Film", role: "video", context: "")]
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "all images and videos", candidates: media).map(\.id),
-                       ["image", "video"])
-        let words = [PageFilterCandidate(id: "pace", text: "pace", role: "text token", context: "We must pace the frontier")]
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "the word pace", candidates: words).map(\.id), ["pace"])
-        let accented = [PageFilterCandidate(id: "cafe", text: "café", role: "text token", context: "A café nearby")]
-        XCTAssertEqual(PersonalFilterDecisions.intent("the word café"), .word("cafe"))
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "the word café", candidates: accented).map(\.id), ["cafe"])
-        XCTAssertEqual(PersonalFilterDecisions.intent("all images and videos"), .media(["image", "video"]))
-        XCTAssertEqual(PersonalFilterDecisions.intent("the word pace"), .word("pace"))
-        XCTAssertEqual(PersonalFilterDecisions.intent("hide layoff posts"), .meaning)
-        XCTAssertEqual(PersonalFilterDecisions.jevCandidates(media + words).map(\.id), ["image", "video"])
-
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let file = directory.appendingPathComponent("filters.json")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let filters = PersonalFilters(file: file)
-        let rule = try XCTUnwrap(filters.add("Hide the changelog", host: "www.github.com"))
-        XCTAssertEqual(filters.rules(for: "github.com").map(\.id), [rule.id])
-        filters.toggle(rule.id)
-        XCTAssertEqual(PersonalFilters(file: file).rules(for: "www.github.com").first?.isEnabled, false)
-    }
-    func testPersonalFilterSemanticMatchesRequireHighConfidenceAndOriginalIDs() {
-        let candidates = [PageFilterCandidate(id: "card", text: "Product announcements", role: "heading", context: ""),
-                          PageFilterCandidate(id: "feed", text: "Your activity", role: "heading", context: "")]
-        let response = JevResponse(answers: [
-            "card": JevAnswer(type: "noul", noul: PersonalFilterDecisions.matchThreshold),
-            "feed": JevAnswer(type: "noul", noul: PersonalFilterDecisions.matchThreshold - 0.01),
-            "invented": JevAnswer(type: "noul", noul: 1)
-        ])
-        XCTAssertEqual(PersonalFilterDecisions.matches(response, candidates: candidates), [candidates[0]])
-        let request = PersonalFilterDecisions.request(description: "Hide product news", candidates: candidates)
-        XCTAssertEqual(Set(request.questions.keys), Set(candidates.map(\.id)))
-        XCTAssertTrue(request.state.contains("Hide product news"))
-        XCTAssertTrue(request.state.contains("text"))
-    }
 }

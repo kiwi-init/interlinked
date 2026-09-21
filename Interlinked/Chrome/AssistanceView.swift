@@ -294,7 +294,7 @@ struct AssistanceSettings: View {
                     Label(keyStatus(assistant), systemImage: assistant.hasKey ? "checkmark.circle.fill" : "circle.dashed")
                         .foregroundStyle(.primary)
                 }
-                SettingsNote("Jev handles meaning search, Critical Reading, Vault ranking, related-tab grouping, and semantic personal filters.")
+                SettingsNote("Jev handles meaning search, Critical Reading, Vault ranking, and related-tab grouping.")
             }
 
             Section("Behavior") {
@@ -685,34 +685,29 @@ struct Toolbox: View {
     var palette: Palette
     private var assistant: BrowserAssistance { workspace.assistance }
     private var expanded: Bool {
-        hovering || workspace.rightCommandKeyHeld || assistant.filterPanelOpen || assistant.panel == .find || assistant.readingPanelOpen
+        hovering || workspace.rightCommandKeyHeld || assistant.panel == .find || assistant.readingPanelOpen
     }
     private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 190 }
     private var menuRows: CGFloat {
         CGFloat(assistant.criticalReadingMode == .onRequest ? 5 : 4)
     }
     private var width: CGFloat {
-        if assistant.filterPanelOpen || assistant.readingPanelOpen { return 340 }
+        if assistant.readingPanelOpen { return 340 }
         return expanded ? menuWidth : 108
     }
     private var height: CGFloat {
-        if assistant.filterPanelOpen { return 300 }
         if assistant.readingPanelOpen { return 150 }
         return expanded ? 44 + menuRows * 40 : 44
     }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if assistant.filterPanelOpen {
-                PersonalFilterPanel(palette: palette)
-                    .transition(.opacity)
-            } else if assistant.readingPanelOpen {
+            if assistant.readingPanelOpen {
                 ToolboxReadingPanel(palette: palette)
                     .transition(.opacity)
             } else {
                 if expanded {
                     VStack(spacing: 0) {
-                        PersonalFilterButton(palette: palette)
                         PageTools(palette: palette)
                         BuiltInRows(palette: palette)
                     }
@@ -760,13 +755,10 @@ struct Toolbox: View {
         .animation(reduceMotion ? nil : Metrics.morph, value: expanded)
         .animation(reduceMotion ? nil : Metrics.morph, value: width)
         .animation(reduceMotion ? nil : Metrics.morph, value: height)
-        .animation(reduceMotion ? nil : Metrics.morph, value: assistant.filterPanelOpen)
-        .animation(reduceMotion ? nil : Metrics.morph, value: assistant.appliedFilterCount)
     }
 
     private func closeActivePanel() {
-        if assistant.filterPanelOpen { assistant.closeFilters() }
-        else if assistant.panel != nil { assistant.closePanel() }
+        if assistant.panel != nil { assistant.closePanel() }
     }
 }
 
@@ -817,7 +809,6 @@ struct PageActions: View {
 
                     pageAction("Downloads", symbol: downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle") {
                         workspace.pageHistoryOpen = false
-                        assistant.closeFilters()
                         if assistant.panel != nil { assistant.closePanel() }
                         downloads.togglePanel()
                     }
@@ -1103,104 +1094,6 @@ private struct ToolboxPanelHeader: View {
         }
     }
 }
-
-private struct PersonalFilterButton: View {
-    @Environment(Workspace.self) private var workspace
-    var palette: Palette
-    private var assistant: BrowserAssistance { workspace.assistance }
-
-    var body: some View {
-        Button {
-            workspace.downloads.closePanel()
-            assistant.filterPanelOpen ? assistant.closeFilters() : assistant.openFilters()
-        } label: {
-            ToolboxRowLabel(
-                title: "Personal Filters",
-                symbol: "line.3.horizontal.decrease",
-                shortcut: workspace.toolboxShortcutLabel(.filters),
-                count: assistant.appliedFilterCount,
-                accent: palette.accent
-            )
-        }
-        .buttonStyle(.pointing)
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(palette.text)
-        .accessibilityLabel("Personal Filters")
-        .accessibilityValue(assistant.appliedFilterCount == 0 ? "No page items hidden" : "\(assistant.appliedFilterCount) page items hidden")
-        .accessibilityIdentifier("personal-filter-button")
-        .help(assistant.appliedFilterCount == 0 ? "Personal Filters" : "\(assistant.appliedFilterCount) page items hidden")
-    }
-}
-
-private struct PersonalFilterPanel: View {
-    @Environment(Workspace.self) private var workspace
-    var palette: Palette
-    private var assistant: BrowserAssistance { workspace.assistance }
-
-    var body: some View {
-        @Bindable var assistant = assistant
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Personal Filters").font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if assistant.filterBusy { ProgressView().controlSize(.mini) }
-                Button(action: assistant.closeFilters) {
-                    Image(systemName: "xmark").frame(width: 24, height: 24)
-                }.accessibilityLabel("Close Personal Filters")
-            }
-
-            if !assistant.currentFilters.isEmpty {
-                ScrollView {
-                    VStack(spacing: 6) {
-                        ForEach(assistant.currentFilters) { rule in
-                            HStack(alignment: .top, spacing: 8) {
-                                Button { assistant.togglePersonalFilter(rule.id) } label: {
-                                    Image(systemName: rule.isEnabled ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(rule.isEnabled ? palette.accent : palette.textDim)
-                                        .frame(width: 20, height: 20)
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(rule.description).font(.system(size: 11, weight: .medium)).lineLimit(2)
-                                    let count = assistant.filterCount(rule.id)
-                                    Text(count == 1 ? "1 page item hidden" : "\(count) page items hidden")
-                                        .font(.system(size: 9)).foregroundStyle(palette.textDim)
-                                }
-                                Spacer(minLength: 4)
-                                Button { assistant.removePersonalFilter(rule.id) } label: {
-                                    Image(systemName: "trash").frame(width: 20, height: 20)
-                                }.accessibilityLabel("Delete filter")
-                            }
-                            .padding(8)
-                            .background(palette.hover, in: RoundedRectangle(cornerRadius: 9))
-                        }
-                    }
-                }.frame(maxHeight: 150)
-            }
-
-            HStack(spacing: 6) {
-                WorkInput(text: $assistant.filterDraft, placeholder: "Hide on this site…",
-                          identifier: "personal-filter-input", fontSize: 11, palette: palette,
-                          submit: assistant.addPersonalFilter, cancel: assistant.closeFilters)
-                    .frame(height: 25)
-                Button(action: assistant.addPersonalFilter) {
-                    Image(systemName: "arrow.up").frame(width: 28, height: 28)
-                        .background(palette.hover, in: Circle())
-                }
-                .disabled(assistant.filterDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("Add Personal Filter")
-            }
-            if !assistant.filterStatus.isEmpty {
-                Text(assistant.filterStatus)
-                    .font(.system(size: 9)).foregroundStyle(palette.textDim).lineLimit(2)
-            }
-        }
-        .buttonStyle(.pointing)
-        .foregroundStyle(palette.text)
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
 
 /// Per-site switches for the built-in blocker and dark pages.
 struct BuiltInRows: View {
