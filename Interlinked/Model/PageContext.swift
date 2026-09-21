@@ -1,6 +1,6 @@
 import Foundation
 
-struct PageMetadata: Codable, Equatable, Sendable {
+struct PageMetadata: Equatable, Sendable {
     var document: String
     var url: String
     var title: String
@@ -9,21 +9,69 @@ struct PageMetadata: Codable, Equatable, Sendable {
     var breadcrumbs: [String]
     var siteName: String? = nil
     var sensitive: Bool = false
+    var cookieNames: [String] = []
+    var hasLogoutControl: Bool = false
+    /// HttpOnly cookie names from Chromium. Never taken from page JavaScript.
+    var httpOnlyCookieNames: [String] = []
 
     var origin: String {
         guard let u = URL(string: url), let host = u.host else { return "" }
         return "\(u.scheme ?? "https")://\(host)" + (u.port.map { ":\($0)" } ?? "")
     }
     var host: String { URL(string: url)?.host ?? "" }
+    var authenticated: Bool {
+        PagePrivacy.isAuthenticated(
+            url: url,
+            sensitive: sensitive,
+            cookieNames: cookieNames,
+            hasLogoutControl: hasLogoutControl,
+            httpOnlyCookieNames: httpOnlyCookieNames
+        )
+    }
     var publicWebPage: Bool {
         guard let u = URL(string: url), ["https", "http"].contains(u.scheme),
-              u.user == nil, u.password == nil, !sensitive else { return false }
+              u.user == nil, u.password == nil, !authenticated else { return false }
         let host = host.lowercased()
         return host.contains(".") && !host.hasSuffix(".local") && !host.hasSuffix(".localhost") &&
             host != "localhost" && !host.contains(":") && host.range(of: "^[0-9.]+$", options: .regularExpression) == nil
     }
     /// Remote metadata never includes a full URL, query string, cookies, or form values.
     var evidence: String { [title, heading, summary, breadcrumbs.joined(separator: " · ")].joined(separator: "\n") }
+}
+
+extension PageMetadata: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case document, url, title, heading, summary, breadcrumbs, siteName, sensitive, cookieNames, hasLogoutControl
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        document = try c.decode(String.self, forKey: .document)
+        url = try c.decode(String.self, forKey: .url)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        heading = try c.decodeIfPresent(String.self, forKey: .heading) ?? ""
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        breadcrumbs = try c.decodeIfPresent([String].self, forKey: .breadcrumbs) ?? []
+        siteName = try c.decodeIfPresent(String.self, forKey: .siteName)
+        sensitive = try c.decodeIfPresent(Bool.self, forKey: .sensitive) ?? false
+        cookieNames = try c.decodeIfPresent([String].self, forKey: .cookieNames) ?? []
+        hasLogoutControl = try c.decodeIfPresent(Bool.self, forKey: .hasLogoutControl) ?? false
+        httpOnlyCookieNames = []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(document, forKey: .document)
+        try c.encode(url, forKey: .url)
+        try c.encode(title, forKey: .title)
+        try c.encode(heading, forKey: .heading)
+        try c.encode(summary, forKey: .summary)
+        try c.encode(breadcrumbs, forKey: .breadcrumbs)
+        try c.encodeIfPresent(siteName, forKey: .siteName)
+        try c.encode(sensitive, forKey: .sensitive)
+        try c.encode(cookieNames, forKey: .cookieNames)
+        try c.encode(hasLogoutControl, forKey: .hasLogoutControl)
+    }
 }
 
 struct PagePassage: Codable, Equatable, Identifiable, Sendable {

@@ -177,18 +177,21 @@ final class JevServiceTests: XCTestCase {
         let response = try await provider.decide(request)
         XCTAssertEqual(response.answers["page"]?.choice, "a")
     }
-    func testCriticalReadingRunsByDefaultAndPersistsOnRequestMode() throws {
+    func testCriticalReadingDefaultsToOnRequestAndPersistsAlwaysOn() throws {
         let name = "CriticalReadingPreferences-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
 
         XCTAssertTrue(JevPreferences.enabled(in: defaults))
-        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .automatic)
+        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
+        XCTAssertFalse(AutomaticReadingConsent.accepted(in: defaults))
 
         defaults.set(false, forKey: JevPreferences.enabledKey)
-        CriticalReadingMode.onRequest.save(to: defaults)
+        CriticalReadingMode.automatic.save(to: defaults)
+        AutomaticReadingConsent.accept(in: defaults)
         XCTAssertFalse(JevPreferences.enabled(in: defaults))
-        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
+        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .automatic)
+        XCTAssertTrue(AutomaticReadingConsent.accepted(in: defaults))
     }
 }
 
@@ -566,6 +569,36 @@ final class BrowserIntelligenceTests: XCTestCase {
         var sensitive = page(); sensitive.sensitive = true
         XCTAssertFalse(sensitive.publicWebPage)
         XCTAssertTrue(page().publicWebPage)
+    }
+    func testLoggedInInboxWithoutPasswordFieldIsNotPublic() {
+        var inbox = page("https://mail.example.com/inbox")
+        XCTAssertTrue(inbox.publicWebPage)
+        inbox.cookieNames = ["SID", "sessionid"]
+        XCTAssertFalse(inbox.publicWebPage)
+        XCTAssertTrue(inbox.authenticated)
+        inbox = page("https://mail.example.com/inbox")
+        inbox.hasLogoutControl = true
+        XCTAssertFalse(inbox.publicWebPage)
+        inbox = page("https://mail.example.com/inbox")
+        inbox.httpOnlyCookieNames = ["OSID"]
+        XCTAssertFalse(inbox.publicWebPage)
+    }
+    func testAnalyticsCookiesDoNotMakeAPageAuthenticated() {
+        var article = page()
+        article.cookieNames = ["_ga", "_gid", "CookieConsent"]
+        XCTAssertFalse(article.authenticated)
+        XCTAssertTrue(article.publicWebPage)
+    }
+    func testPageBridgeReportsAuthenticationSignalsWithoutTrustingHttpOnlyFromThePage() {
+        XCTAssertTrue(PageTextBridge.install.contains("cookieNames:document.cookie"))
+        XCTAssertTrue(PageTextBridge.install.contains("hasLogoutControl"))
+        XCTAssertFalse(PageTextBridge.install.contains("httpOnlyCookieNames"))
+        let payload = Data(#"{"document":"d","url":"https://mail.example.com/inbox","title":"Inbox","heading":"","summary":"","breadcrumbs":[],"sensitive":false,"cookieNames":["SID"],"hasLogoutControl":true,"httpOnlyCookieNames":["forged"]}"#.utf8)
+        let decoded = try? JSONDecoder().decode(PageMetadata.self, from: payload)
+        XCTAssertEqual(decoded?.cookieNames, ["SID"])
+        XCTAssertEqual(decoded?.hasLogoutControl, true)
+        XCTAssertEqual(decoded?.httpOnlyCookieNames, [])
+        XCTAssertEqual(decoded?.publicWebPage, false)
     }
     func testPersonalFiltersMatchVisibleHeadingsLocallyAndPersistPerSite() throws {
         let passages = [

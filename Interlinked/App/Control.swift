@@ -26,6 +26,7 @@ enum Control {
         "tint [name]",
         "sidebar [width|collapse|expand|toggle]",
         "overview [show|hide|toggle]",
+        "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
         "quit",
@@ -55,7 +56,7 @@ enum Control {
         switch command {
         case "commands":
             return json([
-                "reads": ["state", "commands", "measure-frames [pane]"],
+                "reads": ["state", "commands", "identity", "measure-frames [pane]"],
                 "writes": writeCommands,
             ])
 
@@ -77,6 +78,11 @@ enum Control {
                          "matches": a.matches.map { ["id": $0.id, "text": $0.text] },
                          "findings": a.findings.map { ["id": $0.id, "category": $0.signal.rawValue] },
                          "label": workspace.activePane.map { a.label($0, url: workspace.surfaces.line($0)) } ?? "",
+                         "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
+                         "origin_transport": TrustedOrigin.inspect(workspace.currentPageURL)?.transport.rawValue ?? "",
+                         "can_share": a.canShare,
+                         "automatic_reading": a.automaticReadingEnabled,
+                         "granted_origins": a.originGrants.records,
                          "last_decision": a.lastDecisionStatus, "find_scores": a.findScores])
 
         case "find-page":
@@ -273,6 +279,34 @@ enum Control {
             workspace.setTint(tint)
             return ok()
 
+        case "identity":
+            if words.isEmpty {
+                let origin = TrustedOrigin.inspect(workspace.currentPageURL)
+                return json([
+                    "open": workspace.identityOpen,
+                    "host": origin?.displayHost ?? "",
+                    "ascii_host": origin?.asciiHost ?? "",
+                    "transport": origin?.transport.rawValue ?? "",
+                    "url": origin?.fullURL ?? "",
+                    "mixed_script": origin?.mixedScript ?? false,
+                    "label": workspace.activePane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? "",
+                ])
+            }
+            switch words[0] {
+            case "hide":
+                workspace.closeIdentity()
+                return ok()
+            case "show":
+                workspace.identityOpen = false
+                workspace.toggleIdentity()
+                return ok()
+            case "toggle":
+                workspace.toggleIdentity()
+                return ok()
+            default:
+                return error("identity wants show, hide, or toggle")
+            }
+
         case "overview", "sidebar":
             if words.isEmpty {
                 return json([
@@ -393,6 +427,8 @@ enum Control {
             "tint": workspace.tint.name,
             "sidebar": Double(workspace.sidebar),
             "overview": workspace.overviewOpen,
+            "identity": workspace.identityOpen,
+            "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
             "writing": writing(workspace),
             "tabs": tabs,
         ]

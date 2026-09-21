@@ -47,23 +47,27 @@ struct AssistanceView: View {
             case .reading: EmptyView()
             case .permission:
                 Text(assistant.origin.isEmpty ? "Page unavailable" : assistant.origin).lineLimit(1).fontWeight(.medium)
-                Text("Jev uses OpenRouter and TypeSafe to evaluate this page's title, description, labels, and readable page text for each search or reading check. Forms and passwords are excluded. Sharing ends on navigation or reload.")
-                Text("Only share content you are comfortable sending. This does not enable sharing for other tabs.").foregroundStyle(.primary)
+                Text("Jev uses OpenRouter and TypeSafe to evaluate this page's title, description, labels, and readable page text for each search or reading check. Forms, passwords, cookies, and signed-in pages are excluded. A grant covers this site origin. Sharing this visit ends when you quit; remembering the site keeps the grant until you revoke it.")
+                Text("Only share content you are comfortable sending. OpenRouter's policy is that requests are anonymized and not used for training. You still accept the risk that a third party will see this page's text.").foregroundStyle(.primary)
                 if !assistant.enabled || !assistant.hasJevAccess {
                     SettingsLink { Text("Configure Jev in Settings…") }
                         .pointingHandCursor()
                 }
                 if !assistant.canShare {
-                    Text("Local, editable, and password pages cannot be shared.").foregroundStyle(.primary)
+                    Text("Local, signed-in, editable, and password pages cannot be shared.").foregroundStyle(.primary)
                 }
                 Text(assistant.status).foregroundStyle(.primary)
                 HStack {
                     Button("Cancel", action: assistant.closePanel)
                         .pointingHandCursor()
                     Spacer()
-                    Button("Share this page", action: assistant.allowPage)
+                    Button("Share this visit") { assistant.allowPage(remember: false) }
                         .disabled(!assistant.canShare || !assistant.enabled || !assistant.hasJevAccess)
                         .accessibilityIdentifier("allow-page-sharing")
+                        .pointingHandCursor()
+                    Button("Remember this site") { assistant.allowPage(remember: true) }
+                        .disabled(!assistant.canShare || !assistant.enabled || !assistant.hasJevAccess)
+                        .accessibilityIdentifier("remember-page-sharing")
                         .pointingHandCursor()
                 }
             case nil: EmptyView()
@@ -107,6 +111,7 @@ struct AssistanceSettings: View {
     @State private var keyMessage = ""
     @State private var exportMessage = ""
     @State private var confirmClearActivity = false
+    @State private var confirmAutomaticReading = false
     @State private var settingsSearch = ""
     @State private var promptDrafts = Dictionary(
         uniqueKeysWithValues: IntelligencePromptFeature.allCases.map {
@@ -166,6 +171,19 @@ struct AssistanceSettings: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the complete local intelligence audit log.")
+        }
+        .confirmationDialog(
+            "Turn on Always-on Critical Reading?",
+            isPresented: $confirmAutomaticReading,
+            titleVisibility: .visible
+        ) {
+            Button("Enable Always on") {
+                workspace.assistance.acceptAutomaticReading()
+            }
+            .accessibilityIdentifier("confirm-automatic-reading")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(AutomaticReadingConsent.warning)
         }
     }
 
@@ -269,16 +287,54 @@ struct AssistanceSettings: View {
             }
 
             Section("Behavior") {
-                Picker("Critical Reading", selection: $assistant.criticalReadingMode) {
+                Picker("Critical Reading", selection: Binding(
+                    get: { assistant.criticalReadingMode },
+                    set: { mode in
+                        if mode == .automatic && assistant.criticalReadingMode != .automatic {
+                            confirmAutomaticReading = true
+                        } else {
+                            if mode != .automatic { assistant.automaticReadingConsented = false }
+                            assistant.criticalReadingMode = mode
+                            assistant.configure()
+                        }
+                    }
+                )) {
                     ForEach(CriticalReadingMode.allCases) { mode in Text(mode.label).tag(mode) }
                 }
                 .pickerStyle(.menu)
                 .pointingHandCursor()
-                .onChange(of: assistant.criticalReadingMode) { _, _ in assistant.configure() }
+                .accessibilityIdentifier("critical-reading-mode")
+                SettingsNote(assistant.automaticReadingEnabled
+                    ? "Always-on sends readable text from sites you have granted. Revoke a site below to stop."
+                    : "Fresh installs leave Always-on off. Enabling it asks you to accept the privacy risk first.")
 
                 Toggle("Refine public page labels", isOn: $assistant.automaticLabels)
                     .pointingHandCursor()
                     .onChange(of: assistant.automaticLabels) { _, _ in assistant.configure() }
+            }
+
+            Section("Sites allowed to send page text") {
+                if assistant.originGrants.records.isEmpty {
+                    Text("No sites granted.").foregroundStyle(.primary)
+                } else {
+                    ForEach(assistant.originGrants.records, id: \.self) { origin in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(origin)
+                                Text(assistant.originGrants.isRemembered(origin) ? "Remembered on this Mac" : "This visit")
+                                    .font(.callout)
+                                    .foregroundStyle(.primary)
+                            }
+                            Spacer()
+                            Button("Revoke") { assistant.originGrants.revoke(origin) }
+                                .pointingHandCursor()
+                                .accessibilityIdentifier("revoke-origin-grant")
+                        }
+                    }
+                    Button("Revoke All", role: .destructive, action: assistant.originGrants.revokeAll)
+                        .pointingHandCursor()
+                }
+                SettingsNote("Grants are per origin. Remembered grants persist only if you choose Remember this site.")
             }
 
             promptSettings(for: .appleIntelligence)
@@ -383,8 +439,8 @@ struct AssistanceSettings: View {
             }
 
             Section("Privacy") {
-                SettingsFeature(icon: "lock", title: "Sensitive pages stay local", detail: "Passwords, forms, local files, and editable pages are not shared.")
-                SettingsFeature(icon: "eye", title: "You stay in control", detail: "Intelligence results are suggestions. Review the source before relying on them.")
+                SettingsFeature(icon: "lock", title: "Sensitive pages stay local", detail: "Passwords, forms, cookies, local files, signed-in pages, and editable pages are not shared.")
+                SettingsFeature(icon: "eye", title: "You stay in control", detail: "Always-on reading needs informed consent and a per-site grant. Intelligence results are suggestions. Review the source before relying on them.")
             }
         }
         .settingsForm()

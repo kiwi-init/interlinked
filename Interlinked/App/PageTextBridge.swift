@@ -3,6 +3,11 @@ import Foundation
 @MainActor
 protocol PageJavaScriptEvaluating: AnyObject {
     func interlinkedEvaluate(_ body: String, arguments: [String: Any]) async throws -> Any?
+    func httpOnlyCookieNames() async -> [String]
+}
+
+extension PageJavaScriptEvaluating {
+    func httpOnlyCookieNames() async -> [String] { [] }
 }
 
 /// Runs on demand in the page. Reading annotations track only their source nodes.
@@ -48,7 +53,9 @@ protocol PageJavaScriptEvaluating: AnyObject {
             heading:clean(document.querySelector('main h1,article h1,h1')?.textContent).slice(0,120),
             summary:meta('description') || meta('og:description'),siteName:meta('og:site_name'),
             breadcrumbs:Array.from(document.querySelectorAll('[aria-label*="readcrumb"] a,[itemprop="itemListElement"] [itemprop="name"]')).slice(0,5).map(n=>clean(n.textContent).slice(0,60)),
-            sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]')};
+            sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]'),
+            cookieNames:document.cookie.split(';').map(part=>part.split('=')[0].trim()).filter(Boolean).slice(0,40),
+            hasLogoutControl:Array.from(document.querySelectorAll('a,button,[role="button"],[role="link"]')).slice(0,200).some(node=>/\b(log\s*out|sign\s*out|sign\s*off)\b/i.test(clean(node.innerText||node.getAttribute('aria-label')||node.title)))};
         },
         navigationLink(destination) {
           if (!lastLink || Date.now()-lastLink.at>5000) return null;
@@ -384,7 +391,9 @@ protocol PageJavaScriptEvaluating: AnyObject {
     """#
 
     static func metadata<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageMetadata {
-        try await value(view, call: "return interlinkedContext.metadata();", type: PageMetadata.self)
+        var page = try await value(view, call: "return interlinkedContext.metadata();", type: PageMetadata.self)
+        page.httpOnlyCookieNames = await view.httpOnlyCookieNames()
+        return page
     }
     static func extract<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageExtract {
         try await value(view, call: "return interlinkedContext.extract();", type: PageExtract.self)

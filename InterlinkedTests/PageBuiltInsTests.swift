@@ -1,5 +1,4 @@
 import XCTest
-@testable import Interlinked
 
 final class PageBuiltInsTests: XCTestCase {
     func testSiteKeyIgnoresLeadingWWW() {

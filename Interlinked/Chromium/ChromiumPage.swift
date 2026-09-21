@@ -100,6 +100,15 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
         }
     }
 
+    func httpOnlyCookieNames() async -> [String] {
+        guard let url else { return [] }
+        return await withCheckedContinuation { continuation in
+            nativeView.httpOnlyCookieNames(for: url) { names in
+                continuation.resume(returning: names)
+            }
+        }
+    }
+
     func evaluateJavaScript(_ script: String, completion: ((Any?, Error?) -> Void)? = nil) {
         nativeView.evaluateJavaScript(script) { result, error in completion?(result, error) }
     }

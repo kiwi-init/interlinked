@@ -105,8 +105,6 @@ targets:
   InterlinkedTests:
     type: bundle.unit-test
     platform: macOS
-    dependencies:
-      - target: Interlinked
     sources:
       - path: InterlinkedTests
       - path: Interlinked/Model
@@ -116,6 +114,24 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.tests
         GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_NAME: InterlinkedTests
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        TEST_HOST: ""
+        BUNDLE_LOADER: ""
+  InterlinkedUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: InterlinkedUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Interlinked
+    dependencies:
+      - target: Interlinked
 schemes:
   Interlinked:
     build:
@@ -123,11 +139,21 @@ schemes:
         Interlinked: all
         interlinked-ctl: all
         InterlinkedTests: [test]
+        InterlinkedUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - InterlinkedTests
+        - InterlinkedUITests
     archive:
       config: TestFlight
+  InterlinkedTests:
+    build:
+      targets:
+        InterlinkedTests: [test]
+    test:
+      config: Debug
+      targets:
+        - InterlinkedTests

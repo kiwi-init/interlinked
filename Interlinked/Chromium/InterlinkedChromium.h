@@ -125,6 +125,8 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 - (void)closeBrowser;
 - (void)evaluateJavaScript:(NSString *)script
                 completion:(void (^)(id _Nullable result, NSError * _Nullable error))completion;
+- (void)httpOnlyCookieNamesForURL:(NSURL *)URL
+                       completion:(void (^)(NSArray<NSString *> *names))completion;
 - (void)findText:(NSString *)text
        backwards:(BOOL)backwards
         findNext:(BOOL)findNext

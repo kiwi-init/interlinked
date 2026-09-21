@@ -45,6 +45,9 @@ final class BrowserAssistance {
     var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.bool(forKey: "jev.labels")
     var criticalReadingMode = CriticalReadingMode()
+    var automaticReadingConsented = AutomaticReadingConsent.accepted()
+    let originGrants = AIContentGrantStore()
+    @ObservationIgnored private var declinedOrigins: Set<String> = []
     @ObservationIgnored weak var workspace: Workspace?
     @ObservationIgnored private var intelligence: BrowserIntelligence
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
@@ -61,6 +64,9 @@ final class BrowserAssistance {
     }
     var current: PageMetadata? { workspace?.activePane.flatMap { metadata[$0] } }
     var canShare: Bool { current?.publicWebPage == true }
+    var automaticReadingEnabled: Bool {
+        criticalReadingMode == .automatic && automaticReadingConsented
+    }
     var shared: Bool { workspace?.activePane.map { grants[$0] == metadata[$0]?.document && grants[$0] != nil } ?? false }
     var origin: String { current?.origin ?? "" }
     var currentFilterHost: String { PersonalFilters.site(current?.host ?? "") }
@@ -152,7 +158,7 @@ final class BrowserAssistance {
     func changedTab() {
         filterPanelOpen = false; filterBusy = false; filterStatus = ""
         for key in Array(tasks.keys) where key.hasPrefix("filters-") { cancel(key) }
-        if criticalReadingMode == .automatic, panel == .reading {
+        if automaticReadingEnabled, panel == .reading {
             cancel("reading")
             if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
             panel = nil; nextPanel = nil; busy = false; findings = []; status = ""
@@ -165,7 +171,7 @@ final class BrowserAssistance {
     func activated(_ pane: PaneID) {
         guard let view = workspace?.hosts.existingBrowser(pane) else { return }
         if let page = metadata[pane] { applyPersonalFilters(pane: pane, page: page, view: view) }
-        guard criticalReadingMode == .automatic else {
+        guard automaticReadingEnabled else {
             PageTextBridge.clear(view)
             readingResults.removeValue(forKey: pane)
             return
@@ -177,11 +183,16 @@ final class BrowserAssistance {
     func configure() {
         UserDefaults.standard.set(enabled, forKey: JevPreferences.enabledKey)
         UserDefaults.standard.set(automaticLabels, forKey: "jev.labels")
+        if automaticReadingConsented { AutomaticReadingConsent.accept() }
+        else { AutomaticReadingConsent.reset() }
+        if criticalReadingMode == .automatic && !automaticReadingConsented {
+            criticalReadingMode = .onRequest
+        }
         criticalReadingMode.save()
         for key in Array(tasks.keys) { cancel(key) }
         readingInFlight.removeAll()
         filterBusy = false
-        if !enabled || criticalReadingMode == .onRequest {
+        if !enabled || !automaticReadingEnabled {
             readingResults.removeAll()
             if panel == .reading { closePanel() }
             else if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
@@ -217,21 +228,37 @@ final class BrowserAssistance {
         nextPanel = destination; panel = .permission
         status = ""
     }
-    func allowPage() {
+    func allowPage(remember: Bool = false) {
         do {
             try requireReady()
             guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
-                status = "This page is local, editable, or contains a password field. Page sharing is unavailable."; return
+                status = "This page is local, signed-in, editable, or contains a password field. Page sharing is unavailable."; return
             }
+            declinedOrigins.remove(page.origin)
+            originGrants.grant(page.origin, remember: remember)
             grants[pane] = page.document
             selectLabel(pane, page: page)
             panel = nextPanel
             if panel == .find { findChanged() }
             if panel == .reading { review() }
+            if panel == nil, automaticReadingEnabled {
+                if let view = workspace?.hosts.existingBrowser(pane) {
+                    startAutomaticReading(pane: pane, page: page, view: view)
+                }
+            }
         } catch { status = errorMessage(error) }
+    }
+    func acceptAutomaticReading() {
+        automaticReadingConsented = true
+        criticalReadingMode = .automatic
+        configure()
     }
     func revokePage() {
         if let pane = workspace?.activePane {
+            if let origin = metadata[pane]?.origin {
+                originGrants.revoke(origin)
+                declinedOrigins.insert(origin)
+            }
             grants.removeValue(forKey: pane)
             readingInFlight.removeValue(forKey: pane)
             cancel("label-\(pane.rawValue)")
@@ -275,7 +302,7 @@ final class BrowserAssistance {
             do {
                 let page = try await PageTextBridge.metadata(view)
                 guard self.accepts(key, revision), view.url == url else { return }
-                guard page.publicWebPage else { self.vaultStatus = "Local, editable, and password pages are not saved."; return }
+                guard page.publicWebPage else { self.vaultStatus = "Local, signed-in, editable, and password pages are not saved."; return }
                 let extract = try await PageTextBridge.extract(view)
                 guard self.accepts(key, revision), view.url == url, page.document == extract.document else { return }
                 self.history.record(page, passages: extract.passages)
@@ -293,6 +320,9 @@ final class BrowserAssistance {
         findChanged()
     }
     func closePanel() {
+        if panel == .permission, let origin = current?.origin, !origin.isEmpty {
+            declinedOrigins.insert(origin)
+        }
         let wasFinding = panel == .find
         cancel("find"); cancel("exact"); cancel("reading"); panel = nil; nextPanel = nil
         readingPanelOpen = false
@@ -419,7 +449,7 @@ final class BrowserAssistance {
         guard byMeaning else { return }
         guard enabled, hasJevAccess else { status = "Exact find is available. Enable Jev in Settings for meaning search."; return }
         guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
-            status = "Exact find only on local, editable, or password pages."; return
+            status = "Exact find only on local, signed-in, editable, or password pages."; return
         }
         if !shared { grants[pane] = page.document; selectLabel(pane, page: page) }
         runPassages(reading: false)
@@ -448,7 +478,7 @@ final class BrowserAssistance {
     func review() {
         do { try requireReady() } catch { status = errorMessage(error); return }
         guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
-            status = "Reading checks are unavailable on local, editable, or password pages."; return
+            status = "Reading checks are unavailable on local, signed-in, editable, or password pages."; return
         }
         grants[pane] = page.document
         runPassages(reading: true)
@@ -459,9 +489,15 @@ final class BrowserAssistance {
         startAutomaticReading(pane: pane, page: page, view: view)
     }
     private func startAutomaticReading(pane: PaneID, page: PageMetadata, view: ChromiumPage) {
-        guard enabled, hasJevAccess, criticalReadingMode == .automatic, page.publicWebPage,
+        guard enabled, hasJevAccess, automaticReadingEnabled, page.publicWebPage,
               workspace?.activePane == pane, workspace?.hosts.existingBrowser(pane) === view,
-              panel == nil || panel == .reading else { return }
+              panel == nil || panel == .reading || panel == .permission else { return }
+        guard originGrants.allows(page.origin) else {
+            if panel == nil, !declinedOrigins.contains(page.origin) {
+                requestSharing(for: .reading)
+            }
+            return
+        }
         if let result = readingResults[pane], result.document == page.document {
             panel = .reading; busy = false; findings = result.findings; status = result.status
             grants[pane] = page.document
