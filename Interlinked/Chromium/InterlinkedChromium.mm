@@ -22,6 +22,7 @@
 #include "include/cef_permission_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
+#include "include/cef_task.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_stream_resource_handler.h"
@@ -258,6 +259,48 @@ void ScheduleMessagePump(int64_t delay_ms) {
       ScheduleMessagePumpOnMain(delay_ms);
     });
   }
+}
+
+// CefBrowserHost::SetFocus waits on Chromium worker threads that run at
+// Default QoS. The app main thread is User-interactive, so calling it from a
+// GCD/Swift block (outside CefDoMessageLoopWork) is a priority inversion.
+class SetBrowserFocusTask final : public CefTask {
+ public:
+  SetBrowserFocusTask(CefRefPtr<CefBrowser> browser, bool focus)
+      : browser_(std::move(browser)), focus_(focus) {}
+
+  void Execute() override {
+    if (browser_) {
+      browser_->GetHost()->SetFocus(focus_);
+    }
+  }
+
+ private:
+  CefRefPtr<CefBrowser> browser_;
+  const bool focus_;
+  IMPLEMENT_REFCOUNTING(SetBrowserFocusTask);
+};
+
+void PostBrowserFocus(CefRefPtr<CefBrowser> browser, bool focus) {
+  if (!browser) {
+    return;
+  }
+  CefPostTask(TID_UI, new SetBrowserFocusTask(std::move(browser), focus));
+}
+
+NSView *FirstResponderCandidate(NSView *view) {
+  if (!view || view.hidden) {
+    return nil;
+  }
+  if (view.acceptsFirstResponder) {
+    return view;
+  }
+  for (NSView *child in view.subviews) {
+    if (NSView *found = FirstResponderCandidate(child)) {
+      return found;
+    }
+  }
+  return nil;
 }
 
 class InterlinkedBrowserApp final : public CefApp,
@@ -924,7 +967,7 @@ std::atomic_bool g_running(false);
     browserView.hidden = self.window == nil;
   }
   if (self.window == nil) {
-    _browser->GetHost()->SetFocus(false);
+    PostBrowserFocus(_browser, false);
   }
 }
 
@@ -956,9 +999,17 @@ std::atomic_bool g_running(false);
 - (void)stopLoading { if (_browser) _browser->StopLoad(); }
 
 - (void)focusBrowser {
-  if (_browser) {
-    _browser->GetHost()->SetFocus(true);
+  if (!_browser) {
+    return;
   }
+  // Windowed Chromium takes keyboard focus through AppKit. That path does not
+  // wait on Default-QoS worker threads the way CefBrowserHost::SetFocus does.
+  NSView *hostView = (__bridge NSView *)_browser->GetHost()->GetWindowHandle();
+  NSView *target = FirstResponderCandidate(hostView);
+  if (target.window && [target.window makeFirstResponder:target]) {
+    return;
+  }
+  PostBrowserFocus(_browser, true);
 }
 
 - (void)evaluateJavaScript:(NSString *)script
