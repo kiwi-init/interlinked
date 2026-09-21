@@ -104,9 +104,8 @@ The native app is in `Interlinked/`, its control client in `InterlinkedControl/`
 Run the tests with:
 
 ```sh
-xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
-  -derivedDataPath build -destination 'platform=macOS' \
-  -only-testing:InterlinkedTests test
+xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests -configuration Debug \
+  -derivedDataPath build -destination 'platform=macOS,arch=arm64' test
 ```
 
 UI tests launch the app against the local fixture server. They need Chromium staged the same way as `script/run`:

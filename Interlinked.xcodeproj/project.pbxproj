@@ -96,13 +96,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		6626476DDB437C7DD4B559AD /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 7AC4D9DFF607FEBADA009B15 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 729C8F9419A6AAD008144E8C;
-			remoteInfo = Interlinked;
-		};
 		E4342A75E4196943E9D82BF5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7AC4D9DFF607FEBADA009B15 /* Project object */;
@@ -394,7 +387,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				074DBAB3FFA2477E5195BBE1 /* PBXTargetDependency */,
 			);
 			name = InterlinkedTests;
 			packageProductDependencies = (
@@ -636,11 +628,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		074DBAB3FFA2477E5195BBE1 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 729C8F9419A6AAD008144E8C /* Interlinked */;
-			targetProxy = 6626476DDB437C7DD4B559AD /* PBXContainerItemProxy */;
-		};
 		36E099C3FA213FEB54C70E15 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 729C8F9419A6AAD008144E8C /* Interlinked */;
@@ -700,8 +687,11 @@
 		3DA05C7F640FA1018005362D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				BUNDLE_LOADER = "";
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -709,8 +699,9 @@
 					"@loader_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.tests;
+				PRODUCT_NAME = InterlinkedTests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Interlinked.app/Contents/MacOS/Interlinked";
+				TEST_HOST = "";
 			};
 			name = Release;
 		};
@@ -975,8 +966,11 @@
 		BD7AAE1FC84DF610EF616EF4 /* TestFlight */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				BUNDLE_LOADER = "";
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -984,8 +978,9 @@
 					"@loader_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.tests;
+				PRODUCT_NAME = InterlinkedTests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Interlinked.app/Contents/MacOS/Interlinked";
+				TEST_HOST = "";
 			};
 			name = TestFlight;
 		};
@@ -1055,8 +1050,11 @@
 		E61C0E1D2CF3CE9045EDB560 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				BUNDLE_LOADER = "";
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1064,8 +1062,9 @@
 					"@loader_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.tests;
+				PRODUCT_NAME = InterlinkedTests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Interlinked.app/Contents/MacOS/Interlinked";
+				TEST_HOST = "";
 			};
 			name = Debug;
 		};
