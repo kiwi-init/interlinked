@@ -60,6 +60,8 @@ struct InterlinkedApp: App {
                 }
                 .keyboardShortcut("j", modifiers: .command)
                 Divider()
+                Button("Connection Details") { workspace.toggleIdentity() }
+                    .disabled(workspace.currentPageURL == nil)
                 Button("Edit Address") { workspace.editActiveLine() }
                     .keyboardShortcut("l", modifiers: .command)
                 Button("Reload Page") {

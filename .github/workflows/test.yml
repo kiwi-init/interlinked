@@ -1,0 +1,32 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: InterlinkedTests
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: build/cef
+          key: cef-${{ runner.os }}-${{ hashFiles('script/bootstrap-chromium') }}
+      - name: Install Rust, CMake, Ninja, and XcodeGen
+        run: brew install rust cmake ninja xcodegen
+      - name: Stage Chromium
+        run: script/bootstrap-chromium
+      - name: Generate project
+        run: xcodegen generate
+      - name: Run unit tests
+        run: |
+          xcodebuild -project Interlinked.xcodeproj -scheme Interlinked \
+            -configuration Debug -derivedDataPath build \
+            -destination 'platform=macOS' \
+            -only-testing:InterlinkedTests \
+            -allowProvisioningUpdates \
+            test

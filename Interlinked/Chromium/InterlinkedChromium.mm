@@ -985,6 +985,47 @@ std::atomic_bool g_running(false);
   _evaluations[@(identifier)] = [completion copy];
 }
 
+- (void)httpOnlyCookieNamesForURL:(NSURL *)URL
+                       completion:(void (^)(NSArray<NSString *> *names))completion {
+  if (!_browser || URL.absoluteString.length == 0) {
+    completion(@[]);
+    return;
+  }
+  CefRefPtr<CefDictionaryValue> parameters = CefDictionaryValue::Create();
+  CefRefPtr<CefListValue> urls = CefListValue::Create();
+  urls->SetSize(1);
+  urls->SetString(0, CefFromNSString(URL.absoluteString));
+  parameters->SetList("urls", urls);
+  const int identifier = _browser->GetHost()->ExecuteDevToolsMethod(
+      0, "Network.getCookies", parameters);
+  if (identifier == 0) {
+    completion(@[]);
+    return;
+  }
+  _evaluations[@(identifier)] = [^(id result, NSError *error) {
+    if (![result isKindOfClass:NSArray.class]) {
+      completion(@[]);
+      return;
+    }
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (id cookie in (NSArray *)result) {
+      if (![cookie isKindOfClass:NSDictionary.class]) {
+        continue;
+      }
+      NSDictionary *entry = cookie;
+      if (![entry[@"httpOnly"] respondsToSelector:@selector(boolValue)] ||
+          ![entry[@"httpOnly"] boolValue]) {
+        continue;
+      }
+      NSString *name = entry[@"name"];
+      if ([name isKindOfClass:NSString.class] && name.length > 0) {
+        [names addObject:name];
+      }
+    }
+    completion(names);
+  } copy];
+}
+
 - (void)findText:(NSString *)text
        backwards:(BOOL)backwards
         findNext:(BOOL)findNext
@@ -1326,6 +1367,11 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
     completion(nil, [NSError errorWithDomain:@"computer.interlinked.chromium"
                                          code:13
                                      userInfo:@{NSLocalizedDescriptionKey: message}]);
+    return;
+  }
+  NSArray *cookies = payload[@"cookies"];
+  if ([cookies isKindOfClass:NSArray.class]) {
+    completion(cookies, nil);
     return;
   }
   NSDictionary *exception = payload[@"exceptionDetails"];

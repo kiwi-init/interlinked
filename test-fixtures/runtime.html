@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Runtime fixtures</title>
+<style>
+  :root { color-scheme: light dark; font: 16px system-ui; }
+  body { max-width: 760px; margin: 40px auto; padding: 0 20px; }
+  section { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 12px; padding: 16px; margin: 16px 0; }
+  output { display: block; min-height: 1.4em; margin-top: 8px; white-space: pre-wrap; }
+</style>
+<h1>Runtime fixtures</h1>
+<p>WebSockets, service workers, fullscreen, history, and a process-recovery note. Login, upload, download, and popup blockers live on the <a href="/">capability index</a>.</p>
+
+<section>
+  <h2>WebSocket</h2>
+  <button id="ws">Connect echo socket</button>
+  <output id="ws-status">Not connected.</output>
+</section>
+
+<section>
+  <h2>Service worker</h2>
+  <button id="sw">Register service worker</button>
+  <output id="sw-status">Not registered.</output>
+</section>
+
+<section>
+  <h2>Fullscreen</h2>
+  <button id="fullscreen">Enter fullscreen</button>
+  <output id="fullscreen-status">Windowed.</output>
+</section>
+
+<section>
+  <h2>History</h2>
+  <a href="/history/a">History A</a>
+  <a href="/history/b">History B</a>
+  <button id="back">Back</button>
+  <output id="history-status"></output>
+</section>
+
+<section>
+  <h2>Process recovery</h2>
+  <p>Force-quit the page process from Activity Monitor while this tab is in the background, then return to it. Interlinked should restore the URL. This check is manual.</p>
+</section>
+
+<script>
+  document.querySelector('#ws').onclick = () => {
+    const output = document.querySelector('#ws-status');
+    const socket = new WebSocket(`ws://${location.host}/ws`);
+    socket.onopen = () => { socket.send('ping'); output.textContent = 'Socket opened.'; };
+    socket.onmessage = event => { output.textContent = `Echo: ${event.data}`; };
+    socket.onerror = () => { output.textContent = 'Socket failed.'; };
+  };
+  document.querySelector('#sw').onclick = async () => {
+    const output = document.querySelector('#sw-status');
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      output.textContent = `Registered: ${registration.scope}`;
+    } catch (error) {
+      output.textContent = `Service worker failed: ${error.name}: ${error.message}`;
+    }
+  };
+  document.querySelector('#fullscreen').onclick = async () => {
+    const output = document.querySelector('#fullscreen-status');
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        output.textContent = 'Windowed.';
+      } else {
+        await document.documentElement.requestFullscreen();
+        output.textContent = 'Fullscreen.';
+      }
+    } catch (error) {
+      output.textContent = `Fullscreen failed: ${error.name}: ${error.message}`;
+    }
+  };
+  document.querySelector('#history-status').textContent = location.pathname;
+  document.querySelector('#back').onclick = () => history.back();
+</script>
+</html>

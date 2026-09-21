@@ -74,6 +74,7 @@ final class Workspace {
     let builtIns = PageBuiltIns()
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
+    var identityOpen = false
     var pageHistoryOpen = false
     var quickSwitchOpen = false
     var leftCommandKeyHeld = false
@@ -111,6 +112,7 @@ final class Workspace {
         guard open != overviewOpen else { return }
         if open {
             discardLine()
+            closeIdentity()
             hosts.capturePreviews()
             assistance.closePanel()
             assistance.related()
@@ -200,22 +202,41 @@ final class Workspace {
         else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
+        else if identityOpen { closeIdentity() }
         else if editing != nil { discardLine() }
         else if overviewOpen { setOverviewOpen(false) }
         else { cancelListening() }
+    }
+
+    func toggleIdentity() {
+        if identityOpen {
+            closeIdentity()
+            return
+        }
+        guard currentPageURL != nil else { return }
+        discardLine()
+        setOverviewOpen(false)
+        assistance.closePanel()
+        identityOpen = true
+    }
+
+    func closeIdentity() {
+        guard identityOpen else { return }
+        identityOpen = false
+        restoreFocus()
     }
 
     private func restoreFocus() {
         let expectedPane = activePane
         DispatchQueue.main.async { [weak self] in
             guard let self, let pane = expectedPane,
-                  self.activePane == pane, !self.overviewOpen, self.editing == nil else { return }
+                  self.activePane == pane, !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
             if self.hosts.focus(pane) { return }
             // SwiftUI may attach the retained Chromium view one run-loop turn
             // after the selected tab changes.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.activePane == pane,
-                      !self.overviewOpen, self.editing == nil else { return }
+                      !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
                 self.hosts.focus(pane)
             }
         }
@@ -228,7 +249,9 @@ final class Workspace {
         builtIns.start(workspace: self)
         assistance.workspace = self
         downloads.refreshNotificationStatus()
-        if let session = Session.read() {
+        if ProcessInfo.processInfo.arguments.contains("-interlinked-ui-testing") {
+            openTab()
+        } else if let session = Session.read() {
             restore(session)
             if tabs.isEmpty { openTab() }
         } else {
@@ -237,6 +260,10 @@ final class Workspace {
         hosts.startMemoryPressureMonitoring(workspace: self)
         if let appDelegate = NSApp.delegate as? AppDelegate {
             openExternalURLs(appDelegate.takePendingWebURLs())
+        }
+        if let raw = ProcessInfo.processInfo.environment["INTERLINKED_UI_TEST_URL"],
+           let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            openExternalURLs([url])
         }
         #if !TESTFLIGHT
             control = ControlServer()
@@ -429,6 +456,7 @@ final class Workspace {
 
     func clickPane(_ pane: PaneID) {
         if editing != nil { editing = nil }
+        if identityOpen { closeIdentity() }
         if overviewOpen { overviewOpen = false }
         if quickSwitchOpen { quickSwitchOpen = false }
         if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
@@ -516,6 +544,7 @@ final class Workspace {
         if editing?.target == target { return }
         commitLine()
         overviewOpen = false
+        identityOpen = false
         editing = LineEdit(target: target, text: text,
                            original: target.pane == nil ? nil : text)
     }
@@ -910,6 +939,7 @@ final class Workspace {
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
         overviewOpen = false
+        identityOpen = false
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }

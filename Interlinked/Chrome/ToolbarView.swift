@@ -10,8 +10,9 @@ struct PageHandle: View {
     private var hovering: Bool { workspace.quickSwitchOpen || workspace.leftCommandKeyHeld }
 
     private var pane: PaneID? { workspace.activePane }
-    private var expanded: Bool { workspace.overviewOpen || hovering || workspace.editing != nil }
-    private var showsTabs: Bool { !workspace.overviewOpen && (hovering || workspace.editing != nil) && voiceCaption == nil }
+    private var expanded: Bool { workspace.overviewOpen || workspace.identityOpen || hovering || workspace.editing != nil }
+    private var showsTabs: Bool { !workspace.overviewOpen && !workspace.identityOpen && (hovering || workspace.editing != nil) && voiceCaption == nil }
+    private var trustedOrigin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
     private var identity: String {
         guard let pane else { return "All tabs" }
         let label = workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
@@ -46,8 +47,18 @@ struct PageHandle: View {
         min(CGFloat(quickTabs.count * 42), max(0, available.height - 112 - resultsHeight))
     }
     private var controlsHeight: CGFloat { 76 + tabsHeight }
+    private var handleBarHeight: CGFloat {
+        if workspace.overviewOpen || workspace.identityOpen || showsTabs || workspace.editing != nil || voiceCaption != nil {
+            return 44
+        }
+        return trustedOrigin == nil ? 44 : 52
+    }
+    private var identitySize: CGSize {
+        CGSize(width: min(420, available.width - 36), height: min(248, available.height - 72))
+    }
     private var size: CGSize {
         if workspace.overviewOpen { return overviewSize }
+        if workspace.identityOpen { return identitySize }
         if voiceCaption != nil { return CGSize(width: min(340, available.width - 36), height: 44) }
         if showsTabs {
             let address = workspace.editing?.text ?? pane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? ""
@@ -60,6 +71,10 @@ struct PageHandle: View {
                           height: controlsHeight + resultsHeight)
         }
         let labelWidth = (identity as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
+        if let origin = trustedOrigin {
+            let originWidth = (origin.compactLabel as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium)]).width
+            return CGSize(width: min(max(labelWidth, originWidth) + 78, 280, available.width - 36), height: 52)
+        }
         return CGSize(width: min(labelWidth + 66, 240, available.width - 36), height: 44)
     }
 
@@ -162,6 +177,11 @@ struct PageHandle: View {
                     .frame(width: overviewSize.width, height: overviewSize.height)
                     .transition(.opacity)
             }
+            if workspace.identityOpen && workspace.editing == nil {
+                IdentityInspector(origin: trustedOrigin, palette: palette)
+                    .frame(width: identitySize.width, height: identitySize.height)
+                    .transition(.opacity)
+            }
             HStack(spacing: 0) {
                 Button { workspace.toggleOverview() } label: {
                     SiteIcon(pane: pane, palette: palette, framed: false)
@@ -190,39 +210,67 @@ struct PageHandle: View {
                         .font(.system(size: 12))
                         .lineLimit(1)
                         .padding(.trailing, 14)
+                } else if workspace.identityOpen {
+                    Spacer(minLength: 0)
                 } else {
-                    Button { workspace.editActiveLine() } label: {
-                        Group {
-                            if workspace.showsCopiedPageURL {
-                                Text("Copied")
-                                    .font(.system(size: 12, weight: .medium))
-                            } else {
-                                AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
-                            }
-                        }
-                            .lineLimit(1)
-                            .padding(.trailing, 16)
-                            .frame(height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.pointing)
-                    .accessibilityLabel("Edit address, \(identity)")
-                    .accessibilityIdentifier("page-address")
-                    .help(pane.map { workspace.surfaces.line($0) } ?? "")
+                    collapsedIdentity
                 }
             }
-            .frame(height: 44)
+            .frame(height: handleBarHeight)
         }
         .frame(width: size.width, height: size.height, alignment: .bottomLeading)
-        .clipShape(RoundedRectangle(cornerRadius: workspace.overviewOpen ? 20 : 14, style: .continuous))
-        .modifier(PageGlass(radius: workspace.overviewOpen ? 20 : 14))
+        .clipShape(RoundedRectangle(cornerRadius: workspace.overviewOpen || workspace.identityOpen ? 20 : 14, style: .continuous))
+        .modifier(PageGlass(radius: workspace.overviewOpen || workspace.identityOpen ? 20 : 14))
         .modifier(AILabelGlow(effect: workspace.assistance.labelEffect, pane: pane,
-                               radius: workspace.overviewOpen ? 20 : 14))
+                               radius: workspace.overviewOpen || workspace.identityOpen ? 20 : 14))
         .foregroundStyle(palette.text)
         .onHover { workspace.quickSwitchOpen = $0 }
         .onChange(of: workspace.addressResults.map(\.id)) { _, _ in workspace.selectedSearchResult = nil }
         .animation(reduceMotion ? nil : Metrics.morph, value: size)
         .animation(reduceMotion ? nil : Metrics.morph, value: expanded)
+    }
+
+    private var collapsedIdentity: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { workspace.editActiveLine() } label: {
+                Group {
+                    if workspace.showsCopiedPageURL {
+                        Text("Copied")
+                            .font(.system(size: 12, weight: .medium))
+                    } else {
+                        AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
+                    }
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.pointing)
+            .accessibilityLabel(trustedOrigin.map { "Edit address, \(identity), \($0.accessibilityLabel)" } ?? "Edit address, \(identity)")
+            .accessibilityIdentifier("page-address")
+            .help(pane.map { workspace.surfaces.line($0) } ?? "")
+            if let origin = trustedOrigin {
+                Button { workspace.toggleIdentity() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: origin.transport == .http ? "exclamationmark.triangle.fill" : "lock.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
+                        Text(origin.compactLabel)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.pointing)
+                .accessibilityLabel("Site identity, \(origin.accessibilityLabel)")
+                .accessibilityIdentifier("page-origin")
+                .help(origin.fullURL)
+            }
+        }
+        .padding(.trailing, 16)
+        .frame(height: trustedOrigin == nil ? 44 : 52)
     }
 
     private var historyResults: some View {
@@ -257,6 +305,81 @@ struct PageHandle: View {
         .accessibilityIdentifier(id)
     }
 
+}
+
+/// Connection details for the current origin. Page labels never appear here.
+private struct IdentityInspector: View {
+    @Environment(Workspace.self) private var workspace
+    var origin: TrustedOrigin?
+    var palette: Palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Connection")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button { workspace.closeIdentity() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.pointing)
+                    .accessibilityLabel("Close connection details")
+                    .accessibilityIdentifier("close-identity")
+            }
+            if let origin {
+                HStack(spacing: 6) {
+                    Image(systemName: origin.transport == .http ? "exclamationmark.triangle.fill" : "lock.fill")
+                        .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.text)
+                    Text(origin.transport.compactLabel)
+                        .fontWeight(.medium)
+                        .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.text)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(origin.accessibilityLabel)
+                labeled("Site", origin.displayHost)
+                if origin.usesPunycode {
+                    labeled("Encoded host", origin.asciiHost)
+                }
+                labeled("Address", origin.fullURL)
+                if origin.mixedScript {
+                    Text("This hostname mixes writing systems and may imitate another site.")
+                        .foregroundStyle(Color(red: 0.82, green: 0.38, blue: 0.08))
+                }
+                if origin.transport == .http {
+                    Text("This connection is not encrypted. Anything you send can be read on the network.")
+                        .foregroundStyle(Color(red: 0.82, green: 0.38, blue: 0.08))
+                }
+                HStack {
+                    Button("Edit Address", action: workspace.editActiveLine)
+                        .pointingHandCursor()
+                        .accessibilityIdentifier("identity-edit-address")
+                    Spacer()
+                    Button("Copy URL") { _ = workspace.copyCurrentPageURL() }
+                        .pointingHandCursor()
+                        .accessibilityIdentifier("identity-copy-url")
+                }
+            } else {
+                Text("No remote page is active.")
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(palette.text)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(16)
+        .padding(.bottom, 44)
+        .onExitCommand { workspace.closeIdentity() }
+        .accessibilityIdentifier("identity-inspector")
+    }
+
+    private func labeled(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(palette.textDim)
+            Text(value)
+                .textSelection(.enabled)
+                .lineLimit(3)
+                .accessibilityIdentifier("identity-\(title.lowercased())")
+        }
+    }
 }
 
 /// An AI-refined label arrives with a brief spectrum sweep. The ordinary local

@@ -37,6 +37,20 @@
          </BuildActionEntry>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "87C3E936E0BB7B645A1EA957"
+               BuildableName = "InterlinkedUITests.xctest"
+               BlueprintName = "InterlinkedUITests"
+               ReferencedContainer = "container:Interlinked.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "YES"
             buildForArchiving = "YES"
@@ -75,6 +89,17 @@
                BlueprintIdentifier = "8A7366D7C964C74D421FD2E7"
                BuildableName = "InterlinkedTests.xctest"
                BlueprintName = "InterlinkedTests"
+               ReferencedContainer = "container:Interlinked.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "87C3E936E0BB7B645A1EA957"
+               BuildableName = "InterlinkedUITests.xctest"
+               BlueprintName = "InterlinkedUITests"
                ReferencedContainer = "container:Interlinked.xcodeproj">
             </BuildableReference>
          </TestableReference>

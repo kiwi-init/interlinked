@@ -10,7 +10,7 @@ macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a t
 
 ## Browse
 
-The favicon expands on hover. Back, forward, +, and close sit above your tabs and an editable address. Tabs balance across rows of at most five. Addresses stay on one line and widen the control as needed. At the window edge, the field scrolls horizontally.
+The collapsed page handle keeps the page label and a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. The favicon expands on hover. Back, forward, +, and close sit above your tabs and an editable address. Tabs balance across rows of at most five. Addresses stay on one line and widen the control as needed. At the window edge, the field scrolls horizontally.
 
 Type an address or search words. Three Google suggestions appear above the input after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
 
@@ -53,7 +53,7 @@ Meaning search uses Jev to select the best answer and rank existing page text by
 
 **Might need later** explicitly saves the current page's URL, metadata and selected text on this Mac. Ordinary browsing does not save pages to Vault. Address-field searches check saved pages automatically, try Apple Intelligence against up to six local candidates, and can fall back to Jev to rank relevant excerpts when Jev is enabled. Vault stores text, not screenshots, and can be cleared in Settings.
 
-On supported Macs, Apple Intelligence directly generates concise page labels from bounded title, heading, site, host, summary, and breadcrumb metadata. It also handles first-pass Vault matching, related-page grouping, and short explanations for suspicious navigation through Apple's on-device Foundation Models framework. Jev remains responsible for Critical Reading, meaning search, and semantic Personal Filters; it is not used as a page-label fallback. Local development builds can use a personal OpenRouter key saved in macOS Keychain. TestFlight builds instead use Interlinked's relay and the App Store-signed app transaction, so testers never enter or receive an API key. The OpenRouter key remains on the relay. Critical reading runs automatically on public pages by default. Settings can change it to **Run only when asked**. Meaning searches and reading checks send page text to OpenRouter and TypeSafe. Exact Jev requests and their responses are cached on this Mac for five days; the cache stores a request hash rather than page text, queries, or URLs. A page-content, model, or instruction change produces a different key. Exact find and deterministic title/heading/host label fallbacks work without either model.
+On supported Macs, Apple Intelligence directly generates concise page labels from bounded title, heading, site, host, summary, and breadcrumb metadata. It also handles first-pass Vault matching, related-page grouping, and short explanations for suspicious navigation through Apple's on-device Foundation Models framework. Jev remains responsible for Critical Reading, meaning search, and semantic Personal Filters; it is not used as a page-label fallback. Local development builds can use a personal OpenRouter key saved in macOS Keychain. TestFlight builds instead use Interlinked's relay and the App Store-signed app transaction, so testers never enter or receive an API key. The OpenRouter key remains on the relay. Critical reading runs only when asked on a fresh install. Turning on **Always on** first shows the privacy risk: page text goes to OpenRouter, whose policy is that requests are anonymized and not used for training. You still have to accept that a third party will see the text, then grant each site. Signed-in pages are not treated as public just because they lack a password field. Meaning searches and reading checks send page text to OpenRouter and TypeSafe. Exact Jev requests and their responses are cached on this Mac for five days; the cache stores a request hash rather than page text, queries, or URLs. A page-content, model, or instruction change produces a different key. Exact find and deterministic title/heading/host label fallbacks work without either model.
 
 When AI replaces the deterministic page label with its selected label, the page handle briefly picks up a spectrum glow. Deterministic labels and names you type yourself do not trigger it.
 
@@ -99,16 +99,26 @@ build/Build/Products/Debug/interlinked type paper.design
 build/Build/Products/Debug/interlinked commit
 ```
 
-The native app is in `Interlinked/`, its control client in `InterlinkedControl/`, and tests in `InterlinkedTests/`. Project, target, tool, storage, and Keychain identifiers use the Interlinked name. Legacy pane types remain for session compatibility.
+The native app is in `Interlinked/`, its control client in `InterlinkedControl/`, unit tests in `InterlinkedTests/`, and UI tests in `InterlinkedUITests/`. Project, target, tool, storage, and Keychain identifiers use the Interlinked name. Legacy pane types remain for session compatibility.
 
 Run the tests with:
 
 ```sh
 xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
-  -derivedDataPath build -destination 'platform=macOS' test
+  -derivedDataPath build -destination 'platform=macOS' \
+  -only-testing:InterlinkedTests test
 ```
 
-The local browser-capability fixture covers downloads, popup behavior, forms, and navigation cases:
+UI tests launch the app against the local fixture server. They need Chromium staged the same way as `script/run`:
+
+```sh
+python3 test-fixtures/server.py &
+xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
+  -derivedDataPath build -destination 'platform=macOS' \
+  -only-testing:InterlinkedUITests test
+```
+
+The local browser-capability fixture covers downloads, popup behavior, forms, navigation, identity lookalikes, a signed-in inbox, WebSockets, and service workers:
 
 ```sh
 python3 test-fixtures/server.py
