@@ -207,7 +207,24 @@ struct AssistanceSettings: View {
     }
 
     private var generalSettings: some View {
-        Form {
+        @Bindable var sites = workspace.savedSites
+        return Form {
+            Section("New Tab") {
+                Toggle("Show favorites and bookmarks", isOn: $sites.showsOnNewTab)
+                    .pointingHandCursor()
+                    .accessibilityIdentifier("settings-new-tab-saved-sites")
+            }
+
+            Section("Site menu") {
+                Toggle("Use Interlinked site menu", isOn: Binding(
+                    get: { workspace.usesSiteMenu },
+                    set: { workspace.usesSiteMenu = $0 }
+                ))
+                    .pointingHandCursor()
+                    .accessibilityIdentifier("settings-site-menu")
+                SettingsNote("The same compact menu, centered, on every site: its main destinations, and search when the site has one. The site name stays on the page handle. Turn this off to put the site's header back.")
+            }
+
             Section("Downloads") {
                 LabeledContent("System notifications") {
                     Text(workspace.downloads.notificationStatus)

@@ -74,6 +74,21 @@ final class Workspace {
     let savedSites = SavedSites()
     let builtIns = PageBuiltIns()
     var newTabEditor: SavedSiteKind?
+    var usesSiteMenu = SiteMenuPreference.enabled() {
+        didSet {
+            SiteMenuPreference.set(usesSiteMenu)
+            if usesSiteMenu, let pane = activePane {
+                declinedSiteMenu.remove(pane)
+                captureSiteMenu(pane)
+            } else {
+                restoreAllSiteHeaders()
+            }
+        }
+    }
+    private(set) var siteMenus: [PaneID: SiteMenu] = [:]
+    var siteMenuExpanded: String?
+    var siteMenuSearching = false
+    private var declinedSiteMenu: Set<PaneID> = []
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
     var identityOpen = false
@@ -101,6 +116,8 @@ final class Workspace {
     }
 
     var activePane: PaneID? { activeTab?.active }
+
+    var siteMenu: SiteMenu? { activePane.flatMap { siteMenus[$0] } }
 
     var quickTabs: [Tab] {
         OpenWork.switcherTabs(tabs, current: activeTab?.id)
@@ -190,8 +207,9 @@ final class Workspace {
     @discardableResult
     func submitNewTabSite(_ text: String) -> Bool {
         guard let kind = newTabEditor else { return false }
-        guard savedSites.add(text, title: nil, to: kind) != nil else { return false }
+        guard let site = savedSites.add(text, title: nil, to: kind) else { return false }
         newTabEditor = nil
+        rememberFavicon(for: site.url)
         beginEmptyPageEditingIfNeeded()
         return true
     }
@@ -213,6 +231,36 @@ final class Workspace {
         guard let url = currentPageURL else { return }
         let title = activePane.flatMap { hosts.titles[$0] }
         _ = savedSites.toggle(url.absoluteString, title: title, in: kind)
+        if savedSites.contains(url.absoluteString, in: kind) {
+            rememberFavicon(for: url.absoluteString)
+        }
+    }
+
+    func rememberFavicon(for address: String) {
+        guard let url = URL(string: address),
+              let domain = DomainIconCache<NSImage>.domain(url) else { return }
+        keep()
+        if let data = hosts.storedIconData(for: domain) {
+            savedSites.fillMissingIcon(data, domain: domain)
+            return
+        }
+        if let pane = activePane, let image = hosts.favicons[pane],
+           DomainIconCache<NSImage>.domain(currentPageURL) == domain,
+           let data = hosts.pngData(image) {
+            savedSites.fillMissingIcon(data, domain: domain)
+            hosts.rememberIcon(data, for: domain)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self, let data = await self.hosts.fetchIcon(for: url) else { return }
+            self.savedSites.fillMissingIcon(data, domain: domain)
+        }
+    }
+
+    func refreshMissingSavedSiteIcons() {
+        for site in savedSites.favorites + savedSites.bookmarks where site.icon == nil {
+            rememberFavicon(for: site.url)
+        }
     }
 
     @discardableResult
@@ -233,6 +281,110 @@ final class Workspace {
     func newPage() {
         openTab(kind: .browser)
         editActiveLine()
+    }
+
+    func navigateActive(_ address: String) {
+        guard let pane = activePane else {
+            openAddress(address)
+            return
+        }
+        if newTabEditor != nil { newTabEditor = nil }
+        discardLine()
+        surfaces.setKind(pane, .browser)
+        surfaces.setLine(pane, address)
+        navigate(pane, address)
+        keep()
+    }
+
+    func noteSiteMenuDocumentChanged(_ pane: PaneID) {
+        siteMenus[pane] = nil
+        declinedSiteMenu.remove(pane)
+        if activePane == pane { collapseSiteMenuChrome() }
+    }
+
+    func collapseSiteMenuChrome() {
+        siteMenuExpanded = nil
+        siteMenuSearching = false
+    }
+
+    func activateSiteMenuItem(_ item: SiteMenuItem) {
+        if !item.children.isEmpty {
+            siteMenuSearching = false
+            siteMenuExpanded = item.id
+            return
+        }
+        if !item.href.isEmpty {
+            navigateActive(item.href)
+            return
+        }
+        guard let pane = activePane, let view = hosts.existingBrowser(pane) else { return }
+        Task { _ = await PageTextBridge.activateSiteMenuItem(view, id: item.id) }
+    }
+
+    func submitSiteSearch(_ query: String) {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let search = siteMenu?.search, !text.isEmpty,
+              var parts = URLComponents(string: search.action) else { return }
+        var items = parts.queryItems ?? []
+        items.removeAll { $0.name == search.queryParam }
+        items.append(URLQueryItem(name: search.queryParam, value: text))
+        parts.queryItems = items
+        guard let url = parts.url else { return }
+        collapseSiteMenuChrome()
+        navigateActive(url.absoluteString)
+    }
+
+    func captureSiteMenu(_ pane: PaneID) {
+        guard usesSiteMenu, !declinedSiteMenu.contains(pane), paneAlive(pane), let view = hosts.existingBrowser(pane) else { return }
+        if NewTabPage.matches(line: surfaces.line(pane)) {
+            siteMenus[pane] = nil
+            return
+        }
+        // The bar is the browser's, so it is up before the page answers.
+        if siteMenus[pane] == nil, let baseline = SiteMenuPolicy.baseline(line: surfaces.line(pane)) {
+            siteMenus[pane] = baseline
+        }
+        let pageURL = view.url
+        Task { @MainActor [weak self] in
+            guard let self, self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
+                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
+            let extracted = await PageTextBridge.siteMenu(view)
+            guard self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
+                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
+            let accepted = extracted.flatMap { SiteMenuPolicy.accept($0) }
+                ?? SiteMenuPolicy.baseline(line: self.surfaces.line(pane))
+            guard let accepted else {
+                self.siteMenus[pane] = nil
+                return
+            }
+            if accepted.replacesChrome {
+                guard await PageTextBridge.hideSiteMenu(view), self.paneAlive(pane),
+                      self.hosts.existingBrowser(pane) === view, view.url == pageURL,
+                      self.usesSiteMenu, !self.declinedSiteMenu.contains(pane) else { return }
+            }
+            self.siteMenus[pane] = accepted
+        }
+    }
+
+    func restoreSiteHeader(_ pane: PaneID? = nil) {
+        let target = pane ?? activePane
+        guard let target else { return }
+        declinedSiteMenu.insert(target)
+        siteMenus[target] = nil
+        collapseSiteMenuChrome()
+        Task { @MainActor [weak self] in
+            await PageTextBridge.showSiteMenu(self?.hosts.existingBrowser(target))
+        }
+    }
+
+    func restoreAllSiteHeaders() {
+        let panes = Array(siteMenus.keys)
+        siteMenus.removeAll()
+        Task { @MainActor [weak self] in
+            for pane in panes {
+                await PageTextBridge.showSiteMenu(self?.hosts.existingBrowser(pane))
+            }
+        }
     }
 
     func openAddress(_ address: String) {
@@ -260,6 +412,7 @@ final class Workspace {
         else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
+        else if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
         else if editing != nil {
             discardLine()
             beginEmptyPageEditingIfNeeded()
@@ -430,7 +583,7 @@ final class Workspace {
     }
 
     func keep() {
-        hosts.syncFavicons(tabs: tabs, surfaces: surfaces)
+        hosts.syncFavicons(tabs: tabs, surfaces: surfaces, pinned: savedSites.domains)
         assistance.prune()
         let session = session()
         guard let data = Session.data(session) else { return }
@@ -836,6 +989,8 @@ final class Workspace {
         hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) }, downloads: downloads)
         builtIns.forget(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
+        siteMenus = siteMenus.filter { paneAlive($0.key) }
+        declinedSiteMenu = declinedSiteMenu.filter(paneAlive)
         if let editing {
             let gone: Bool
             switch editing.target {

@@ -57,4 +57,38 @@ final class SavedSitesTests: XCTestCase {
         XCTAssertEqual(store.favorites.count, SavedSiteAddress.favoriteLimit)
         XCTAssertEqual(store.bookmarks.count, 1)
     }
+
+    func testNewTabStripCanBeTurnedOffAndDefaultsOn() {
+        let suite = "saved-sites-pref-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = directory.appendingPathComponent("saved-sites.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = SavedSites(file: file, defaults: defaults)
+        XCTAssertTrue(store.showsOnNewTab)
+        store.showsOnNewTab = false
+        XCTAssertFalse(NewTabSavedSitesPreference.enabled(in: defaults))
+        XCTAssertFalse(SavedSites(file: file, defaults: defaults).showsOnNewTab)
+        store.showsOnNewTab = true
+        XCTAssertTrue(SavedSites(file: file, defaults: defaults).showsOnNewTab)
+    }
+
+    func testSavedSiteIconsPersistOnTheRecord() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = directory.appendingPathComponent("saved-sites.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SavedSites(file: file)
+        let site = try XCTUnwrap(store.add("https://example.com", title: "Example", to: .favorite))
+        XCTAssertNil(site.icon)
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+        store.setIcon(bytes, id: site.id)
+        XCTAssertEqual(store.favorites.first?.icon, bytes)
+        store.fillMissingIcon(Data([1, 2, 3]), domain: "example.com")
+        XCTAssertEqual(store.favorites.first?.icon, bytes)
+        XCTAssertEqual(SavedSites(file: file).favorites.first?.icon, bytes)
+        XCTAssertEqual(store.domains, ["example.com"])
+    }
 }

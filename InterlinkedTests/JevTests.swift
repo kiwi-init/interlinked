@@ -57,6 +57,7 @@ private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
         if adviceUnavailable { throw CancellationError() }
         return advice
     }
+    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { true }
 }
 
 private final class JevURLProtocol: URLProtocol {

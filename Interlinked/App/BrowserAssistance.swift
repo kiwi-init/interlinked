@@ -181,6 +181,10 @@ final class BrowserAssistance {
         startAutomaticReading(pane: pane, page: page, view: view)
     }
 
+    func shouldReplaceSiteMenu(host: String, labels: String) async -> Bool? {
+        await intelligence.shouldReplaceSiteMenu(host: host, labels: labels)
+    }
+
     func configure() {
         UserDefaults.standard.set(enabled, forKey: JevPreferences.enabledKey)
         UserDefaults.standard.set(automaticLabels, forKey: "jev.labels")
