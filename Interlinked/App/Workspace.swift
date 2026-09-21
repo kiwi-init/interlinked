@@ -71,7 +71,9 @@ final class Workspace {
     let permissions = WebsitePermissionStore()
     let navigationExceptions = NavigationExceptionStore()
     let browserHistory = BrowserHistoryStore()
+    let savedSites = SavedSites()
     let builtIns = PageBuiltIns()
+    var newTabEditor: SavedSiteKind?
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
     var identityOpen = false
@@ -111,6 +113,7 @@ final class Workspace {
     func setOverviewOpen(_ open: Bool) {
         guard open != overviewOpen else { return }
         if open {
+            newTabEditor = nil
             discardLine()
             closeIdentity()
             hosts.capturePreviews()
@@ -168,9 +171,48 @@ final class Workspace {
     }
 
     func beginEmptyPageEditingIfNeeded() {
-        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil else { return }
+        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil, newTabEditor == nil else { return }
         guard case .idle = voice.state else { return }
         editActiveLine()
+    }
+
+    func beginNewTabEditor(_ kind: SavedSiteKind) {
+        newTabEditor = kind
+        discardLine()
+    }
+
+    func cancelNewTabEditor() {
+        guard newTabEditor != nil else { return }
+        newTabEditor = nil
+        beginEmptyPageEditingIfNeeded()
+    }
+
+    @discardableResult
+    func submitNewTabSite(_ text: String) -> Bool {
+        guard let kind = newTabEditor else { return false }
+        guard savedSites.add(text, title: nil, to: kind) != nil else { return false }
+        newTabEditor = nil
+        beginEmptyPageEditingIfNeeded()
+        return true
+    }
+
+    func openPage(_ address: String) {
+        if newTabEditor != nil { newTabEditor = nil }
+        if isEmptyActivePage, let pane = activePane {
+            discardLine()
+            surfaces.setKind(pane, .browser)
+            surfaces.setLine(pane, address)
+            navigate(pane, address)
+            keep()
+            return
+        }
+        openAddress(address)
+    }
+
+    func toggleCurrentPage(in kind: SavedSiteKind) {
+        guard let url = currentPageURL else { return }
+        let title = activePane.flatMap { hosts.titles[$0] }
+        _ = savedSites.toggle(url.absoluteString, title: title, in: kind)
     }
 
     @discardableResult
@@ -212,7 +254,8 @@ final class Workspace {
     }
 
     func escape() {
-        if pageHistoryOpen { pageHistoryOpen = false }
+        if newTabEditor != nil { cancelNewTabEditor() }
+        else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
