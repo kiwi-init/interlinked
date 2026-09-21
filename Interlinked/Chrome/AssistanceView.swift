@@ -1197,16 +1197,18 @@ struct BuiltInRows: View {
         let dark = builtIns.darkens(url)
         VStack(spacing: 0) {
             Button { builtIns.setBlocking(!blocking, for: url) } label: {
-                ToolboxRowLabel(title: blocking ? "Blocking Ads Here" : "Ads Allowed Here",
+                ToolboxRowLabel(title: "Ad blocking",
                                 symbol: blocking ? "shield.lefthalf.filled" : "shield.slash", shortcut: "",
+                                detail: builtIns.blockingEnabled && blocking ? "On" : "Off",
                                 count: workspace.activePane.flatMap { builtIns.blockedCounts[$0] } ?? 0,
                                 accent: palette.accent)
             }
             .disabled(url == nil || !builtIns.blockingEnabled)
             .accessibilityIdentifier("toolbox-blocking-button")
             Button { builtIns.setDarkening(!dark, for: url) } label: {
-                ToolboxRowLabel(title: dark ? "Dark Page" : "Light Page",
-                                symbol: dark ? "moon.fill" : "sun.max", shortcut: "")
+                ToolboxRowLabel(title: "Dark Page",
+                                symbol: dark ? "moon.fill" : "moon", shortcut: "",
+                                detail: dark ? "On" : "Off")
             }
             .disabled(url == nil || builtIns.darkMode == .off)
             .accessibilityIdentifier("toolbox-dark-button")
@@ -1325,6 +1327,7 @@ private struct ToolboxRowLabel: View {
     var title: String
     var symbol: String
     var shortcut: String
+    var detail: String? = nil
     var count = 0
     var accent: Color = .clear
 
@@ -1332,22 +1335,27 @@ private struct ToolboxRowLabel: View {
         HStack(spacing: 0) {
             Image(systemName: symbol)
                 .frame(width: 24)
-                .overlay(alignment: .topTrailing) {
-                    if count > 0 {
-                        Circle().fill(accent).frame(width: 7, height: 7).offset(x: 3, y: -3)
-                    }
-                }
             Text(title)
                 .padding(.leading, 10)
                 .lineLimit(1)
-            Spacer(minLength: 8)
-            if count > 0 {
-                Text("\(count)")
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.trailing, 8)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 22, alignment: .trailing)
+                }
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(minWidth: 24, alignment: .trailing)
+                }
+                ToolboxShortcutLabel(shortcut)
+                    .frame(width: 28, alignment: .trailing)
             }
-            ToolboxShortcutLabel(shortcut)
-                .frame(width: 28, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
