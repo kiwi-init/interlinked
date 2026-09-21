@@ -397,6 +397,15 @@ final class BrowserIntelligenceTests: XCTestCase {
     func page(_ url: String = "https://www.apple.com/iphone-18-pro/buy") -> PageMetadata {
         PageMetadata(document: "doc1", url: url, title: "Buy iPhone 18 Pro - Apple", heading: "Buy iPhone 18 Pro", summary: "Choose your iPhone", breadcrumbs: ["iPhone 18 Pro", "Buy"])
     }
+    func testPageBridgeUsesExtractionTextForHighlightValidation() {
+        XCTAssertTrue(PageTextBridge.install.contains("nodeText(node)!==item.text"))
+        XCTAssertFalse(PageTextBridge.install.contains("clean(node.innerText)!==item.text"))
+    }
+    func testPageBridgeReportsWhenExtractionReachesItsLimit() {
+        XCTAssertTrue(PageTextBridge.install.contains("passages.length>=limit"))
+        XCTAssertTrue(PageTextBridge.install.contains("passages,truncated"))
+        XCTAssertFalse(PageTextBridge.install.contains("truncated:false"))
+    }
     func testLabelsUseMetadataWithoutCandidatesOrURLSecrets() {
         XCTAssertEqual(PageLabels.fallback(page()), "Buy iPhone 18 Pro - Apple")
         let evidence = PageLabels.evidence(page("https://www.apple.com/buy?token=secret#private"))

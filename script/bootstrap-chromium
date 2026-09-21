@@ -10,13 +10,15 @@ project="$root/cef-project"
 output="$root/cef-project-out"
 wrapper="$output/libcef_dll_wrapper/libcef_dll_wrapper.a"
 helper="$output/Release/minimal.app/Contents/Frameworks/minimal Helper.app"
+helper_binary="$helper/Contents/MacOS/minimal Helper"
 
 if [ "$(uname -m)" != "arm64" ]; then
   echo "error: The pinned Chromium SDK currently supports Apple silicon only." >&2
   exit 1
 fi
 
-if [ -f "$wrapper" ] && [ -d "$helper" ]; then
+if [ -f "$wrapper" ] && [ -x "$helper_binary" ] && \
+   /usr/bin/strings "$helper_binary" | /usr/bin/grep -q 'libcef_sandbox.dylib'; then
   echo "Chromium runtime is ready."
   exit 0
 fi
@@ -33,7 +35,7 @@ cmake -S "$project" -B "$output" -G Ninja \
   -DCEF_VERSION="$version" \
   -DCEF_PLATFORM="$platform" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DUSE_SANDBOX=OFF
+  -DUSE_SANDBOX=ON
 cmake --build "$output" --target minimal --parallel
 
 test -f "$wrapper"
