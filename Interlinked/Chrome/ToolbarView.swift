@@ -8,10 +8,20 @@ struct PageHandle: View {
     var palette: Palette
     var available: CGSize
     private var hovering: Bool { workspace.quickSwitchOpen || workspace.leftCommandKeyHeld }
+    private var isNewTab: Bool { workspace.isEmptyActivePage }
 
     private var pane: PaneID? { workspace.activePane }
-    private var expanded: Bool { workspace.overviewOpen || workspace.identityOpen || hovering || workspace.editing != nil }
-    private var showsTabs: Bool { !workspace.overviewOpen && !workspace.identityOpen && (hovering || workspace.editing != nil) && voiceCaption == nil }
+    private var expanded: Bool { workspace.overviewOpen || workspace.identityOpen || hovering || workspace.editing != nil || isNewTab }
+    private var showsTabs: Bool {
+        PageHandleExpansion.showsOpenWork(
+            overviewOpen: workspace.overviewOpen,
+            identityOpen: workspace.identityOpen,
+            hovering: hovering,
+            editing: workspace.editing != nil,
+            isNewTab: isNewTab,
+            voiceActive: voiceCaption != nil
+        )
+    }
     private var trustedOrigin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
     private var identity: String {
         guard let pane else { return "All tabs" }
@@ -195,13 +205,15 @@ struct PageHandle: View {
                 .accessibilityIdentifier("page-handle")
                 if showsTabs && workspace.editing == nil {
                     LineEditor(palette: palette)
-                        .padding(.trailing, 8)
-                    Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .monospacedDigit()
-                        .frame(width: 42, alignment: .trailing)
-                        .padding(.trailing, 14)
-                        .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
+                        .padding(.trailing, workspace.currentPageURL == nil ? 14 : 8)
+                    if workspace.currentPageURL != nil {
+                        Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .frame(width: 42, alignment: .trailing)
+                            .padding(.trailing, 14)
+                            .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
+                    }
                 } else if workspace.editing != nil {
                     LineEditor(palette: palette)
                         .padding(.trailing, 14)
@@ -226,6 +238,11 @@ struct PageHandle: View {
         .foregroundStyle(palette.text)
         .onHover { workspace.quickSwitchOpen = $0 }
         .onChange(of: workspace.addressResults.map(\.id)) { _, _ in workspace.selectedSearchResult = nil }
+        .onAppear { workspace.beginEmptyPageEditingIfNeeded() }
+        .onChange(of: workspace.activePane) { _, _ in workspace.beginEmptyPageEditingIfNeeded() }
+        .onChange(of: workspace.isEmptyActivePage) { _, isEmpty in
+            if isEmpty { workspace.beginEmptyPageEditingIfNeeded() }
+        }
         .animation(reduceMotion ? nil : Metrics.morph, value: size)
         .animation(reduceMotion ? nil : Metrics.morph, value: expanded)
     }

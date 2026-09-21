@@ -118,7 +118,10 @@ final class Workspace {
             assistance.related()
         }
         overviewOpen = open
-        if !open { restoreFocus() }
+        if !open {
+            restoreFocus()
+            beginEmptyPageEditingIfNeeded()
+        }
     }
 
     func toggleOverview() { setOverviewOpen(!overviewOpen) }
@@ -155,8 +158,19 @@ final class Workspace {
         return url
     }
 
+    var isEmptyActivePage: Bool {
+        guard let pane = activePane else { return true }
+        return NewTabPage.matches(line: surfaces.line(pane))
+    }
+
     var showsCopiedPageURL: Bool {
-        copiedPageURL == currentPageURL?.absoluteString
+        CopiedPageURLFeedback.isShowing(copied: copiedPageURL, current: currentPageURL?.absoluteString)
+    }
+
+    func beginEmptyPageEditingIfNeeded() {
+        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil else { return }
+        guard case .idle = voice.state else { return }
+        editActiveLine()
     }
 
     @discardableResult
@@ -203,7 +217,10 @@ final class Workspace {
         else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
-        else if editing != nil { discardLine() }
+        else if editing != nil {
+            discardLine()
+            beginEmptyPageEditingIfNeeded()
+        }
         else if overviewOpen { setOverviewOpen(false) }
         else { cancelListening() }
     }
@@ -265,6 +282,7 @@ final class Workspace {
            let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             openExternalURLs([url])
         }
+        beginEmptyPageEditingIfNeeded()
         #if !TESTFLIGHT
             control = ControlServer()
             control?.start { [weak self] request in
@@ -405,6 +423,7 @@ final class Workspace {
         }
         restoreFocus()
         keep()
+        beginEmptyPageEditingIfNeeded()
     }
 
     func cycleTabs(_ step: Int) {
@@ -420,6 +439,7 @@ final class Workspace {
         }
         restoreFocus()
         keep()
+        beginEmptyPageEditingIfNeeded()
     }
 
     @discardableResult
@@ -628,6 +648,7 @@ final class Workspace {
         }
         keep()
         restoreFocus()
+        beginEmptyPageEditingIfNeeded()
     }
 
     func discardLine() {
