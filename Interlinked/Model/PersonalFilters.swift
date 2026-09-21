@@ -77,6 +77,33 @@ enum PersonalFilterDecisions {
     static let matchThreshold = 0.82
     static let batchSize = 400
 
+    enum Intent: Equatable, Sendable {
+        case media(Set<String>)
+        case word(String)
+        case meaning
+    }
+
+    static func intent(_ description: String) -> Intent {
+        let folded = normalized(description)
+        if folded.contains("word") || folded.contains("palavra") {
+            let leftover = usefulWords(description).subtracting(["word", "words", "palavra", "palavras"])
+            if leftover.count == 1, let word = leftover.first { return .word(normalized(word)) }
+        }
+        let words = usefulWords(description)
+        var roles = Set<String>()
+        if words.contains("image") || words.contains("images") || words.contains("picture")
+            || words.contains("pictures") || words.contains("photo") || words.contains("photos") {
+            roles.insert("image")
+        }
+        if words.contains("video") || words.contains("videos") { roles.insert("video") }
+        let other = words.subtracting([
+            "image", "images", "picture", "pictures", "photo", "photos",
+            "video", "videos", "all", "every", "any", "hide", "remove"
+        ])
+        if !roles.isEmpty, other.isEmpty { return .media(roles) }
+        return .meaning
+    }
+
     static func localMatches(description: String, passages: [PagePassage]) -> [PagePassage] {
         let request = normalized(description)
         let requestWords = usefulWords(description)
@@ -90,18 +117,29 @@ enum PersonalFilterDecisions {
     }
 
     static func localMatches(description: String, candidates: [PageFilterCandidate]) -> [PageFilterCandidate] {
-        let request = normalized(description)
-        let requestedWords = usefulWords(description)
-        let requestedStems = Set(requestedWords.map(stem))
-        guard !request.isEmpty else { return [] }
-        return candidates.filter { candidate in
-            let text = normalized(candidate.text)
-            guard text.count >= 2 else { return false }
-            if candidate.role == "text token" { return requestedWords.contains(text) }
-            let roleStems = Set(usefulWords(candidate.role).map(stem))
-            if !roleStems.isEmpty, roleStems.isSubset(of: requestedStems) { return true }
-            return request == text || (text.contains(" ") && request.contains(text))
+        switch intent(description) {
+        case .media(let roles):
+            return candidates.filter { roles.contains($0.role) }
+        case .word(let word):
+            return candidates.filter { $0.role == "text token" && normalized($0.text) == word }
+        case .meaning:
+            let request = normalized(description)
+            let requestedWords = usefulWords(description)
+            let requestedStems = Set(requestedWords.map(stem))
+            guard !request.isEmpty else { return [] }
+            return candidates.filter { candidate in
+                let text = normalized(candidate.text)
+                guard text.count >= 2 else { return false }
+                if candidate.role == "text token" { return requestedWords.contains(text) }
+                let roleStems = Set(usefulWords(candidate.role).map(stem))
+                if !roleStems.isEmpty, roleStems.isSubset(of: requestedStems) { return true }
+                return request == text || (text.contains(" ") && request.contains(text))
+            }
         }
+    }
+
+    static func jevCandidates(_ candidates: [PageFilterCandidate]) -> [PageFilterCandidate] {
+        candidates.filter { $0.role != "text token" }
     }
 
     static func batches(_ candidates: [PageFilterCandidate]) -> [[PageFilterCandidate]] {

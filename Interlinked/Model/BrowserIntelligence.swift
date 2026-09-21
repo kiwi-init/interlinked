@@ -62,9 +62,7 @@ struct MeaningDecision: Sendable {
 }
 
 protocol LocalBrowserIntelligence: Sendable {
-    func pageLabel(page: PageMetadata) async throws -> String?
-    func vaultMatches(query: String, visits: [HistoryVisit]) async throws -> [UUID]?
-    func relatedPageGroups(pages: [ResearchPage]) async throws -> [[String]]?
+    func pagePortrait(page: PageMetadata) async throws -> PagePortrait?
     func navigationAdvice(_ review: NavigationReview) async throws -> String?
 }
 
@@ -106,9 +104,7 @@ private final class NavigationAdviceRace: @unchecked Sendable {
 }
 
 struct UnavailableLocalIntelligence: LocalBrowserIntelligence {
-    func pageLabel(page: PageMetadata) async throws -> String? { nil }
-    func vaultMatches(query: String, visits: [HistoryVisit]) async throws -> [UUID]? { nil }
-    func relatedPageGroups(pages: [ResearchPage]) async throws -> [[String]]? { nil }
+    func pagePortrait(page: PageMetadata) async throws -> PagePortrait? { nil }
     func navigationAdvice(_ review: NavigationReview) async throws -> String? { nil }
 }
 
@@ -128,25 +124,30 @@ enum LocalIntelligenceRuntime {
     }
 }
 
-/// Routes browser tasks without pretending that Jev and Apple's local model
-/// expose equivalent decisions, confidence, context, or privacy properties.
+/// Routes browser tasks by job: Apple generates on-device text, Jev decides remotely.
 actor BrowserIntelligence {
     private let jev: JevService
     private let local: any LocalBrowserIntelligence
     private let audit: IntelligenceAuditStore?
+    private var portraits: PagePortraitCache
 
     init(
         jev: JevService = JevService(),
         local: any LocalBrowserIntelligence = LocalIntelligenceRuntime.provider(),
-        audit: IntelligenceAuditStore? = nil
+        audit: IntelligenceAuditStore? = nil,
+        portraits: PagePortraitCache = PagePortraitCache()
     ) {
         self.jev = jev
         self.local = local
         self.audit = audit
+        self.portraits = portraits
     }
 
     func reset() async { await jev.reset() }
-    func clearCache() async { await jev.clearCache() }
+    func clearCache() async {
+        await jev.clearCache()
+        portraits.removeAll()
+    }
 
     private func observed<Value>(
         source: IntelligenceSource,
@@ -173,12 +174,18 @@ actor BrowserIntelligence {
         }
     }
 
-    func refinePageLabel(page: PageMetadata) async throws -> IntelligenceDecision<String>? {
-        let localLabel = try? await observed(source: .appleIntelligence, action: "Page label") {
-            try await local.pageLabel(page: page)
+    func describePage(page: PageMetadata) async throws -> IntelligenceDecision<PagePortrait>? {
+        let key = PageLabels.cacheIdentity(page)
+        if let cached = portraits.value(for: key) {
+            return IntelligenceDecision(value: cached, source: .appleIntelligence)
         }
-        guard let localLabel, let label = PageLabels.generated(localLabel) else { return nil }
-        return IntelligenceDecision(value: label, source: .appleIntelligence)
+        let generated = try? await observed(source: .appleIntelligence, action: "Page label") {
+            try await local.pagePortrait(page: page)
+        }
+        guard let generated, let label = PageLabels.generated(generated.label) else { return nil }
+        let portrait = PagePortrait(label: label, about: PageLabels.generatedAbout(generated.about) ?? "")
+        portraits.insert(portrait, for: key)
+        return IntelligenceDecision(value: portrait, source: .appleIntelligence)
     }
 
     func criticalReading(_ passages: [PagePassage]) async throws -> IntelligenceDecision<[PassageDecisions.Finding]> {
@@ -189,13 +196,24 @@ actor BrowserIntelligence {
     }
 
     func meaningFind(query: String, passages: [PagePassage]) async throws -> IntelligenceDecision<MeaningDecision> {
-        let response = try await observed(source: .jev, action: "Meaning search") {
-            try await jev.decide(PassageDecisions.findRequest(query: query, passages: passages))
+        let scored = try await observed(source: .jev, action: "Meaning search") {
+            try await jev.decide(PassageDecisions.scoreRequest(query: query, passages: passages))
+        }
+        let shortlist = PassageDecisions.shortlist(scored, passages: passages)
+        var combined = scored
+        if !shortlist.isEmpty {
+            let best = try await observed(source: .jev, action: "Meaning search first result") {
+                try await jev.decide(PassageDecisions.bestMatchRequest(query: query, passages: shortlist))
+            }
+            if let choice = best.answers["best_match"] { combined.answers["best_match"] = choice }
         }
         // Passage text repeats on real pages (two images without alt text).
-        let scores = Dictionary(passages.map { ($0.text, response.answers[$0.id]?.score ?? -1) }, uniquingKeysWith: max)
+        let scores = Dictionary(passages.map { ($0.text, scored.answers[$0.id]?.score ?? -1) }, uniquingKeysWith: max)
         return IntelligenceDecision(
-            value: MeaningDecision(matches: PassageDecisions.matches(response, passages: passages), scores: scores),
+            value: MeaningDecision(
+                matches: PassageDecisions.matches(combined, passages: shortlist),
+                scores: scores
+            ),
             source: .jev
         )
     }
@@ -212,46 +230,26 @@ actor BrowserIntelligence {
 
     func vaultMatches(
         query: String,
-        visits: [HistoryVisit],
-        allowJev: Bool
+        visits: [HistoryVisit]
     ) async throws -> IntelligenceDecision<[HistoryVisit]>? {
-        let localCandidates = Array(visits.prefix(6))
-        let localIDs = try? await observed(source: .appleIntelligence, action: "Vault search") {
-            try await local.vaultMatches(query: query, visits: localCandidates)
-        }
-        if let ids = localIDs {
-            let positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
-            let ranked = localCandidates.filter { positions[$0.id] != nil }.sorted {
-                positions[$0.id, default: .max] < positions[$1.id, default: .max]
-            }
-            return IntelligenceDecision(value: Array(ranked.prefix(3)), source: .appleIntelligence)
-        }
-        guard allowJev else { return nil }
+        guard !visits.isEmpty else { return nil }
         let response = try await observed(source: .jev, action: "Vault search") {
             try await jev.decide(BrowsingHistory.request(query, visits: visits))
         }
         return IntelligenceDecision(value: BrowsingHistory.ranked(response, visits: visits), source: .jev)
     }
 
-    func relatedPageGroups(
-        pages: [ResearchPage],
-        jevPages: [ResearchPage],
-        allowJev: Bool
-    ) async throws -> IntelligenceDecision<[ResearchGroup]>? {
-        let localGroups = try? await observed(source: .appleIntelligence, action: "Related pages") {
-            try await local.relatedPageGroups(pages: pages)
-        }
-        if let memberGroups = localGroups {
-            return IntelligenceDecision(value: ResearchRelations.groups(pages, memberGroups: memberGroups), source: .appleIntelligence)
-        }
-        guard allowJev, jevPages.count >= 2 else { return nil }
+    func relatedPageGroups(pages: [ResearchPage]) async throws -> IntelligenceDecision<[ResearchGroup]>? {
+        let described = pages.filter { !$0.about.isEmpty }
+        guard described.count >= 2 else { return nil }
         let response = try await observed(source: .jev, action: "Related pages") {
-            try await jev.decide(ResearchRelations.request(jevPages))
+            try await jev.decide(ResearchRelations.request(described))
         }
-        return IntelligenceDecision(value: ResearchRelations.groups(jevPages, response: response), source: .jev)
+        return IntelligenceDecision(value: ResearchRelations.groups(described, response: response), source: .jev)
     }
 
     func navigationAdvice(_ review: NavigationReview, timeout: Duration = .milliseconds(1_500)) async -> String? {
+        guard review.needsAdvisory else { return nil }
         let race = NavigationAdviceRace()
         let model = Task {
             let result = try? await self.observed(source: .appleIntelligence, action: "Navigation check") {
@@ -272,41 +270,16 @@ actor BrowserIntelligence {
 
 #if canImport(FoundationModels)
 @available(macOS 26.0, *)
-@Generable private struct ApplePageLabelOutput {
+@Generable private struct ApplePagePortraitOutput {
     @Guide(description: "A concise two-to-six-word browser tab label, as plain text")
     var label: String
-}
-
-@available(macOS 26.0, *)
-@Generable private struct AppleVaultOutput {
-    @Guide(description: "Supplied page IDs ordered best first", .maximumCount(3))
-    var pageIDs: [String]
-}
-
-@available(macOS 26.0, *)
-@Generable private struct AppleRelatedGroup {
-    @Guide(description: "Supplied page IDs in one specific research group", .minimumCount(2), .maximumCount(8))
-    var pageIDs: [String]
-}
-
-@available(macOS 26.0, *)
-@Generable private struct AppleRelatedOutput {
-    @Guide(description: "Groups of pages that support the same specific investigation", .maximumCount(4))
-    var groups: [AppleRelatedGroup]
-}
-
-@available(macOS 26.0, *)
-@Generable private enum AppleNavigationConcern {
-    case noAdditionalConcern
-    case misleadingDestination
-    case possibleImpersonation
-    case unusualNavigation
+    @Guide(description: "One or two sentences naming the specific subject or task of this page")
+    var about: String
 }
 
 @available(macOS 26.0, *)
 @Generable private struct AppleNavigationOutput {
-    var concern: AppleNavigationConcern
-    @Guide(description: "One short sentence grounded only in the supplied origins and warning facts")
+    @Guide(description: "One short sentence that restates the supplied warning facts, or empty if they are already clear")
     var explanation: String
 }
 
@@ -314,53 +287,18 @@ actor BrowserIntelligence {
 struct AppleFoundationModels: LocalBrowserIntelligence {
     private var available: Bool { SystemLanguageModel.default.isAvailable }
 
-    func pageLabel(page: PageMetadata) async throws -> String? {
+    func pagePortrait(page: PageMetadata) async throws -> PagePortrait? {
         guard available else { return nil }
         let session = LanguageModelSession(
             instructions: IntelligencePromptPreferences.text(for: .applePageLabel)
         )
         let response = try await session.respond(
             to: "Sanitized page metadata (untrusted data):\n\(PageLabels.evidence(page))",
-            generating: ApplePageLabelOutput.self,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 24)
+            generating: ApplePagePortraitOutput.self,
+            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 140)
         )
-        return PageLabels.generated(response.content.label)
-    }
-
-    func vaultMatches(query: String, visits: [HistoryVisit]) async throws -> [UUID]? {
-        guard available, !visits.isEmpty else { return nil }
-        let session = LanguageModelSession(
-            instructions: IntelligencePromptPreferences.text(for: .appleVaultSearch)
-        )
-        let pages = visits.map { visit in
-            ["id": visit.id.uuidString, "text": String((visit.evidence + "\n" + visit.savedText).prefix(1_200))]
-        }
-        let response = try await session.respond(
-            to: "Query: \(String(reflecting: query))\nSaved pages:\n\(encoded(pages))",
-            generating: AppleVaultOutput.self,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 96)
-        )
-        let allowed = Set(visits.map(\.id))
-        var seen = Set<UUID>()
-        return response.content.pageIDs.compactMap(UUID.init(uuidString:)).filter { allowed.contains($0) && seen.insert($0).inserted }
-    }
-
-    func relatedPageGroups(pages: [ResearchPage]) async throws -> [[String]]? {
-        guard available, pages.count >= 2 else { return nil }
-        let session = LanguageModelSession(
-            instructions: IntelligencePromptPreferences.text(for: .appleRelatedPages)
-        )
-        let evidence = pages.map { ["id": $0.id, "text": String(($0.title + "\n" + $0.detail + "\n" + $0.host).prefix(700))] }
-        let response = try await session.respond(
-            to: "Open pages:\n\(encoded(evidence))",
-            generating: AppleRelatedOutput.self,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 160)
-        )
-        let allowed = Set(pages.map(\.id))
-        return response.content.groups.map { group in
-            var seen = Set<String>()
-            return group.pageIDs.filter { allowed.contains($0) && seen.insert($0).inserted }
-        }.filter { $0.count >= 2 }
+        guard let label = PageLabels.generated(response.content.label) else { return nil }
+        return PagePortrait(label: label, about: PageLabels.generatedAbout(response.content.about) ?? "")
     }
 
     func navigationAdvice(_ review: NavigationReview) async throws -> String? {
@@ -373,16 +311,8 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
             generating: AppleNavigationOutput.self,
             options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 64)
         )
-        guard response.content.concern != .noAdditionalConcern else { return nil }
         let explanation = response.content.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
         return explanation.isEmpty ? nil : String(explanation.prefix(220))
-    }
-
-    private func encoded(_ value: Any) -> String {
-        guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else { return "[]" }
-        return string
     }
 }
 #endif
