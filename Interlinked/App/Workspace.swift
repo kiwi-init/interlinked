@@ -727,6 +727,48 @@ final class Workspace {
         restoreFocus()
     }
 
+    /// A page dragged from another tab lands on one side of this one. In a
+    /// split it replaces the page on that side, which takes the dragged tab's
+    /// place, so nothing closes.
+    func dropTab(_ dragged: TabID, leading: Bool) {
+        guard let current = activeTab, dragged != current.id,
+              let source = tabs.firstIndex(where: { $0.id == dragged }) else { return }
+        if editing != nil { discardLine() }
+        overviewOpen = false
+        let incoming = tabs[source].active
+        var tab = current
+        var emptiedSource = false
+        if tab.isSplit {
+            let replaced = leading ? tab.panes[0] : tab.panes[tab.panes.count - 1]
+            tab.root.replace(replaced, with: incoming)
+            tabs[source].root.replace(incoming, with: replaced)
+            tabs[source].active = replaced
+        } else {
+            let pane = tab.active
+            guard tab.split(pane, axis: .columns, new: incoming, id: SplitID(nextSplit)) else { return }
+            nextSplit += 1
+            if leading { tab.root.swap(pane, incoming) }
+            if tabs[source].isSplit { tabs[source].close(incoming) } else { emptiedSource = true }
+        }
+        tab.active = incoming
+        let currentID = current.id
+        if let index = tabs.firstIndex(where: { $0.id == currentID }) { tabs[index] = tab }
+        if emptiedSource { tabs.removeAll { $0.id == dragged } }
+        active = tabs.firstIndex(where: { $0.id == currentID }) ?? active
+        assistance.changedTab()
+        hosts.touch(incoming)
+        assistance.activated(incoming)
+        keep()
+        restoreFocus()
+    }
+
+    /// Best title for one page: what it calls itself, else where it is.
+    func title(_ pane: PaneID) -> String {
+        let line = surfaces.line(pane)
+        let fallback = line.isEmpty ? "New page" : surfaces.kind(pane).compactLabel(for: line)
+        return OpenWork.title(customName: nil, pageTitle: hosts.titles[pane], fallback: fallback.isEmpty ? line : fallback)
+    }
+
     func toggleSplitView() {
         isSplit ? unsplit() : splitActive()
     }

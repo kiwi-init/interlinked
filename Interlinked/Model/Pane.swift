@@ -294,6 +294,14 @@ indirect enum Pane: Equatable {
         return best.map { PaneID($0.2) }
     }
 
+    /// Puts `new` where `old` was. `new` must not already be in the tree.
+    @discardableResult
+    mutating func replace(_ old: PaneID, with new: PaneID) -> Bool {
+        guard contains(old), !contains(new) else { return false }
+        swapLeaves(old, new)
+        return true
+    }
+
     @discardableResult
     mutating func swap(_ a: PaneID, _ b: PaneID) -> Bool {
         if a == b { return contains(a) }

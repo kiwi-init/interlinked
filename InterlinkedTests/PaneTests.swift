@@ -284,6 +284,15 @@ final class SplitViewTests: XCTestCase {
         XCTAssertEqual(tab.panes.count, Tab.maxPanes)
     }
 
+    func testReplacingAPageKeepsItsSide() {
+        var root = Pane.leaf(PaneID(1))
+        _ = root.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        XCTAssertTrue(root.replace(PaneID(1), with: PaneID(7)))
+        XCTAssertEqual(root.leaves(), [PaneID(7), PaneID(2)])
+        XCTAssertFalse(root.replace(PaneID(2), with: PaneID(7)), "a page cannot appear twice")
+        XCTAssertFalse(root.replace(PaneID(9), with: PaneID(8)))
+    }
+
     func testClosingOnePageOfASplitKeepsTheOther() {
         var tab = Tab(id: TabID(1), pane: PaneID(1))
         _ = tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))

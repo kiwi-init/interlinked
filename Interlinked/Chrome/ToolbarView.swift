@@ -56,9 +56,10 @@ struct PageHandle: View {
         min(CGFloat(workspace.searchResults.count * 42 + (workspace.searchResults.isEmpty ? 0 : 22)), max(84, available.height - 170))
     }
     private var tabsHeight: CGFloat {
-        min(CGFloat(quickTabs.count * 42), max(0, available.height - 112 - resultsHeight))
+        min(CGFloat(quickTabs.count * 42), max(0, available.height - 112 - resultsHeight - splitRowHeight))
     }
-    private var controlsHeight: CGFloat { 76 + tabsHeight }
+    private var splitRowHeight: CGFloat { workspace.isSplit ? 42 : 0 }
+    private var controlsHeight: CGFloat { 76 + tabsHeight + splitRowHeight }
     private var historySize: CGSize {
         let rows = CGFloat(workspace.browserHistory.visits.count) * 44 + 58
         return CGSize(width: min(330, available.width - 36), height: min(max(140, rows) + 44, available.height - 72))
@@ -147,11 +148,15 @@ struct PageHandle: View {
                                 ForEach(Array(quickTabs.enumerated()), id: \.element.id) { index, tab in
                                     Button { workspace.selectWork(tab.id) } label: {
                                         HStack(spacing: 8) {
-                                            SiteIcon(pane: tab.active, palette: palette, framed: false)
-                                                .frame(width: 28, height: 28)
-                                            Text(workspace.title(tab))
-                                                .font(.system(size: 12, weight: .medium))
-                                                .lineLimit(1)
+                                            if tab.isSplit && tab.name == nil {
+                                                SplitTabLabel(tab: tab, palette: palette)
+                                            } else {
+                                                SiteIcon(pane: tab.active, palette: palette, framed: false)
+                                                    .frame(width: 28, height: 28)
+                                                Text(workspace.title(tab))
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .lineLimit(1)
+                                            }
                                             Spacer(minLength: 8)
                                             if index < 9 {
                                                 Text("⌘\(index + 1)")
@@ -167,7 +172,16 @@ struct PageHandle: View {
                                     }
                                     .buttonStyle(.pointing)
                                     .id(tab.id)
+                                    // Drop it on the page to open the two side by side.
+                                    .onDrag { NSItemProvider.tab(tab.id) } preview: {
+                                        Label(workspace.title(tab), systemImage: "rectangle.split.2x1")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .padding(.horizontal, 12)
+                                            .frame(height: 32)
+                                            .background(.regularMaterial, in: Capsule())
+                                    }
                                     .accessibilityLabel(index < 9 ? "Switch to \(workspace.title(tab)), Command \(index + 1)" : "Switch to \(workspace.title(tab))")
+                                    .accessibilityHint("Drag onto the page to open it side by side")
                                     .accessibilityIdentifier("quick-tab-\(tab.id.rawValue)")
                                 }
                             }
@@ -175,6 +189,11 @@ struct PageHandle: View {
                         }
                         .scrollIndicators(.hidden)
                         .frame(height: tabsHeight)
+                    }
+                    if let tab = workspace.activeTab, tab.isSplit {
+                        SplitFocusRow(tab: tab, palette: palette)
+                            .padding(.horizontal, 4)
+                            .frame(height: splitRowHeight)
                     }
                 }
                 .padding(.bottom, 44)
@@ -362,6 +381,71 @@ struct PageHandle: View {
         .accessibilityIdentifier(id)
     }
 
+}
+
+/// The current tab when it is split: both pages on one line, as they sit on
+/// screen. Clicking one gives it focus.
+private struct SplitFocusRow: View {
+    @Environment(Workspace.self) private var workspace
+    var tab: Tab
+    var palette: Palette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(tab.panes, id: \.self) { pane in
+                Button {
+                    workspace.clickPane(pane)
+                } label: {
+                    HStack(spacing: 8) {
+                        SiteIcon(pane: pane, palette: palette, framed: false)
+                            .frame(width: 28, height: 28)
+                        Text(workspace.title(pane))
+                            .font(.system(size: 12, weight: pane == tab.active ? .semibold : .medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 38)
+                    .background(pane == tab.active ? palette.text.opacity(0.1) : .clear,
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.pointing)
+                .accessibilityLabel(pane == tab.active ? "\(workspace.title(pane)), focused" : "Focus \(workspace.title(pane))")
+                .accessibilityIdentifier("split-focus-\(pane.rawValue)")
+            }
+        }
+    }
+}
+
+/// A split tab in the open pages list: both pages on one line, in the order
+/// they sit on screen.
+private struct SplitTabLabel: View {
+    @Environment(Workspace.self) private var workspace
+    var tab: Tab
+    var palette: Palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(tab.panes.enumerated()), id: \.element) { index, pane in
+                if index > 0 {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(palette.textDim)
+                        .accessibilityHidden(true)
+                }
+                SiteIcon(pane: pane, palette: palette, framed: false)
+                    .frame(width: 28, height: 28)
+                Text(workspace.title(pane))
+                    .font(.system(size: 12, weight: pane == tab.active ? .semibold : .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(pane == tab.active ? 1 : 0)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// Connection details for the current origin. Page labels never appear here.

@@ -7,7 +7,7 @@ enum Control {
         "new-tab [kind]",
         "open-url URL",
         "sharing-mode on|off|state|check",
-        "split-view on|off|other|state",
+        "split-view on|off|other|drop TAB left|right|state",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -430,6 +430,11 @@ enum Control {
             case "on": if !workspace.isSplit { workspace.splitActive() }
             case "off": workspace.unsplit()
             case "other": workspace.focusOtherPane()
+            case "drop":
+                guard words.count == 3, let raw = UInt64(words[1]), ["left", "right"].contains(words[2]) else {
+                    return error("split-view drop takes a tab id and left or right")
+                }
+                workspace.dropTab(TabID(raw), leading: words[2] == "left")
             case "state": break
             default: return error("split-view takes on, off, other, or state")
             }
@@ -438,6 +443,7 @@ enum Control {
                 "panes": workspace.activeTab?.panes.map { Int($0.rawValue) } ?? [],
                 "active": workspace.activePane.map { Int($0.rawValue) } ?? 0,
                 "tabs": workspace.tabs.count,
+                "tab_ids": workspace.tabs.map { Int($0.id.rawValue) },
             ])
 
         case "sharing-mode":
