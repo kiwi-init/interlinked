@@ -298,6 +298,11 @@ class InterlinkedClient final : public CefClient,
                                    CefRefPtr<CefFrame> frame,
                                    CefRefPtr<CefRequest> request,
                                    CefRefPtr<CefCallback> callback) override;
+  void OnResourceRedirect(CefRefPtr<CefBrowser> browser,
+                          CefRefPtr<CefFrame> frame,
+                          CefRefPtr<CefRequest> request,
+                          CefRefPtr<CefResponse> response,
+                          CefString& new_url) override;
   CefRefPtr<CefResourceHandler> GetResourceHandler(CefRefPtr<CefBrowser> browser,
                                                    CefRefPtr<CefFrame> frame,
                                                    CefRefPtr<CefRequest> request) override;
@@ -385,6 +390,7 @@ class InterlinkedClient final : public CefClient,
   CefRefPtr<CefRegistration> devtools_registration_;
   std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> downloads_;
   std::atomic<int> unreported_blocks_{0};
+  std::atomic<uint64_t> blocking_navigation_{0};
   // Stand-in responses chosen in OnBeforeResourceLoad, keyed by request id.
   std::mutex replacements_mutex_;
   std::map<uint64_t, std::string> replacements_;
@@ -487,7 +493,7 @@ std::atomic_bool g_running(false);
 - (void)didUpdateDownload:(uint32_t)identifier fullPath:(NSString *)fullPath receivedBytes:(int64_t)receivedBytes totalBytes:(int64_t)totalBytes percent:(NSInteger)percent complete:(BOOL)complete cancelled:(BOOL)cancelled interrupted:(BOOL)interrupted;
 - (void)didCloseBrowser;
 - (void)didBlockRequests:(NSInteger)count;
-- (void)prepareBlockingForURLString:(NSString *)URLString;
+- (void)prepareBlockingForURLString:(NSString *)URLString runImmediately:(BOOL)runImmediately;
 - (void)didReceiveBindingCall:(NSData *)parameters;
 - (void)removeBlockingScript:(NSString *)identifier;
 - (void)applyForcedDarkMode;
@@ -994,10 +1000,12 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   _browser->GetHost()->ExecuteDevToolsMethod(0, "Page.removeScriptToEvaluateOnNewDocument", parameters);
 }
 
-- (void)addBlockingScript:(NSString *)source world:(nullable NSString *)world {
+- (void)addBlockingScript:(NSString *)source
+                    world:(nullable NSString *)world
+           runImmediately:(BOOL)runImmediately {
   CefRefPtr<CefDictionaryValue> parameters = CefDictionaryValue::Create();
   parameters->SetString("source", CefFromNSString(source));
-  parameters->SetBool("runImmediately", false);
+  parameters->SetBool("runImmediately", runImmediately);
   if (world) {
     parameters->SetString("worldName", CefFromNSString(world));
   }
@@ -1008,10 +1016,9 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   }
 }
 
-/// Registers what the next document at |URLString| needs before any of its own
-/// scripts run: scriptlets in the page's world, and element hiding in an
-/// isolated world the page cannot see.
-- (void)prepareBlockingForURLString:(NSString *)URLString {
+/// Registers what the document at |URLString| needs: scriptlets in the page's
+/// world, and element hiding in an isolated world the page cannot see.
+- (void)prepareBlockingForURLString:(NSString *)URLString runImmediately:(BOOL)runImmediately {
   if (!_browser) {
     return;
   }
@@ -1054,7 +1061,9 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
 
   NSString *scriptlets = cosmetics[@"script"];
   if ([scriptlets isKindOfClass:NSString.class] && scriptlets.length > 0) {
-    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@\n%@\n})();", guard, scriptlets] world:nil];
+    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@\n%@\n})();", guard, scriptlets]
+                      world:nil
+             runImmediately:runImmediately];
   }
 
   NSArray *exceptions = cosmetics[@"exceptions"] ?: @[];
@@ -1069,7 +1078,8 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   NSString *configurationLiteral = [[NSString alloc] initWithData:configurationJSON encoding:NSUTF8StringEncoding];
   [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@const cfg=%@;%@})();", guard, configurationLiteral,
                                                      ILCosmeticsScript()]
-                    world:ILCosmeticsWorld];
+                    world:ILCosmeticsWorld
+           runImmediately:runImmediately];
 }
 
 /// The page reported class names and ids it uses; answer with the generic
@@ -1465,6 +1475,29 @@ CefRefPtr<CefResourceHandler> InterlinkedClient::GetResourceHandler(CefRefPtr<Ce
       CefStreamReader::CreateForData(bytes.data(), bytes.size()));
 }
 
+void InterlinkedClient::OnResourceRedirect(CefRefPtr<CefBrowser> browser,
+                                            CefRefPtr<CefFrame> frame,
+                                            CefRefPtr<CefRequest> request,
+                                            CefRefPtr<CefResponse> response,
+                                            CefString& new_url) {
+  CEF_REQUIRE_IO_THREAD();
+  if (!frame || !frame->IsMain() || new_url.empty()) {
+    return;
+  }
+  CefRefPtr<InterlinkedClient> self(this);
+  const uint64_t navigation = blocking_navigation_.load();
+  NSString *URLString = NSStringFromCef(new_url);
+  PerformOnMainRunLoop(^{
+    if (self->blocking_navigation_.load() != navigation) {
+      return;
+    }
+    // The redirect continues on the IO thread while this crosses to Chromium's
+    // UI thread. Running in existing contexts closes the small race where the
+    // redirected document starts before its rules are registered.
+    [self->view_ prepareBlockingForURLString:URLString runImmediately:YES];
+  });
+}
+
 bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                        CefRefPtr<CefFrame> frame,
                                        CefRefPtr<CefRequest> request,
@@ -1472,7 +1505,8 @@ bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                        bool is_redirect) {
   CEF_REQUIRE_UI_THREAD();
   if (frame->IsMain()) {
-    [view_ prepareBlockingForURLString:NSStringFromCef(request->GetURL())];
+    blocking_navigation_.fetch_add(1);
+    [view_ prepareBlockingForURLString:NSStringFromCef(request->GetURL()) runImmediately:NO];
   }
   return false;
 }
