@@ -21,16 +21,19 @@ struct InterlinkedApp: App {
                 Button("Close Tab") { workspace.closeActive() }
                     .keyboardShortcut("w", modifiers: .command)
             }
-            CommandGroup(replacing: .saveItem) {
-                Button("Save to Vault") { workspace.assistance.saveToVault() }
-                    .keyboardShortcut("s", modifiers: .command)
-            }
+            CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .sidebar) {
                 Button("All Tabs") { workspace.toggleOverview() }
                     .keyboardShortcut("s", modifiers: [.command, .control])
             }
             CommandMenu("Tab") {
+                Button(workspace.isSplit ? "Move Side Page to Its Own Tab" : "Split View") { workspace.toggleSplitView() }
+                    .keyboardShortcut("\\", modifiers: .command)
+                Button("Focus Other Page") { workspace.focusOtherPane() }
+                    .keyboardShortcut("\\", modifiers: [.command, .option])
+                    .disabled(!workspace.isSplit)
+                Divider()
                 Button("Next Tab") { workspace.cycleTabs(1) }
                     .keyboardShortcut("]", modifiers: .command)
                 Button("Previous Tab") { workspace.cycleTabs(-1) }
@@ -51,11 +54,13 @@ struct InterlinkedApp: App {
                 Button("Share This Page with Jev…") { workspace.assistance.requestSharing() }
                 Button("Stop Sharing This Page") { workspace.assistance.revokePage() }
                     .disabled(!workspace.assistance.shared)
-                Button("Downloads") {
-                    if workspace.assistance.panel != nil { workspace.assistance.closePanel() }
-                    workspace.downloads.togglePanel()
-                }
+                Button("Downloads") { workspace.toggleDownloads() }
                 .keyboardShortcut("j", modifiers: .command)
+                Toggle("Sharing Screen Mode", isOn: Binding(
+                    get: { workspace.sharingScreenMode },
+                    set: { workspace.sharingScreenMode = $0 }
+                ))
+                .keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
                 Button("Connection Details") { workspace.toggleIdentity() }
                     .disabled(workspace.currentPageURL == nil)
@@ -68,23 +73,13 @@ struct InterlinkedApp: App {
                 Button("Copy Page URL") { workspace.copyCurrentPageURL() }
                     .disabled(workspace.currentPageURL == nil)
                     .keyboardShortcut("c", modifiers: [.command, .shift])
-                Divider()
-                Button(workspace.savedSites.contains(workspace.currentPageURL?.absoluteString ?? "", in: .favorite) ? "Remove from Favorites" : "Add to Favorites") {
-                    workspace.toggleCurrentPage(in: .favorite)
-                }
-                .disabled(workspace.currentPageURL == nil)
-                Button(workspace.savedSites.contains(workspace.currentPageURL?.absoluteString ?? "", in: .bookmark) ? "Remove Bookmark" : "Bookmark This Page") {
-                    workspace.toggleCurrentPage(in: .bookmark)
-                }
-                .disabled(workspace.currentPageURL == nil)
-                .keyboardShortcut("d", modifiers: .command)
             }
         }
         Window("About Interlinked", id: "about") {
             AboutView()
         }
         .windowResizability(.contentSize)
-        Settings { AssistanceSettings().environment(workspace) }
+        Settings { InterlinkedSettings().environment(workspace) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 840, height: 620)
             .windowResizability(.contentMinSize)
@@ -111,6 +106,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// SwiftUI can mount the restored session's pages before
+    /// `applicationDidFinishLaunching`, and a page view cannot make a browser
+    /// until Chromium is up. Start the engine before any scene exists.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        startChromium()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

@@ -49,6 +49,11 @@ targets:
         NSLocationWhenInUseUsageDescription: Interlinked lets websites use your location only after you approve their request.
         NSSpeechRecognitionUsageDescription: Interlinked uses on-device speech recognition for voice navigation and browser commands.
         InterlinkedJevRelayURL: "$(INTERLINKED_JEV_RELAY_URL)"
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: computer.interlinked.tab
+            UTTypeDescription: Interlinked tab
+            UTTypeConformsTo:
+              - public.data
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked

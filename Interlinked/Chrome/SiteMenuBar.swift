@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The browser's menu for the page. A compact centered pill: a few destinations,
-/// and search when the site has one. The site name stays on the page handle.
+/// The browser's menu for the page, built like the page handle: one continuous
+/// glass shape whose size morphs between destinations, a submenu, and search,
+/// with the contents crossfading inside it. The site name stays on the handle.
 struct SiteMenuBar: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -10,73 +11,146 @@ struct SiteMenuBar: View {
     var available: CGSize
     @State private var searchDraft = ""
 
+    /// What the pill is currently shaped around.
+    private enum Mode: Equatable {
+        case destinations
+        case more
+        case submenu(String)
+        case search
+    }
+
+    private static let radius: CGFloat = 14
+    private static let rowHeight: CGFloat = 44
+    private static let chevronWidth: CGFloat = 44
+    private static let homeWidth: CGFloat = 44
+    private static let searchIconWidth: CGFloat = 44
+    private static let moreWidth: CGFloat = 64
+    private static let labelSize: CGFloat = 13
+    private static let glyphSize: CGFloat = 13
+    private static let searchWidth: CGFloat = 320
+
     private var menu: SiteMenu? { workspace.siteMenu }
     /// Room for the page actions on the right, matched on the left so the pill stays centered.
     private var maxWidth: CGFloat { max(220, available.width - 320) }
-    private var expanded: SiteMenuItem? {
-        guard let id = workspace.siteMenuExpanded, id != SiteMenuItem.moreID else { return nil }
-        return menu?.items.first { $0.id == id }
-    }
-    private var showingMore: Bool { workspace.siteMenuExpanded == SiteMenuItem.moreID }
 
     var body: some View {
         if let menu, showsBar(menu) {
-            Group {
-                if let item = expanded {
-                    submenuRow(item, menu)
-                } else if showingMore {
-                    moreRow(menu)
-                } else {
-                    topRow(menu)
+            let mode = resolved(menu)
+            let size = CGSize(width: width(mode, menu), height: Self.rowHeight)
+            ZStack {
+                switch mode {
+                case .search:
+                    if let search = menu.search { searchRow(search).transition(.opacity) }
+                case .submenu(let id):
+                    if let item = menu.items.first(where: { $0.id == id }) {
+                        submenuRow(item, menu).transition(.opacity)
+                    }
+                case .more:
+                    moreRow(menu).transition(.opacity)
+                case .destinations:
+                    topRow(menu).transition(.opacity)
                 }
             }
-            .fixedSize(horizontal: true, vertical: true)
-            .frame(height: 44)
+            .frame(width: size.width, height: size.height)
+            .clipShape(RoundedRectangle(cornerRadius: Self.radius, style: .continuous))
+            .modifier(PageGlass(radius: Self.radius))
+            .modifier(AILabelGlow(effect: workspace.siteMenuEffect, pane: workspace.activePane,
+                                  radius: Self.radius))
             .foregroundStyle(palette.text)
-            .modifier(PageGlass(radius: 14))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("site-menu")
             .modifier(SiteMenuExit())
-            .animation(reduceMotion ? nil : Metrics.morph, value: workspace.siteMenuExpanded)
+            .animation(reduceMotion ? nil : Metrics.morph, value: size)
+            .animation(reduceMotion ? nil : Metrics.morph, value: mode)
             .onChange(of: menu.home) { _, _ in searchDraft = "" }
         }
     }
 
     private func showsBar(_ menu: SiteMenu) -> Bool {
-        if menu.search != nil || expanded != nil || showingMore { return true }
+        if menu.search != nil || workspace.siteMenuExpanded != nil { return true }
         return menu.items.contains { !$0.label.isEmpty }
+    }
+
+    // MARK: - Shape
+
+    /// The requested mode, dropped back to the destinations when the page no
+    /// longer offers what it asked for.
+    private func resolved(_ menu: SiteMenu) -> Mode {
+        if workspace.siteMenuSearching {
+            return menu.search == nil ? .destinations : .search
+        }
+        guard let id = workspace.siteMenuExpanded else { return .destinations }
+        if id == SiteMenuItem.moreID {
+            return split(menu).extra.isEmpty ? .destinations : .more
+        }
+        return menu.items.contains { $0.id == id } ? .submenu(id) : .destinations
+    }
+
+    private func width(_ mode: Mode, _ menu: SiteMenu) -> CGFloat {
+        let search: CGFloat = menu.search == nil ? 0 : Self.searchIconWidth
+        switch mode {
+        case .destinations:
+            let parts = split(menu)
+            let items = parts.visible.reduce(0) { $0 + itemWidth($1) }
+            return min(maxWidth, Self.homeWidth + items + (parts.extra.isEmpty ? 0 : Self.moreWidth) + search + 12)
+        case .more:
+            let extra = split(menu).extra
+            return min(maxWidth, Self.chevronWidth + scrollWidth(extra) + search + Self.chevronWidth)
+        case .submenu(let id):
+            let item = menu.items.first { $0.id == id }
+            let label = item.map { textWidth($0.label, size: Self.labelSize, weight: .semibold) + 12 } ?? 0
+            return min(maxWidth, Self.chevronWidth + label + scrollWidth(item?.children ?? [])
+                       + search + Self.chevronWidth)
+        case .search:
+            return min(maxWidth, Self.searchWidth)
+        }
     }
 
     private func split(_ menu: SiteMenu) -> (visible: [SiteMenuItem], extra: [SiteMenuItem]) {
         let items = menu.items.filter { !$0.label.isEmpty }
-        let search: CGFloat = menu.search == nil ? 0 : 148
-        let budget = max(0, maxWidth - search - 8)
-        let widths = items.map { textWidth($0.label, size: 12, weight: .medium) + 16 }
-        let count = SiteMenuLayout.visibleCount(itemWidths: widths, budget: budget)
+        let search: CGFloat = menu.search == nil ? 0 : Self.searchIconWidth
+        let budget = max(0, maxWidth - Self.homeWidth - search - 12)
+        let count = SiteMenuLayout.visibleCount(itemWidths: items.map(itemWidth), budget: budget,
+                                                moreWidth: Self.moreWidth)
         return (Array(items.prefix(count)), Array(items.dropFirst(count)))
     }
+
+    private func itemWidth(_ item: SiteMenuItem) -> CGFloat {
+        max(Self.rowHeight, textWidth(item.label, size: Self.labelSize, weight: .semibold) + 24)
+    }
+
+    private func itemsWidth(_ items: [SiteMenuItem]) -> CGFloat {
+        items.reduce(0) { $0 + itemWidth($1) }
+    }
+
+    private func scrollWidth(_ items: [SiteMenuItem]) -> CGFloat {
+        min(itemsWidth(items), max(80, maxWidth - 120))
+    }
+
+    // MARK: - Rows
 
     private func topRow(_ menu: SiteMenu) -> some View {
         let parts = split(menu)
         return HStack(spacing: 0) {
+            homeButton(menu)
             ForEach(parts.visible) { itemButton($0) }
             if !parts.extra.isEmpty {
                 moreButton
             }
-            if let search = menu.search {
-                compactSearch(search)
+            if menu.search != nil {
+                searchButton
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 6)
     }
 
     private func moreRow(_ menu: SiteMenu) -> some View {
         let extra = split(menu).extra
         return HStack(spacing: 0) {
             backButton
-            scrolling(extra, width: itemsWidth(extra))
-            if let search = menu.search {
-                compactSearch(search)
+            scrolling(extra)
+            if menu.search != nil {
+                searchButton
             }
             closeButton
         }
@@ -86,37 +160,57 @@ struct SiteMenuBar: View {
         HStack(spacing: 0) {
             backButton
             Text(item.label)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: Self.labelSize, weight: .semibold))
                 .lineLimit(1)
-                .padding(.trailing, 8)
-            scrolling(item.children, width: itemsWidth(item.children))
-            if let search = menu.search {
-                compactSearch(search)
+                .padding(.trailing, 12)
+            scrolling(item.children)
+            if menu.search != nil {
+                searchButton
             }
             closeButton
         }
     }
 
-    private func scrolling(_ items: [SiteMenuItem], width: CGFloat) -> some View {
+    /// Morphed state: the same pill, now a field. Escape or Close returns it.
+    private func searchRow(_ search: SiteMenuSearch) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: Self.glyphSize, weight: .medium))
+                .foregroundStyle(palette.textDim)
+                .padding(.leading, 16)
+            WorkInput(
+                text: $searchDraft,
+                placeholder: search.placeholder.isEmpty ? "Search" : search.placeholder,
+                identifier: "site-menu-search",
+                fontSize: Self.labelSize,
+                palette: palette,
+                submit: { workspace.submitSiteSearch(searchDraft) },
+                cancel: { workspace.collapseSiteMenuChrome() },
+                autofocus: true
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 22)
+            closeButton
+        }
+    }
+
+    private func scrolling(_ items: [SiteMenuItem]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ForEach(items) { itemButton($0) }
             }
         }
-        .frame(width: min(width, max(80, maxWidth - 120)))
+        .frame(width: scrollWidth(items))
     }
 
-    private func itemsWidth(_ items: [SiteMenuItem]) -> CGFloat {
-        items.reduce(0) { $0 + textWidth($1.label, size: 12, weight: .medium) + 16 }
-    }
+    // MARK: - Controls
 
     private var moreButton: some View {
         Button { workspace.siteMenuExpanded = SiteMenuItem.moreID } label: {
             Text("More")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: Self.labelSize, weight: .medium))
                 .foregroundStyle(palette.textDim)
-                .padding(.horizontal, 10)
-                .frame(height: 44)
+                .frame(width: Self.moreWidth, height: Self.rowHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pointing)
@@ -127,8 +221,8 @@ struct SiteMenuBar: View {
     private var backButton: some View {
         Button { workspace.collapseSiteMenuChrome() } label: {
             Image(systemName: "chevron.left")
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 36, height: 44)
+                .font(.system(size: Self.glyphSize, weight: .medium))
+                .frame(width: Self.chevronWidth, height: Self.rowHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pointing)
@@ -138,8 +232,8 @@ struct SiteMenuBar: View {
     private var closeButton: some View {
         Button { workspace.collapseSiteMenuChrome() } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 36, height: 44)
+                .font(.system(size: Self.glyphSize, weight: .medium))
+                .frame(width: Self.chevronWidth, height: Self.rowHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pointing)
@@ -147,37 +241,42 @@ struct SiteMenuBar: View {
         .accessibilityIdentifier("site-menu-close")
     }
 
-    private func compactSearch(_ search: SiteMenuSearch) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(palette.textDim)
-            WorkInput(
-                text: $searchDraft,
-                placeholder: "Search",
-                identifier: "site-menu-search",
-                fontSize: 12,
-                palette: palette,
-                submit: { workspace.submitSiteSearch(searchDraft) },
-                cancel: { searchDraft = "" },
-                autofocus: false
-            )
-            .frame(width: 96, height: 22)
+    /// Resting state: search is one glyph beside the destinations.
+    /// Interlinked replaces the site's header, so its home is always one
+    /// click away, however deep you navigate.
+    private func homeButton(_ menu: SiteMenu) -> some View {
+        let atHome = workspace.currentPageURL.map { SiteMenuHome.matches($0, home: menu.home) } ?? false
+        return Button { workspace.goSiteHome() } label: {
+            Image(systemName: atHome ? "house.fill" : "house")
+                .font(.system(size: Self.glyphSize, weight: .medium))
+                .frame(width: Self.homeWidth, height: Self.rowHeight)
+                .contentShape(Rectangle())
         }
-        .padding(.horizontal, 8)
-        .frame(width: 132, height: 28)
-        .background(palette.hover, in: Capsule())
-        .padding(.leading, 6)
-        .accessibilityLabel("Search")
+        .buttonStyle(.pointing)
+        .help(menu.name.isEmpty ? "Home" : "\(menu.name) home")
+        .accessibilityLabel(menu.name.isEmpty ? "Site home" : "\(menu.name) home")
+        .accessibilityIdentifier("site-menu-home")
+    }
+
+    private var searchButton: some View {
+        Button { workspace.beginSiteMenuSearch() } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: Self.glyphSize, weight: .medium))
+                .foregroundStyle(palette.textDim)
+                .frame(width: Self.searchIconWidth, height: Self.rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pointing)
+        .accessibilityLabel("Search this site")
+        .accessibilityIdentifier("site-menu-search-button")
     }
 
     private func itemButton(_ item: SiteMenuItem) -> some View {
         Button { workspace.activateSiteMenuItem(item) } label: {
             Text(item.label)
-                .font(.system(size: 12, weight: item.current ? .semibold : .medium))
+                .font(.system(size: Self.labelSize, weight: item.current ? .semibold : .medium))
                 .lineLimit(1)
-                .padding(.horizontal, 8)
-                .frame(height: 44)
+                .frame(width: itemWidth(item), height: Self.rowHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pointing)
@@ -190,12 +289,13 @@ struct SiteMenuBar: View {
     }
 }
 
-/// Escape closes a morphed destination list. The resting bar stays; it is the browser's menu.
+/// Escape closes a morphed destination list or search field. The resting bar
+/// stays; it is the browser's menu.
 private struct SiteMenuExit: ViewModifier {
     @Environment(Workspace.self) private var workspace
 
     func body(content: Content) -> some View {
-        if workspace.siteMenuExpanded != nil {
+        if workspace.siteMenuExpanded != nil || workspace.siteMenuSearching {
             content.onExitCommand { workspace.collapseSiteMenuChrome() }
         } else {
             content

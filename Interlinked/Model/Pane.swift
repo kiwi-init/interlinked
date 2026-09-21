@@ -90,27 +90,27 @@ enum NewTabPage {
 enum PageHandleExpansion {
     static func showsOpenWork(
         overviewOpen: Bool,
-        identityOpen: Bool,
+        panelOpen: Bool,
         hovering: Bool,
         editing: Bool,
         isNewTab: Bool,
         voiceActive: Bool
     ) -> Bool {
-        !overviewOpen && !identityOpen && !voiceActive && (hovering || editing || isNewTab)
+        !overviewOpen && !panelOpen && !voiceActive && (hovering || editing || isNewTab)
     }
 }
 
 enum ToolboxShortcut: Equatable {
     case find
-    case vault
     case reading
+    case sharingScreen
     case settings
 
     var label: String {
         switch self {
         case .find: "⌘F"
-        case .vault: "⌘S"
         case .reading: ""
+        case .sharingScreen: "⇧⌘S"
         case .settings: "⌘,"
         }
     }
@@ -294,6 +294,14 @@ indirect enum Pane: Equatable {
         return best.map { PaneID($0.2) }
     }
 
+    /// Puts `new` where `old` was. `new` must not already be in the tree.
+    @discardableResult
+    mutating func replace(_ old: PaneID, with new: PaneID) -> Bool {
+        guard contains(old), !contains(new) else { return false }
+        swapLeaves(old, new)
+        return true
+    }
+
     @discardableResult
     mutating func swap(_ a: PaneID, _ b: PaneID) -> Bool {
         if a == b { return contains(a) }
@@ -373,10 +381,19 @@ extension Pane: Codable {
 }
 
 struct Tab: Codable, Equatable, Identifiable {
+    /// Split view shows two pages side by side, never more.
+    static let maxPanes = 2
+
     var id: TabID
     var root: Pane
     var active: PaneID
     var name: String?
+
+    var panes: [PaneID] { root.leaves() }
+    var isSplit: Bool { panes.count > 1 }
+    var canSplit: Bool { panes.count < Self.maxPanes }
+    /// The pane beside the focused one in split view.
+    var otherPane: PaneID? { panes.first { $0 != active } }
 
     init(id: TabID, pane: PaneID) {
         self.id = id
@@ -389,6 +406,7 @@ struct Tab: Codable, Equatable, Identifiable {
 
     @discardableResult
     mutating func split(_ target: PaneID, axis: SplitAxis, new: PaneID, id: SplitID) -> Bool {
+        guard canSplit else { return false }
         if root.split(target, axis: axis, new: new, id: id) {
             active = new
             return true

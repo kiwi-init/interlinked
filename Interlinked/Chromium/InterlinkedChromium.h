@@ -100,6 +100,12 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 
 @interface ILChromiumView : NSView
 
+/// Interlinked's controls float over the page. While this returns YES the
+/// page may not change the cursor; its latest cursor is kept for later.
++ (void)setChromeOwnsCursor:(nullable BOOL (^)(void))owns;
+/// Shows the page's latest cursor again once the mouse leaves the controls.
++ (void)restorePageCursor;
+
 @property(nonatomic, weak, nullable) id<ILChromiumViewDelegate> delegate;
 @property(nonatomic, readonly, nullable) NSURL *URL;
 @property(nonatomic, readonly, copy) NSString *title;
@@ -115,6 +121,10 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 - (instancetype)initWithFrame:(NSRect)frameRect;
 - (nullable instancetype)initWithCoder:(NSCoder *)coder;
 
+/// A script that runs at the start of every document in this view, before
+/// the page paints, and immediately in the current one. Setting nil removes
+/// it; |stopScript| then runs in the current document to undo its effects.
+- (void)setDocumentStartScript:(nullable NSString *)source stopScript:(nullable NSString *)stopScript;
 - (void)navigateToURL:(NSURL *)URL NS_SWIFT_NAME(navigate(to:));
 - (void)goBack;
 - (void)goForward;
@@ -125,8 +135,6 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 - (void)closeBrowser;
 - (void)evaluateJavaScript:(NSString *)script
                 completion:(void (^)(id _Nullable result, NSError * _Nullable error))completion;
-- (void)httpOnlyCookieNamesForURL:(NSURL *)URL
-                       completion:(void (^)(NSArray<NSString *> *names))completion;
 - (void)findText:(NSString *)text
        backwards:(BOOL)backwards
         findNext:(BOOL)findNext

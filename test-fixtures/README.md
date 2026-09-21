@@ -13,6 +13,7 @@ Additional local pages:
 - `/identity/lookalike` — Gmail title and a fake brand icon. The handle must still show `127.0.0.1`.
 - `/inbox` — signed-in mail with an HttpOnly session cookie and a Sign out control, but no password field.
 - `/public-article` — analytics cookies only.
+- `/contact` — a business address in schema.org data, phone and email links, and sensitive values for Sharing Screen Mode: a valid and an invalid CPF, a test card, an API key, a labeled password, an IBAN, a password field, and an email added after load.
 - `/runtime` — WebSocket echo, service worker registration, fullscreen, and history A/B.
 
 Failed login, upload, download, or popup on these local pages is a release blocker. The manual matrix for Gmail, Docs, GitHub, Slack, OAuth, a video meeting, and one checkout flow is `COMPATIBILITY.md`. Do not commit account passwords or payment details.

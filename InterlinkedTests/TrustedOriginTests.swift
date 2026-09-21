@@ -95,45 +95,8 @@ final class AIContentGrantTests: XCTestCase {
 }
 
 final class PagePrivacyTests: XCTestCase {
-    func testSessionCookiesAndLogoutMarkAuthenticatedPages() {
-        XCTAssertTrue(PagePrivacy.isAuthenticated(
-            url: "https://hr.example.com/home",
-            sensitive: false,
-            cookieNames: [],
-            hasLogoutControl: true,
-            httpOnlyCookieNames: []
-        ))
-        XCTAssertTrue(PagePrivacy.isAuthenticated(
-            url: "https://mail.example.com/inbox",
-            sensitive: false,
-            cookieNames: [],
-            hasLogoutControl: false,
-            httpOnlyCookieNames: ["SID"]
-        ))
-        XCTAssertFalse(PagePrivacy.isAuthenticated(
-            url: "https://www.example.com/article",
-            sensitive: false,
-            cookieNames: ["_ga", "CookieConsent"],
-            hasLogoutControl: false,
-            httpOnlyCookieNames: []
-        ))
-        XCTAssertTrue(PagePrivacy.isAuthenticated(
-            url: "https://person:secret@example.com/",
-            sensitive: false,
-            cookieNames: [],
-            hasLogoutControl: false,
-            httpOnlyCookieNames: []
-        ))
-    }
-
+    @MainActor
     func testFormAndPasswordExclusionsRemainIntact() {
-        XCTAssertTrue(PagePrivacy.isAuthenticated(
-            url: "https://www.example.com/account",
-            sensitive: true,
-            cookieNames: [],
-            hasLogoutControl: false,
-            httpOnlyCookieNames: []
-        ))
         XCTAssertTrue(PageTextBridge.install.contains("form,input,textarea,select,[contenteditable]"))
         XCTAssertTrue(PageTextBridge.install.contains("input[type=\"password\"],textarea,[contenteditable=\"true\"]"))
     }

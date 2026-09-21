@@ -6,6 +6,8 @@ enum Control {
     static let writeCommands = [
         "new-tab [kind]",
         "open-url URL",
+        "sharing-mode on|off|state|check",
+        "split-view on|off|other|drop TAB left|right|state",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -29,6 +31,7 @@ enum Control {
         "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
+        "site-menu [state|search|close|home]",
         "quit",
     ]
 
@@ -56,7 +59,7 @@ enum Control {
         switch command {
         case "commands":
             return json([
-                "reads": ["state", "commands", "identity", "measure-frames [pane]"],
+                "reads": ["state", "commands", "identity", "measure-frames [pane]", "site-menu", "useful-info"],
                 "writes": writeCommands,
             ])
 
@@ -71,10 +74,35 @@ enum Control {
                 "active_pages": workspace.tabs.filter { workspace.hosts.existingBrowser($0.active) != nil }.count,
             ])
 
+        case "site-menu":
+            switch words.first {
+            case "search": workspace.beginSiteMenuSearch()
+            case "close": workspace.collapseSiteMenuChrome()
+            case "home": workspace.goSiteHome()
+            case "state", nil: break
+            default: return error("usage: site-menu [state|search|close]")
+            }
+            guard let menu = workspace.siteMenu else {
+                return json(["shown": false, "uses_site_menu": workspace.usesSiteMenu])
+            }
+            return json([
+                "shown": true,
+                "uses_site_menu": workspace.usesSiteMenu,
+                "home": menu.home,
+                "name": menu.name,
+                "replaces_chrome": menu.replacesChrome,
+                "searching": workspace.siteMenuSearching,
+                "expanded": workspace.siteMenuExpanded ?? "",
+                "effect": workspace.siteMenuEffect != nil,
+                "search": menu.search.map {
+                    ["action": $0.action, "query_param": $0.queryParam, "placeholder": $0.placeholder]
+                } ?? [:],
+                "items": menu.items.map { ["label": $0.label, "children": $0.children.count] },
+            ])
+
         case "assistance-state":
             let a = workspace.assistance
             return json(["enabled": a.enabled, "key_saved": a.hasKey, "jev_ready": a.hasJevAccess, "status": a.status,
-                         "vault_status": a.vaultStatus, "vault_count": a.history.visits.count,
                          "matches": a.matches.map { ["id": $0.id, "text": $0.text] },
                          "findings": a.findings.map { ["id": $0.id, "category": $0.signal.rawValue] },
                          "label": workspace.activePane.map { a.label($0, url: workspace.surfaces.line($0)) } ?? "",
@@ -93,10 +121,6 @@ enum Control {
 
         case "check-wording":
             workspace.assistance.openReading()
-            return ok()
-
-        case "save-page":
-            workspace.assistance.saveToVault()
             return ok()
 
         case "close-page-tool":
@@ -401,6 +425,55 @@ enum Control {
             default:
                 return error("builtins takes state, blocking on|off, or dark off|system|always")
             }
+
+        case "split-view":
+            switch words.first ?? "state" {
+            case "on": if !workspace.isSplit { workspace.splitActive() }
+            case "off": workspace.unsplit()
+            case "other": workspace.focusOtherPane()
+            case "drop":
+                guard words.count == 3, let raw = UInt64(words[1]), ["left", "right"].contains(words[2]) else {
+                    return error("split-view drop takes a tab id and left or right")
+                }
+                workspace.dropTab(TabID(raw), leading: words[2] == "left")
+            case "state": break
+            default: return error("split-view takes on, off, other, or state")
+            }
+            return json([
+                "split": workspace.isSplit,
+                "panes": workspace.activeTab?.panes.map { Int($0.rawValue) } ?? [],
+                "active": workspace.activePane.map { Int($0.rawValue) } ?? 0,
+                "tabs": workspace.tabs.count,
+                "tab_ids": workspace.tabs.map { Int($0.id.rawValue) },
+            ])
+
+        case "sharing-mode":
+            switch words.first ?? "state" {
+            case "on": workspace.sharingScreenMode = true
+            case "off": workspace.sharingScreenMode = false
+            case "state": break
+            case "check":
+                // Writes what the active page covers, for fixtures.
+                guard let view = workspace.activePane.flatMap(workspace.hosts.existingBrowser) else { return error("no loaded web page") }
+                Task { @MainActor in
+                    let covered = try? await view.evaluateJavaScript("globalThis.__interlinkedShield?.covered() ?? null")
+                    let output = ProcessInfo.processInfo.environment["INTERLINKED_SHIELD_REPORT"] ?? "/tmp/interlinked-shield-report.json"
+                    try? json(["enabled": workspace.sharingScreenMode, "covered": covered ?? NSNull()]).write(toFile: output, atomically: true, encoding: .utf8)
+                }
+            default: return error("sharing-mode takes on, off, state, or check")
+            }
+            return json(["enabled": workspace.sharingScreenMode])
+
+        case "useful-info":
+            let info = workspace.usefulInfo
+            let found = workspace.activePane.flatMap { info.contacts[$0] }
+            return json([
+                "address_enabled": info.showsAddress,
+                "contact_enabled": info.showsContact,
+                "address": found?.address ?? "",
+                "phones": found?.phones ?? [],
+                "emails": found?.emails ?? [],
+            ])
 
         case "quit":
             workspace.quit()

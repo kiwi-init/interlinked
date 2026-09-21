@@ -48,6 +48,6 @@ enum AutomaticReadingConsent {
     }
 
     static let warning = """
-    Always-on Critical Reading sends readable text from sites you allow to Jev through OpenRouter. OpenRouter's current policy is that these requests are anonymized and not used to train models. That policy is not a guarantee. A third party still receives the page's text, including anything written on a logged-in mail, finance, health, or work page you later allow. Interlinked will not run automatically on a site until you grant that site, and you can revoke a grant at any time.
+    Always-on Critical Reading sends the readable text of every public page you open to Jev through OpenRouter, without asking again. OpenRouter's current policy is that these requests are anonymized and not used to train models. That policy is not a guarantee. A third party still receives the page's text, including anything shown on a signed-in mail, finance, health, or work page. Form fields and password pages are never sent. Stop Sharing This Page pauses it for a site until you quit, and you can turn Always on off at any time.
     """
 }

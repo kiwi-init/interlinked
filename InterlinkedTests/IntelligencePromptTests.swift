@@ -3,7 +3,7 @@ import XCTest
 final class IntelligencePromptTests: XCTestCase {
     func testEveryFeatureHasAVisibleDefaultAndCorrectProvider() {
         XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 3)
-        XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 5)
+        XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 4)
         for feature in IntelligencePromptFeature.allCases {
             XCTAssertFalse(feature.title.isEmpty)
             XCTAssertFalse(feature.defaultText.isEmpty)
@@ -42,16 +42,16 @@ final class IntelligencePromptTests: XCTestCase {
     func testRuntimeVariablesRenderInsideTheShippedPrompt() {
         XCTAssertEqual(
             IntelligencePromptPreferences.rendered(
-                .jevVaultSearch,
-                values: ["page_id": "page-4", "query": "browser architecture"]
+                .jevRelatedPages,
+                values: ["first_page_id": "page-4", "second_page_id": "page-9"]
             ).contains("page-4"),
             true
         )
         XCTAssertTrue(
             IntelligencePromptPreferences.rendered(
-                .jevVaultSearch,
-                values: ["page_id": "page-4", "query": "browser architecture"]
-            ).contains("browser architecture")
+                .jevRelatedPages,
+                values: ["first_page_id": "page-4", "second_page_id": "page-9"]
+            ).contains("page-9")
         )
     }
 }

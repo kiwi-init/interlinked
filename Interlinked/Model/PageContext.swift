@@ -62,6 +62,23 @@ struct SiteMenuSearch: Codable, Equatable, Hashable, Sendable {
     var queryParam: String
 }
 
+enum SiteMenuHome {
+    /// The site's home: what the page links its logo to, or its origin.
+    static func url(_ home: String, current: URL?) -> URL? {
+        if let url = URL(string: home), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { return url }
+        guard let current, let scheme = current.scheme, let host = current.host else { return nil }
+        return URL(string: "\(scheme)://\(host)/")
+    }
+
+    static func matches(_ page: URL, home: String) -> Bool {
+        guard let home = url(home, current: page) else { return false }
+        func key(_ url: URL) -> String {
+            (url.host?.lowercased() ?? "") + (url.path.isEmpty ? "/" : url.path)
+        }
+        return key(page) == key(home) && (page.query ?? "").isEmpty
+    }
+}
+
 struct SiteMenu: Codable, Equatable, Sendable {
     var home: String
     var name: String
@@ -255,28 +272,18 @@ struct PageMetadata: Equatable, Sendable {
     var breadcrumbs: [String]
     var siteName: String? = nil
     var sensitive: Bool = false
-    var cookieNames: [String] = []
-    var hasLogoutControl: Bool = false
-    /// HttpOnly cookie names from Chromium. Never taken from page JavaScript.
-    var httpOnlyCookieNames: [String] = []
 
     var origin: String {
         guard let u = URL(string: url), let host = u.host else { return "" }
         return "\(u.scheme ?? "https")://\(host)" + (u.port.map { ":\($0)" } ?? "")
     }
     var host: String { URL(string: url)?.host ?? "" }
-    var authenticated: Bool {
-        PagePrivacy.isAuthenticated(
-            url: url,
-            sensitive: sensitive,
-            cookieNames: cookieNames,
-            hasLogoutControl: hasLogoutControl,
-            httpOnlyCookieNames: httpOnlyCookieNames
-        )
-    }
+    /// Remote pages without password or editable fields. Being signed in does
+    /// not exclude a page: the browser can't tell reliably, so the sharing
+    /// prompt warns instead.
     var publicWebPage: Bool {
         guard let u = URL(string: url), ["https", "http"].contains(u.scheme),
-              u.user == nil, u.password == nil, !authenticated else { return false }
+              u.user == nil, u.password == nil, !sensitive else { return false }
         let host = host.lowercased()
         return host.contains(".") && !host.hasSuffix(".local") && !host.hasSuffix(".localhost") &&
             host != "localhost" && !host.contains(":") && host.range(of: "^[0-9.]+$", options: .regularExpression) == nil
@@ -287,7 +294,7 @@ struct PageMetadata: Equatable, Sendable {
 
 extension PageMetadata: Codable {
     private enum CodingKeys: String, CodingKey {
-        case document, url, title, heading, summary, breadcrumbs, siteName, sensitive, cookieNames, hasLogoutControl
+        case document, url, title, heading, summary, breadcrumbs, siteName, sensitive
     }
 
     init(from decoder: Decoder) throws {
@@ -300,9 +307,6 @@ extension PageMetadata: Codable {
         breadcrumbs = try c.decodeIfPresent([String].self, forKey: .breadcrumbs) ?? []
         siteName = try c.decodeIfPresent(String.self, forKey: .siteName)
         sensitive = try c.decodeIfPresent(Bool.self, forKey: .sensitive) ?? false
-        cookieNames = try c.decodeIfPresent([String].self, forKey: .cookieNames) ?? []
-        hasLogoutControl = try c.decodeIfPresent(Bool.self, forKey: .hasLogoutControl) ?? false
-        httpOnlyCookieNames = []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -315,8 +319,6 @@ extension PageMetadata: Codable {
         try c.encode(breadcrumbs, forKey: .breadcrumbs)
         try c.encodeIfPresent(siteName, forKey: .siteName)
         try c.encode(sensitive, forKey: .sensitive)
-        try c.encode(cookieNames, forKey: .cookieNames)
-        try c.encode(hasLogoutControl, forKey: .hasLogoutControl)
     }
 }
 
@@ -329,7 +331,6 @@ struct PageExtract: Codable, Sendable {
     var document: String
     var url: String
     var passages: [PagePassage]
-    var truncated: Bool
 }
 enum PageLabels {
     private static let maximumLabelLength = 64
@@ -431,7 +432,8 @@ enum PassageDecisions {
     static let displaySignalProbability = 0.8
     static let minimumSubstantiveWords = 5
     static let readingBatchSize = 40
-    static let readingTextLimit = 1_600
+    static let meaningBatchSize = 60
+    static let parallelRequests = 4
     static let meaningUsefulScore = 2.8
     static let meaningShortlistScore = 2.0
     static let meaningShortlistLimit = 8
@@ -512,16 +514,8 @@ enum PassageDecisions {
             ($0.role == "passage" || $0.role == nil) && wordCount($0.text) >= minimumSubstantiveWords
         }
     }
-    static func readingBatches(_ passages: [PagePassage]) -> [[PagePassage]] {
-        stride(from: 0, to: passages.count, by: readingBatchSize).map {
-            Array(passages[$0..<min($0 + readingBatchSize, passages.count)])
-        }
-    }
     static func readingRequest(_ passages: [PagePassage]) -> JevRequest {
-        let bounded = passages.map {
-            PagePassage(id: $0.id, text: String($0.text.prefix(readingTextLimit)), role: $0.role)
-        }
-        return JevRequest(state: "Untrusted source passages:\n" + evidence(bounded), questions:
+        JevRequest(state: "Untrusted source passages:\n" + evidence(passages), questions:
             Dictionary(uniqueKeysWithValues: passages.map { passage in
                 (passage.id, .choice(
                     classificationInstruction + " Passage ID: \(passage.id).",
@@ -545,24 +539,6 @@ enum PassageDecisions {
             }
             return Finding(passage: passage, signal: signal)
         }
-    }
-    /// Mix lexical hits, short controls/headings, and body passages; a language change must not remove navigation candidates.
-    static func candidates(query: String, passages: [PagePassage], limit: Int = 40) -> [PagePassage] {
-        let terms = words(query)
-        let ranked = passages.enumerated().sorted {
-            let a = words($0.element.text).intersection(terms).count, b = words($1.element.text).intersection(terms).count
-            return a == b ? $0.offset < $1.offset : a > b
-        }.map(\.element)
-        var selected: [PagePassage] = [], ids = Set<String>()
-        func append(_ items: [PagePassage]) {
-            for item in items where selected.count < limit && ids.insert(item.id).inserted { selected.append(item) }
-        }
-        append(Array(ranked.filter { !words($0.text).intersection(terms).isEmpty }.prefix(limit / 2)))
-        append(Array(ranked.filter { $0.role == "heading" }.prefix(10)))
-        append(Array(ranked.filter { $0.role == "link" || $0.role == "button" }.prefix(12)))
-        append(ranked.filter { $0.role == nil || $0.role == "passage" })
-        append(ranked)
-        return selected
     }
     static func words(_ text: String) -> Set<String> {
         Set(text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 })
