@@ -31,12 +31,18 @@ enum Control {
         "quit",
     ]
 
+    static let maxRequestBytes = 64 * 1024
+    static let receiveTimeoutSeconds = 5
+
     static func socketPath() -> String {
-        if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] {
+        if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"], !named.isEmpty {
             return named
         }
-        let user = ProcessInfo.processInfo.environment["USER"] ?? "unknown"
-        return "/tmp/interlinked-\(user).sock"
+        if let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return base.appendingPathComponent("Interlinked/control/control.sock").path
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent("Library/Application Support/Interlinked/control/control.sock")
     }
 
     @MainActor
@@ -488,19 +494,48 @@ final class ControlServer {
 
     func start(handler: @escaping (String) -> String) {
         let path = Control.socketPath()
+        let usingOverride = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] != nil
+
+        let probe = sockaddr_un()
+        let sunPathCapacity = MemoryLayout.size(ofValue: probe.sun_path)
+        let pathByteCount = path.utf8CString.count
+        guard pathByteCount <= sunPathCapacity else {
+            fputs("interlinked: control socket path too long (\(pathByteCount) > \(sunPathCapacity))\n", stderr)
+            return
+        }
+
+        if usingOverride {
+            let dir = (path as NSString).deletingLastPathComponent
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: nil)
+        } else {
+            guard Self.ensureControlDirectory(for: path) else {
+                fputs("interlinked: could not secure control directory for \(path)\n", stderr)
+                return
+            }
+        }
+
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {
             fputs("interlinked: could not listen on \(path)\n", stderr)
             return
         }
+        Self.setNoSigPipe(fd)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        let pathBytes = Array(path.utf8CString)
-        withUnsafeMutableBytes(of: &addr.sun_path) { dest in
-            guard let base = dest.baseAddress else { return }
-            let count = min(pathBytes.count, dest.count)
-            memcpy(base, pathBytes, count)
+        memset(&addr.sun_path, 0, sunPathCapacity)
+        let filled = path.withCString { cstr in
+            withUnsafeMutableBytes(of: &addr.sun_path) { dest -> Bool in
+                guard let base = dest.baseAddress else { return false }
+                // pathByteCount includes the NUL terminator and fits.
+                memcpy(base, cstr, pathByteCount)
+                return true
+            }
+        }
+        guard filled else {
+            close(fd)
+            fputs("interlinked: could not listen on \(path)\n", stderr)
+            return
         }
         let len = socklen_t(MemoryLayout<sockaddr_un>.size)
         let bound: Int32 = withUnsafePointer(to: &addr) { ptr in
@@ -513,25 +548,24 @@ final class ControlServer {
             fputs("interlinked: could not listen on \(path)\n", stderr)
             return
         }
+        // The socket lives in a 0700 directory; lock the node itself down too.
+        _ = path.withCString { Darwin.chmod($0, 0o600) }
         listenFD = fd
         running = true
         print("interlinked: control channel on \(path)")
         let thread = Thread { [weak self] in
             while self?.running == true {
                 let client = accept(fd, nil, nil)
-                if client < 0 { break }
-                var data = Data()
-                var byte: UInt8 = 0
-                while read(client, &byte, 1) == 1 {
-                    if byte == 10 { break }
-                    if byte != 13 { data.append(byte) }
+                if client < 0 {
+                    if self?.running == true { continue }
+                    break
                 }
-                let request = String(data: data, encoding: .utf8) ?? ""
-                let reply = DispatchQueue.main.sync { handler(request) } + "\n"
-                reply.withCString { cstr in
-                    _ = Darwin.write(client, cstr, strlen(cstr))
+                // Handle each client off the accept thread so one slow or
+                // wedged peer cannot starve the channel.
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    guard let self else { Darwin.close(client); return }
+                    self.handleClient(client, handler: handler)
                 }
-                close(client)
             }
         }
         thread.start()
@@ -541,9 +575,111 @@ final class ControlServer {
     func stop() {
         running = false
         if listenFD >= 0 {
-            close(listenFD)
+            let fd = listenFD
             listenFD = -1
+            shutdown(fd, SHUT_RDWR)
+            close(fd)
         }
         unlink(Control.socketPath())
+    }
+
+    private static func ensureControlDirectory(for socketPath: String) -> Bool {
+        let dir = (socketPath as NSString).deletingLastPathComponent
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir)
+        } catch {
+            return false
+        }
+        // Confirm we own the directory and nobody else can write to it.
+        var st = stat()
+        guard stat(dir, &st) == 0, st.st_uid == getuid(), (st.st_mode & 0o077) == 0 else {
+            return false
+        }
+        return true
+    }
+
+    private static func setNoSigPipe(_ fd: Int32) {
+        var opt: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    private static func setTimeout(_ fd: Int32, seconds: Int) {
+        var tv = timeval()
+        tv.tv_sec = __darwin_time_t(seconds)
+        tv.tv_usec = __darwin_suseconds_t(0)
+        _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    private func handleClient(_ client: Int32, handler: @escaping (String) -> String) {
+        defer { Darwin.close(client) }
+        Self.setNoSigPipe(client)
+        Self.setTimeout(client, seconds: Control.receiveTimeoutSeconds)
+
+        // Only our own uid may drive the browser (type/dictate carry keystrokes).
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        guard getpeereid(client, &peerUID, &peerGID) == 0, peerUID == getuid() else {
+            return
+        }
+
+        var data = Data()
+        data.reserveCapacity(4096)
+        var sawNewline = false
+        var tooLarge = false
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while !sawNewline && !tooLarge {
+            let n = chunk.withUnsafeMutableBytes { buf -> Int in
+                guard let base = buf.baseAddress else { return -1 }
+                return Darwin.read(client, base, buf.count)
+            }
+            if n == 0 { break } // EOF
+            if n < 0 {
+                if errno == EINTR { continue }
+                break // timeout (EAGAIN/EWOULDBLOCK) or other error
+            }
+            for i in 0..<n {
+                let byte = chunk[i]
+                if byte == 10 {
+                    sawNewline = true
+                    break
+                }
+                if byte == 13 { continue }
+                if data.count >= Control.maxRequestBytes {
+                    tooLarge = true
+                    break
+                }
+                data.append(byte)
+            }
+        }
+
+        if tooLarge {
+            Self.writeAll(client, string: "error request too large\n")
+            return
+        }
+        // A peer that connected and said nothing (or timed out) just goes away.
+        guard sawNewline || !data.isEmpty else { return }
+
+        let request = String(data: data, encoding: .utf8) ?? ""
+        let reply = DispatchQueue.main.sync { handler(request) } + "\n"
+        Self.writeAll(client, string: reply)
+    }
+
+    private static func writeAll(_ fd: Int32, string: String) {
+        string.withCString { cstr in
+            var ptr = UnsafeRawPointer(cstr)
+            var remaining = strlen(cstr)
+            while remaining > 0 {
+                let written = Darwin.write(fd, ptr, remaining)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    break // EPIPE (peer closed) or timeout; SO_NOSIGPIPE keeps this from signalling.
+                }
+                if written == 0 { break }
+                remaining -= Int(written)
+                ptr = ptr.advanced(by: Int(written))
+            }
+        }
     }
 }
