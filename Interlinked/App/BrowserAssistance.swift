@@ -38,12 +38,13 @@ final class BrowserAssistance {
     var groups: [ResearchGroup] = []
     private(set) var metadata: [PaneID: PageMetadata] = [:]
     private(set) var labels: [PaneID: String] = [:]
+    private(set) var portraits: [PaneID: PagePortrait] = [:]
     private(set) var labelEffect: AILabelEffect?
     private(set) var grants: [PaneID: String] = [:]
     let history = BrowsingHistory()
     let personalFilters = PersonalFilters()
     var enabled = JevPreferences.enabled()
-    var automaticLabels = UserDefaults.standard.bool(forKey: "jev.labels")
+    var automaticLabels = UserDefaults.standard.object(forKey: "jev.labels") as? Bool ?? true
     var criticalReadingMode = CriticalReadingMode()
     var automaticReadingConsented = AutomaticReadingConsent.accepted()
     let originGrants = AIContentGrantStore()
@@ -121,7 +122,7 @@ final class BrowserAssistance {
     func committed(_ pane: PaneID) {
         let wasActive = workspace?.activePane == pane
         for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)", "filters-\(pane.rawValue)"] { cancel(key) }
-        metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); grants.removeValue(forKey: pane)
+        metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); portraits.removeValue(forKey: pane); grants.removeValue(forKey: pane)
         readingResults.removeValue(forKey: pane); readingInFlight.removeValue(forKey: pane)
         filterResults.removeValue(forKey: pane)
         if labelEffect?.pane == pane { labelEffect = nil }
@@ -143,8 +144,8 @@ final class BrowserAssistance {
                 if self.metadata[pane]?.document != page.document { self.grants.removeValue(forKey: pane) }
                 self.metadata[pane] = page
                 self.labels[pane] = PageLabels.fallback(page)
-                if self.automaticLabels && page.publicWebPage {
-                    self.selectLabel(pane, page: page)
+                if page.publicWebPage {
+                    self.describePage(pane, page: page)
                 }
                 self.applyPersonalFilters(pane: pane, page: page, view: view)
                 self.startAutomaticReading(pane: pane, page: page, view: view)
@@ -201,7 +202,9 @@ final class BrowserAssistance {
         grants.removeAll(); busy = false
         matches = []; findings = []; groups = []
         labelEffect = nil
-        labels = metadata.mapValues(PageLabels.fallback)
+        labels = Dictionary(uniqueKeysWithValues: metadata.map { pane, page in
+            (pane, (automaticLabels ? portraits[pane]?.label : nil) ?? PageLabels.fallback(page))
+        })
         Task { await intelligence.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
         if let pane = workspace?.activePane, let page = metadata[pane], let view = workspace?.hosts.existingBrowser(pane) {
@@ -237,7 +240,7 @@ final class BrowserAssistance {
             declinedOrigins.remove(page.origin)
             originGrants.grant(page.origin, remember: remember)
             grants[pane] = page.document
-            selectLabel(pane, page: page)
+            describePage(pane, page: page)
             panel = nextPanel
             if panel == .find { findChanged() }
             if panel == .reading { review() }
@@ -265,16 +268,17 @@ final class BrowserAssistance {
         }
         cancel("find"); cancel("reading"); cancel("groups"); busy = false; matches = []; findings = []; groups = []
     }
-    private func selectLabel(_ pane: PaneID, page: PageMetadata) {
+    private func describePage(_ pane: PaneID, page: PageMetadata) {
         let key = "label-\(pane.rawValue)", revision = token("label-\(pane.rawValue)")
         tasks[key] = Task { [weak self] in
             guard let self else { return }
             do {
-                let decision = try await self.intelligence.refinePageLabel(page: page)
+                let decision = try await self.intelligence.describePage(page: page)
                 guard self.accepts(key, revision), self.metadata[pane]?.document == page.document,
                       let decision else { return }
-                if decision.value != self.labels[pane] {
-                    self.labels[pane] = decision.value
+                self.portraits[pane] = decision.value
+                if self.automaticLabels, decision.value.label != self.labels[pane] {
+                    self.labels[pane] = decision.value.label
                     self.labelEffect = AILabelEffect(pane: pane)
                 }
                 self.lastDecisionStatus = "\(decision.source.rawValue) label decision received"
@@ -404,10 +408,14 @@ final class BrowserAssistance {
                 var selected: [UUID: [PageFilterCandidate]] = [:]
                 var usedJev = false
                 for rule in rules {
-                    var matches = PersonalFilterDecisions.localMatches(description: rule.description,
-                                                                       candidates: extract.candidates)
-                    if matches.isEmpty, self.enabled, self.hasJevAccess {
-                        for candidates in PersonalFilterDecisions.batches(extract.candidates) {
+                    var matches = PersonalFilterDecisions.localMatches(
+                        description: rule.description, candidates: extract.candidates)
+                    if PersonalFilterDecisions.intent(rule.description) == .meaning,
+                       self.enabled, self.hasJevAccess, self.originGrants.allows(page.origin) {
+                        let matched = Set(matches.map(\.id))
+                        let remainder = PersonalFilterDecisions.jevCandidates(extract.candidates)
+                            .filter { !matched.contains($0.id) }
+                        for candidates in PersonalFilterDecisions.batches(remainder) {
                             let decision = try await self.intelligence.personalFilterMatches(
                                 description: rule.description, candidates: candidates)
                             try Task.checkCancellation()
@@ -415,7 +423,8 @@ final class BrowserAssistance {
                             usedJev = true
                         }
                     }
-                    selected[rule.id] = matches
+                    var seen = Set<String>()
+                    selected[rule.id] = matches.filter { seen.insert($0.id).inserted }
                 }
                 guard self.accepts(key, revision), self.metadata[pane]?.document == page.document,
                       view.url?.absoluteString == extract.url else { return }
@@ -451,7 +460,7 @@ final class BrowserAssistance {
         guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
             status = "Exact find only on local, signed-in, editable, or password pages."; return
         }
-        if !shared { grants[pane] = page.document; selectLabel(pane, page: page) }
+        if !shared { grants[pane] = page.document }
         runPassages(reading: false)
     }
     func exactFind(backwards: Bool) {
@@ -640,8 +649,10 @@ final class BrowserAssistance {
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(500))
-                let decision = try await self.intelligence.vaultMatches(
-                    query: query, visits: candidates, allowJev: self.enabled && self.hasJevAccess)
+                var decision: IntelligenceDecision<[HistoryVisit]>?
+                if self.enabled, self.hasJevAccess {
+                    decision = try await self.intelligence.vaultMatches(query: query, visits: candidates)
+                }
                 guard self.accepts(key, revision), self.workspace?.editing?.text == text else { return }
                 let live = Set(self.history.visits.map(\.id))
                 if let decision {
@@ -659,20 +670,22 @@ final class BrowserAssistance {
         guard let workspace else { return }
         let pages = workspace.tabs.prefix(8).compactMap { tab -> ResearchPage? in
             guard let page = metadata[tab.active] else { return nil }
-            return ResearchPage(id: String(tab.id.rawValue), title: page.title.isEmpty ? page.host : page.title, detail: page.summary, host: page.host)
+            return ResearchPage(
+                id: String(tab.id.rawValue),
+                title: page.title.isEmpty ? page.host : page.title,
+                detail: page.summary,
+                host: page.host,
+                about: portraits[tab.active]?.about ?? ""
+            )
         }
         groups = ResearchRelations.groups(pages)
-        guard pages.count >= 2 else { return }
-        let allowed = pages.filter { page in workspace.tabs.first { String($0.id.rawValue) == page.id }.map { grants[$0.active] == metadata[$0.active]?.document && grants[$0.active] != nil } ?? false }
+        guard pages.count >= 2, enabled, hasJevAccess else { return }
         let key = "groups", revision = token(key)
         tasks[key] = Task { [weak self] in
             guard let self else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
-                let decision = try await self.intelligence.relatedPageGroups(
-                    pages: pages,
-                    jevPages: allowed,
-                    allowJev: self.enabled && self.hasJevAccess && allowed.count >= 2)
+                let decision = try await self.intelligence.relatedPageGroups(pages: pages)
                 guard self.accepts(key, revision), workspace.overviewOpen else { return }
                 if let decision {
                     self.groups = decision.value

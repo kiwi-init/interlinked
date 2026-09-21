@@ -1,13 +1,8 @@
 import XCTest
 
 final class IntelligencePromptTests: XCTestCase {
-    private func isolatedDefaults() throws -> (name: String, defaults: UserDefaults) {
-        let name = "IntelligencePromptTests-" + UUID().uuidString
-        return (name, try XCTUnwrap(UserDefaults(suiteName: name)))
-    }
-
     func testEveryFeatureHasAVisibleDefaultAndCorrectProvider() {
-        XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 4)
+        XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 2)
         XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 6)
         for feature in IntelligencePromptFeature.allCases {
             XCTAssertFalse(feature.title.isEmpty)
@@ -15,64 +10,48 @@ final class IntelligencePromptTests: XCTestCase {
         }
     }
 
-    func testCustomPromptPersistsAndCanBeRestored() throws {
-        let storage = try isolatedDefaults()
-        defer { storage.defaults.removePersistentDomain(forName: storage.name) }
+    func testPromptsAreLockedToTheShippedText() throws {
+        let name = "IntelligencePromptTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
         let feature = IntelligencePromptFeature.applePageLabel
 
+        IntelligencePromptPreferences.set("Use my page label rules.", for: feature, defaults: defaults)
         XCTAssertEqual(
-            IntelligencePromptPreferences.text(for: feature, defaults: storage.defaults),
+            IntelligencePromptPreferences.text(for: feature, defaults: defaults),
             feature.defaultText
         )
-        XCTAssertFalse(IntelligencePromptPreferences.isCustomized(feature, defaults: storage.defaults))
-
-        IntelligencePromptPreferences.set("Use my page label rules.", for: feature, defaults: storage.defaults)
-        XCTAssertEqual(
-            IntelligencePromptPreferences.text(for: feature, defaults: storage.defaults),
-            "Use my page label rules."
-        )
-        XCTAssertTrue(IntelligencePromptPreferences.isCustomized(feature, defaults: storage.defaults))
-
-        IntelligencePromptPreferences.reset(feature, defaults: storage.defaults)
-        XCTAssertEqual(
-            IntelligencePromptPreferences.text(for: feature, defaults: storage.defaults),
-            feature.defaultText
-        )
-        XCTAssertFalse(IntelligencePromptPreferences.isCustomized(feature, defaults: storage.defaults))
+        XCTAssertFalse(IntelligencePromptPreferences.isCustomized(feature, defaults: defaults))
+        XCTAssertTrue(feature.defaultText.contains("one-or-two-sentence description"))
     }
 
-    func testRuntimeVariablesRenderInsideCustomPrompt() throws {
-        let storage = try isolatedDefaults()
-        defer { storage.defaults.removePersistentDomain(forName: storage.name) }
-        let feature = IntelligencePromptFeature.jevPersonalFilter
-
-        IntelligencePromptPreferences.set(
-            "Evaluate {candidate_id} with role {candidate_role}.",
-            for: feature,
-            defaults: storage.defaults
-        )
+    func testCriticalReadingDefinitionsAreLockedAndDictionaryBased() {
         XCTAssertEqual(
             IntelligencePromptPreferences.rendered(
-                feature,
-                values: ["candidate_id": "candidate-4", "candidate_role": "button"],
-                defaults: storage.defaults
+                .jevCriticalReading,
+                values: ["passage_id": "p1"]
             ),
-            "Evaluate candidate-4 with role button."
+            PassageDecisions.classificationInstruction + " Passage ID: p1."
         )
+        XCTAssertTrue(PassageDecisions.Signal.loaded.explanation.hasPrefix("Loaded language:"))
+        XCTAssertTrue(PassageDecisions.Signal.pressure.explanation.hasPrefix("Pressure:"))
+        XCTAssertTrue(PassageDecisions.Signal.opinion.explanation.hasPrefix("Opinion:"))
+        XCTAssertTrue(PassageDecisions.classificationInstruction.contains("dictionary definitions"))
     }
 
-    func testBlankPromptRestoresTheDefault() throws {
-        let storage = try isolatedDefaults()
-        defer { storage.defaults.removePersistentDomain(forName: storage.name) }
-        let feature = IntelligencePromptFeature.jevVaultSearch
-
-        IntelligencePromptPreferences.set("Custom", for: feature, defaults: storage.defaults)
-        IntelligencePromptPreferences.set("  \n ", for: feature, defaults: storage.defaults)
-
+    func testRuntimeVariablesRenderInsideTheShippedPrompt() {
         XCTAssertEqual(
-            IntelligencePromptPreferences.text(for: feature, defaults: storage.defaults),
-            feature.defaultText
+            IntelligencePromptPreferences.rendered(
+                .jevPersonalFilter,
+                values: ["candidate_id": "candidate-4", "candidate_role": "button"]
+            ).contains("candidate-4"),
+            true
         )
-        XCTAssertFalse(IntelligencePromptPreferences.isCustomized(feature, defaults: storage.defaults))
+        XCTAssertTrue(
+            IntelligencePromptPreferences.rendered(
+                .jevPersonalFilter,
+                values: ["candidate_id": "candidate-4", "candidate_role": "button"]
+            ).contains("button")
+        )
     }
 }

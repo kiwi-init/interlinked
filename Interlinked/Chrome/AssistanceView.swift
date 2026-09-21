@@ -113,12 +113,6 @@ struct AssistanceSettings: View {
     @State private var confirmClearActivity = false
     @State private var confirmAutomaticReading = false
     @State private var settingsSearch = ""
-    @State private var promptDrafts = Dictionary(
-        uniqueKeysWithValues: IntelligencePromptFeature.allCases.map {
-            ($0, IntelligencePromptPreferences.text(for: $0))
-        }
-    )
-    @State private var promptMessages: [IntelligencePromptFeature: String] = [:]
 
     private var visibleSections: [SettingsDestination] {
         let query = settingsSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -243,7 +237,7 @@ struct AssistanceSettings: View {
                     systemImage: LocalIntelligenceRuntime.isAvailable ? "checkmark.circle.fill" : "xmark.circle"
                 )
                 .foregroundStyle(.primary)
-                SettingsNote("Runs locally and is tried first for page labels, Vault search, related pages, and navigation advice.")
+                SettingsNote("On-device. Writes a tab label and a short page description from metadata. Paraphrases a few navigation warnings. Does not rank Vault or group tabs.")
             }
 
             Section("Jev") {
@@ -283,7 +277,7 @@ struct AssistanceSettings: View {
                     Label(keyStatus(assistant), systemImage: assistant.hasKey ? "checkmark.circle.fill" : "circle.dashed")
                         .foregroundStyle(.primary)
                 }
-                SettingsNote("Jev handles meaning search, Critical Reading, and personal filters, and backs up supported Apple Intelligence actions.")
+                SettingsNote("Jev handles meaning search, Critical Reading, Vault ranking, related-tab grouping, and semantic personal filters.")
             }
 
             Section("Behavior") {
@@ -337,8 +331,6 @@ struct AssistanceSettings: View {
                 SettingsNote("Grants are per origin. Remembered grants persist only if you choose Remember this site.")
             }
 
-            promptSettings(for: .appleIntelligence)
-            promptSettings(for: .jev)
             criticalReadingDefinitions
 
             Section {
@@ -380,21 +372,6 @@ struct AssistanceSettings: View {
         .settingsForm()
     }
 
-    private func promptSettings(for provider: IntelligencePromptProvider) -> some View {
-        Section("\(provider.rawValue) Prompts") {
-            ForEach(IntelligencePromptFeature.features(for: provider)) { feature in
-                IntelligencePromptEditor(
-                    feature: feature,
-                    text: promptBinding(for: feature),
-                    isCustomized: IntelligencePromptPreferences.isCustomized(feature),
-                    message: promptMessages[feature] ?? "",
-                    save: { savePrompt(feature) },
-                    restoreDefault: { restoreDefaultPrompt(feature) }
-                )
-            }
-        }
-    }
-
     private var criticalReadingDefinitions: some View {
         Section("Critical Reading Definitions") {
             DisclosureGroup("View Definitions") {
@@ -410,7 +387,7 @@ struct AssistanceSettings: View {
                     .padding(.vertical, 3)
                 }
             }
-            SettingsNote("These fixed definitions are used for every Critical Reading decision.")
+            SettingsNote("These dictionary-based definitions cannot be edited. They are the same for every check.")
         }
     }
 
@@ -422,7 +399,7 @@ struct AssistanceSettings: View {
                     Button("Clear Cache", action: assistant.clearDecisionCache)
                         .pointingHandCursor()
                 }
-                SettingsNote("Identical Jev decisions stay on this Mac for five days.")
+                SettingsNote("Identical Jev decisions and Apple page labels stay on this Mac for five days.")
                 if !assistant.cacheStatus.isEmpty {
                     Text(assistant.cacheStatus).foregroundStyle(.primary)
                 }
@@ -582,29 +559,6 @@ struct AssistanceSettings: View {
         return assistant.hasKey ? "Saved in macOS Keychain" : "No key saved"
     }
 
-    private func promptBinding(for feature: IntelligencePromptFeature) -> Binding<String> {
-        Binding(
-            get: { promptDrafts[feature] ?? IntelligencePromptPreferences.text(for: feature) },
-            set: {
-                promptDrafts[feature] = $0
-                promptMessages[feature] = ""
-            }
-        )
-    }
-
-    private func savePrompt(_ feature: IntelligencePromptFeature) {
-        let text = promptDrafts[feature] ?? ""
-        IntelligencePromptPreferences.set(text, for: feature)
-        promptDrafts[feature] = IntelligencePromptPreferences.text(for: feature)
-        promptMessages[feature] = "Saved."
-    }
-
-    private func restoreDefaultPrompt(_ feature: IntelligencePromptFeature) {
-        IntelligencePromptPreferences.reset(feature)
-        promptDrafts[feature] = feature.defaultText
-        promptMessages[feature] = "Default restored."
-    }
-
     private func exportActivity() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
@@ -663,67 +617,6 @@ private struct IntelligenceActivityRow: View {
             }
         }
         .padding(.vertical, 2)
-    }
-}
-
-private struct IntelligencePromptEditor: View {
-    var feature: IntelligencePromptFeature
-    @Binding var text: String
-    var isCustomized: Bool
-    var message: String
-    var save: () -> Void
-    var restoreDefault: () -> Void
-
-    var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 10) {
-                TextEditor(text: $text)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .frame(minHeight: 116)
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(.primary.opacity(0.28), lineWidth: 1)
-                    )
-                    .accessibilityIdentifier("prompt-\(feature.rawValue)")
-
-                if !feature.variables.isEmpty {
-                    Text("Variables: " + feature.variables.map { "{\($0)}" }.joined(separator: ", "))
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                }
-
-                HStack {
-                    Button("Restore Default", action: restoreDefault)
-                        .disabled(!isCustomized && text == feature.defaultText)
-                        .pointingHandCursor()
-                    Spacer()
-                    if !message.isEmpty {
-                        Text(message)
-                            .font(.callout)
-                            .foregroundStyle(.primary)
-                    }
-                    Button("Save Prompt", action: save)
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .pointingHandCursor()
-                }
-            }
-            .padding(.vertical, 8)
-        } label: {
-            HStack {
-                Text(feature.title)
-                    .foregroundStyle(.primary)
-                Spacer()
-                if isCustomized {
-                    Text("Edited")
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                }
-            }
-            .pointingHandCursor()
-        }
     }
 }
 

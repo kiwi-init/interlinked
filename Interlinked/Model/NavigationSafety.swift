@@ -40,6 +40,18 @@ struct NavigationReview: Equatable, Sendable {
         return NavigationExceptionKey(origin: destinationOrigin, reasons: reasons.map(\.rawValue).sorted())
     }
 
+    /// Apple may paraphrase these; other warnings already speak for themselves.
+    var needsAdvisory: Bool {
+        reasons.contains {
+            switch $0 {
+            case .misleadingLinkText, .mixedScriptHostname, .encodedHostname, .embeddedCredentials:
+                true
+            default:
+                false
+            }
+        }
+    }
+
     var advisoryEvidence: String {
         var lines = ["Destination origin: \(destinationOrigin)"]
         if let sourceOrigin { lines.append("Source origin: \(sourceOrigin)") }
