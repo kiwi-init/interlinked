@@ -180,7 +180,10 @@ final class PageBuiltIns {
     }
 
     func apply(to page: ChromiumPage) {
-        page.forcedDarkMode = darkens(page.url)
+        let dark = darkens(page.url)
+        guard page.forcedDarkMode != dark else { return }
+        page.forcedDarkMode = dark
+        PageTextBridge.appearanceChanged(page)
     }
 
     private func applyDarkMode() {

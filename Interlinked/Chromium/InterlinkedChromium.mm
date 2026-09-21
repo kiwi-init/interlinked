@@ -156,6 +156,14 @@ void (^g_close_all_completion)(BOOL);
 // closes. Blank tabs own no browser, so this hidden page keeps Chromium alive
 // until Interlinked itself decides to quit.
 ILChromiumView *g_keep_alive_view;
+// See +setChromeOwnsCursor:.
+BOOL (^g_chrome_owns_cursor)(void);
+NSCursor *g_last_page_cursor;
+// SwiftUI can mount a restored page before the app delegate has started
+// Chromium. Those views are remembered here and asked again once the runtime
+// is up; without the retry a restored tab stays blank until AppKit happens to
+// re-attach its view.
+NSHashTable<ILChromiumView *> *g_views_awaiting_runtime;
 
 void FinishClosingAllBrowsers(BOOL closed) {
   if (!g_close_all_completion) {
@@ -414,6 +422,10 @@ class InterlinkedClient final : public CefClient,
                        const CefString& url) override;
   void OnTitleChange(CefRefPtr<CefBrowser> browser,
                      const CefString& title) override;
+  bool OnCursorChange(CefRefPtr<CefBrowser> browser,
+                      CefCursorHandle cursor,
+                      cef_cursor_type_t type,
+                      const CefCursorInfo& custom_cursor_info) override;
   void OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
                             bool is_loading,
                             bool can_go_back,
@@ -577,6 +589,7 @@ std::atomic_bool g_running(false);
   NSMutableDictionary<NSNumber *, void (^)(id _Nullable, NSError * _Nullable)> *_evaluations;
   void (^_findCompletion)(BOOL);
 }
+- (void)createBrowserIfPossible;
 - (void)didCreateBrowser:(CefRefPtr<CefBrowser>)browser;
 - (void)didChangeURLString:(NSString *)URLString;
 - (void)didChangePageTitle:(NSString *)title;
@@ -828,6 +841,11 @@ std::atomic_bool g_running(false);
   PerformMessagePumpWork();
   g_keep_alive_view = [[ILChromiumView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)
                                                  initialURL:[NSURL URLWithString:@"about:blank"]];
+  NSArray<ILChromiumView *> *waiting = g_views_awaiting_runtime.allObjects;
+  [g_views_awaiting_runtime removeAllObjects];
+  for (ILChromiumView *view in waiting) {
+    [view createBrowserIfPossible];
+  }
   return YES;
 }
 
@@ -876,6 +894,14 @@ std::atomic_bool g_running(false);
 @end
 
 @implementation ILChromiumView
+
++ (void)setChromeOwnsCursor:(BOOL (^)(void))owns {
+  g_chrome_owns_cursor = [owns copy];
+}
+
++ (void)restorePageCursor {
+  [(g_last_page_cursor ?: NSCursor.arrowCursor) set];
+}
 
 - (instancetype)initWithFrame:(NSRect)frame initialURL:(NSURL *)URL {
   self = [super initWithFrame:frame];
@@ -935,9 +961,17 @@ std::atomic_bool g_running(false);
 }
 
 - (void)createBrowserIfPossible {
-  if (_browser || _client || _closing || g_closing_all_browsers || !ILChromiumRuntime.running) {
+  if (_browser || _client || _closing || g_closing_all_browsers) {
     return;
   }
+  if (!ILChromiumRuntime.running) {
+    if (!g_views_awaiting_runtime) {
+      g_views_awaiting_runtime = [NSHashTable weakObjectsHashTable];
+    }
+    [g_views_awaiting_runtime addObject:self];
+    return;
+  }
+  [g_views_awaiting_runtime removeObject:self];
   _client = new InterlinkedClient(self);
   CefWindowInfo window_info;
   const int width = std::max(1, static_cast<int>(NSWidth(self.bounds)));
@@ -1035,47 +1069,6 @@ std::atomic_bool g_running(false);
     return;
   }
   _evaluations[@(identifier)] = [completion copy];
-}
-
-- (void)httpOnlyCookieNamesForURL:(NSURL *)URL
-                       completion:(void (^)(NSArray<NSString *> *names))completion {
-  if (!_browser || URL.absoluteString.length == 0) {
-    completion(@[]);
-    return;
-  }
-  CefRefPtr<CefDictionaryValue> parameters = CefDictionaryValue::Create();
-  CefRefPtr<CefListValue> urls = CefListValue::Create();
-  urls->SetSize(1);
-  urls->SetString(0, CefFromNSString(URL.absoluteString));
-  parameters->SetList("urls", urls);
-  const int identifier = _browser->GetHost()->ExecuteDevToolsMethod(
-      0, "Network.getCookies", parameters);
-  if (identifier == 0) {
-    completion(@[]);
-    return;
-  }
-  _evaluations[@(identifier)] = [^(id result, NSError *error) {
-    if (![result isKindOfClass:NSArray.class]) {
-      completion(@[]);
-      return;
-    }
-    NSMutableArray<NSString *> *names = [NSMutableArray array];
-    for (id cookie in (NSArray *)result) {
-      if (![cookie isKindOfClass:NSDictionary.class]) {
-        continue;
-      }
-      NSDictionary *entry = cookie;
-      if (![entry[@"httpOnly"] respondsToSelector:@selector(boolValue)] ||
-          ![entry[@"httpOnly"] boolValue]) {
-        continue;
-      }
-      NSString *name = entry[@"name"];
-      if ([name isKindOfClass:NSString.class] && name.length > 0) {
-        [names addObject:name];
-      }
-    }
-    completion(names);
-  } copy];
 }
 
 - (void)findText:(NSString *)text
@@ -1465,6 +1458,15 @@ void InterlinkedClient::OnTitleChange(CefRefPtr<CefBrowser> browser,
                                       const CefString& title) {
   CEF_REQUIRE_UI_THREAD();
   [view_ didChangePageTitle:NSStringFromCef(title)];
+}
+
+bool InterlinkedClient::OnCursorChange(CefRefPtr<CefBrowser> browser,
+                                       CefCursorHandle cursor,
+                                       cef_cursor_type_t type,
+                                       const CefCursorInfo& custom_cursor_info) {
+  CEF_REQUIRE_UI_THREAD();
+  g_last_page_cursor = (__bridge NSCursor *)cursor;
+  return g_chrome_owns_cursor && g_chrome_owns_cursor();
 }
 
 void InterlinkedClient::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,

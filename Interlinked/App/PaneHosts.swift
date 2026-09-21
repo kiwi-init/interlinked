@@ -107,82 +107,20 @@ final class PaneHosts {
         }
     }
 
-    func syncFavicons(tabs: [Tab], surfaces: Surfaces, pinned: Set<String> = []) {
+    func syncFavicons(tabs: [Tab], surfaces: Surfaces) {
         var owners: [PaneID: String] = [:]
         for tab in tabs {
             let pane = tab.active
             let url = pageURLs[pane] ?? address(from: surfaces.line(pane))
             owners[pane] = DomainIconCache<NSImage>.domain(url)
         }
-        for domain in iconCache.retain(owners, pinned: pinned) { iconTasks.removeValue(forKey: domain)?.cancel() }
-        for domain in Set(owners.values).union(pinned) where !iconCache.contains(domain) {
+        for domain in iconCache.retain(owners) { iconTasks.removeValue(forKey: domain)?.cancel() }
+        for domain in Set(owners.values) where !iconCache.contains(domain) {
             guard let data = iconStore.data(for: domain) else { continue }
             guard let image = NSImage(data: data) else { continue }
             _ = iconCache.restore(domain, value: image)
         }
         publishFavicons()
-    }
-
-    func storedIconData(for domain: String) -> Data? {
-        iconStore.data(for: domain)
-    }
-
-    func rememberIcon(_ data: Data, for domain: String) {
-        try? iconStore.write(data, for: domain)
-        if let image = NSImage(data: data), !iconCache.contains(domain) {
-            _ = iconCache.restore(domain, value: image)
-        }
-        publishFavicons()
-    }
-
-    func fetchIcon(for url: URL) async -> Data? {
-        guard let domain = DomainIconCache<NSImage>.domain(url) else { return nil }
-        if let data = iconStore.data(for: domain), NSImage(data: data) != nil { return data }
-        guard let token = iconCache.begin(domain) else {
-            if let image = iconCache.value(forDomain: domain), let data = pngData(image) { return data }
-            return iconStore.data(for: domain)
-        }
-        let data = await Self.downloadIcon(for: url)
-        _ = iconCache.complete(domain, token: token, value: data.flatMap(NSImage.init(data:)))
-        iconTasks.removeValue(forKey: domain)
-        if let data { try? iconStore.write(data, for: domain) }
-        publishFavicons()
-        return data
-    }
-
-    private static func downloadIcon(for pageURL: URL) async -> Data? {
-        let html = await pageHTML(pageURL)
-        var tried: Set<URL> = []
-        for url in FaviconCandidates.urls(for: pageURL, html: html) where ["https", "http"].contains(url.scheme ?? "") && tried.insert(url).inserted {
-            guard let data = await imageData(url), NSImage(data: data) != nil else { continue }
-            return data
-        }
-        return nil
-    }
-
-    private static func pageHTML(_ pageURL: URL) async -> String? {
-        var request = URLRequest(url: pageURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 8)
-        request.setValue(browserUserAgent, forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              data.count < 512_000 else { return nil }
-        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
-    }
-
-    private static func imageData(_ url: URL) async -> Data? {
-        var request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 8)
-        request.setValue(browserUserAgent, forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              data.count < 1_048_576 else { return nil }
-        return data
-    }
-
-    private static let browserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
-
-    func pngData(_ image: NSImage) -> Data? {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
     }
 
     private func publishFavicons() {
@@ -220,7 +158,6 @@ final class PaneHosts {
                   self.iconCache.complete(domain, token: token, value: icon) else { return }
             if let iconData {
                 try? self.iconStore.write(iconData, for: domain)
-                workspace?.savedSites.fillMissingIcon(iconData, domain: domain)
             }
             self.iconTasks.removeValue(forKey: domain)
             self.publishFavicons()
@@ -332,7 +269,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         }
         workspace.hosts.updatePage(page, pane: pane)
         if urlChanged {
-            workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces, pinned: workspace.savedSites.domains)
+            workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces)
             if let url = page.url, url.absoluteString != "about:blank" {
                 workspace.setLineFromHost(pane, url.absoluteString)
                 if !page.isLoading { workspace.browserHistory.record(url, title: page.title) }

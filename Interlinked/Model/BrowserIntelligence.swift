@@ -197,16 +197,22 @@ actor BrowserIntelligence {
     }
 
     func criticalReading(_ passages: [PagePassage]) async throws -> IntelligenceDecision<[PassageDecisions.Finding]> {
-        let response = try await observed(source: .jev, action: "Critical reading") {
-            try await jev.decide(PassageDecisions.readingRequest(passages))
+        let responses = try await batched(passages, size: PassageDecisions.readingBatchSize) { intelligence, batch in
+            try await intelligence.observed(source: .jev, action: "Critical reading") {
+                try await intelligence.jev.decide(PassageDecisions.readingRequest(batch))
+            }
         }
-        return IntelligenceDecision(value: PassageDecisions.findings(response, passages: passages), source: .jev)
+        let answers = responses.reduce(into: [String: JevAnswer]()) { $0.merge($1.answers) { first, _ in first } }
+        return IntelligenceDecision(value: PassageDecisions.findings(JevResponse(answers: answers), passages: passages), source: .jev)
     }
 
     func meaningFind(query: String, passages: [PagePassage]) async throws -> IntelligenceDecision<MeaningDecision> {
-        let scored = try await observed(source: .jev, action: "Meaning search") {
-            try await jev.decide(PassageDecisions.scoreRequest(query: query, passages: passages))
+        let responses = try await batched(passages, size: PassageDecisions.meaningBatchSize) { intelligence, batch in
+            try await intelligence.observed(source: .jev, action: "Meaning search") {
+                try await intelligence.jev.decide(PassageDecisions.scoreRequest(query: query, passages: batch))
+            }
         }
+        let scored = JevResponse(answers: responses.reduce(into: [:]) { $0.merge($1.answers) { first, _ in first } })
         let shortlist = PassageDecisions.shortlist(scored, passages: passages)
         var combined = scored
         if !shortlist.isEmpty {
@@ -226,15 +232,34 @@ actor BrowserIntelligence {
         )
     }
 
-    func vaultMatches(
-        query: String,
-        visits: [HistoryVisit]
-    ) async throws -> IntelligenceDecision<[HistoryVisit]>? {
-        guard !visits.isEmpty else { return nil }
-        let response = try await observed(source: .jev, action: "Vault search") {
-            try await jev.decide(BrowsingHistory.request(query, visits: visits))
+    /// Every passage is checked. Batches keep each request inside the relay's
+    /// limits, and a few run at once so a long page still finishes quickly.
+    private func batched<Value: Sendable>(
+        _ passages: [PagePassage],
+        size: Int,
+        _ run: @escaping @Sendable (BrowserIntelligence, [PagePassage]) async throws -> Value
+    ) async throws -> [Value] {
+        let batches = stride(from: 0, to: passages.count, by: size).map {
+            Array(passages[$0..<min($0 + size, passages.count)])
         }
-        return IntelligenceDecision(value: BrowsingHistory.ranked(response, visits: visits), source: .jev)
+        return try await withThrowingTaskGroup(of: (Int, Value).self) { group in
+            var results = [Value?](repeating: nil, count: batches.count)
+            var next = 0
+            while next < min(PassageDecisions.parallelRequests, batches.count) {
+                let index = next, batch = batches[index]
+                group.addTask { (index, try await run(self, batch)) }
+                next += 1
+            }
+            while let (index, value) = try await group.next() {
+                results[index] = value
+                if next < batches.count {
+                    let index = next, batch = batches[index]
+                    group.addTask { (index, try await run(self, batch)) }
+                    next += 1
+                }
+            }
+            return results.compactMap { $0 }
+        }
     }
 
     func relatedPageGroups(pages: [ResearchPage]) async throws -> IntelligenceDecision<[ResearchGroup]>? {

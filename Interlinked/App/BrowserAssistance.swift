@@ -24,9 +24,6 @@ final class BrowserAssistance {
     var findings: [PassageDecisions.Finding] = []
     var matches: [PagePassage] = []
     var matchIndex = 0
-    var historyResults: [HistoryVisit] = []
-    var historyStatus = ""
-    var vaultStatus = ""
     var cacheStatus = ""
     var lastDecisionStatus = ""
     var findScores: [String: Double] = [:]
@@ -37,7 +34,6 @@ final class BrowserAssistance {
     private(set) var portraits: [PaneID: PagePortrait] = [:]
     private(set) var labelEffect: AILabelEffect?
     private(set) var grants: [PaneID: String] = [:]
-    let history = BrowsingHistory()
     var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.object(forKey: "jev.labels") as? Bool ?? true
     var criticalReadingMode = CriticalReadingMode()
@@ -145,7 +141,6 @@ final class BrowserAssistance {
         } else {
             closePanel()
         }
-        vaultStatus = ""
     }
 
     func activated(_ pane: PaneID) {
@@ -189,12 +184,6 @@ final class BrowserAssistance {
         Task { await intelligence.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
     }
-    func clearHistory() {
-        cancel("history"); history.clear(); historyResults = []; historyStatus = "Vault cleared."
-    }
-    func forgetVisit(_ id: UUID) {
-        cancel("history"); history.remove(id); historyResults.removeAll { $0.id == id }
-    }
     func clearDecisionCache() {
         cacheStatus = "Clearing…"
         Task { [weak self] in
@@ -213,7 +202,7 @@ final class BrowserAssistance {
         do {
             try requireReady()
             guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
-                status = "This page is local, signed-in, editable, or contains a password field. Page sharing is unavailable."; return
+                status = "This page is local, editable, or contains a password field. Page sharing is unavailable."; return
             }
             declinedOrigins.remove(page.origin)
             originGrants.grant(page.origin, remember: remember)
@@ -268,32 +257,6 @@ final class BrowserAssistance {
         await intelligence.navigationAdvice(review)
     }
 
-    var savedInVault: Bool { current.map { page in history.visits.contains { $0.url == page.url } } ?? false }
-    func saveToVault() {
-        guard let pane = workspace?.activePane, let view = workspace?.hosts.existingBrowser(pane) else { return }
-        let key = "vault", revision = token("vault"), url = view.url
-        vaultStatus = "Saving page…"
-        tasks[key] = Task { [weak self, weak view] in
-            guard let self else { return }
-            defer {
-                if self.accepts(key, revision), self.vaultStatus == "Saving page…" {
-                    self.vaultStatus = "The page changed before it could be saved."
-                }
-            }
-            guard let view else { return }
-            do {
-                let page = try await PageTextBridge.metadata(view)
-                guard self.accepts(key, revision), view.url == url else { return }
-                guard page.publicWebPage else { self.vaultStatus = "Local, signed-in, editable, and password pages are not saved."; return }
-                let extract = try await PageTextBridge.extract(view)
-                guard self.accepts(key, revision), view.url == url, page.document == extract.document else { return }
-                self.history.record(page, passages: extract.passages)
-                self.history.save()
-                self.vaultStatus = "Saved to Vault on this Mac"
-            } catch { if self.accepts(key, revision) { self.vaultStatus = "Couldn't read this page. Try again after it loads." } }
-        }
-    }
-
     func openFind() {
         readingPanelOpen = false
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
@@ -327,7 +290,7 @@ final class BrowserAssistance {
         guard byMeaning else { return }
         guard enabled, hasJevAccess else { status = "Exact find is available. Enable Jev in Settings for meaning search."; return }
         guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
-            status = "Exact find only on local, signed-in, editable, or password pages."; return
+            status = "Exact find only on local, editable, or password pages."; return
         }
         if !shared { grants[pane] = page.document }
         runPassages(reading: false)
@@ -355,8 +318,10 @@ final class BrowserAssistance {
     }
     func review() {
         do { try requireReady() } catch { status = errorMessage(error); return }
-        guard let pane = workspace?.activePane, let page = metadata[pane], page.publicWebPage else {
-            status = "Reading checks are unavailable on local, signed-in, editable, or password pages."; return
+        // Asking for a reading check is the consent. Form fields and editable
+        // text are still left out of the extract.
+        guard let pane = workspace?.activePane, let page = metadata[pane] else {
+            status = "Wait for the page to finish loading, then check again."; return
         }
         grants[pane] = page.document
         runPassages(reading: true)
@@ -430,7 +395,7 @@ final class BrowserAssistance {
                 }
                 let candidates = reading
                     ? PassageDecisions.readingCandidates(extract.passages)
-                    : PassageDecisions.candidates(query: query, passages: extract.passages)
+                    : extract.passages
                 guard !candidates.isEmpty else {
                     self.status = "No readable passages found. Exact find still works."
                     if reading {
@@ -441,22 +406,10 @@ final class BrowserAssistance {
                 var readingFindings: [PassageDecisions.Finding] = []
                 var meaningDecision: MeaningDecision?
                 if reading {
-                    let batches = PassageDecisions.readingBatches(candidates)
-                    for (index, batch) in batches.enumerated() {
-                        self.status = batches.count == 1
-                            ? "Checking selected passages…"
-                            : "Checking passage batch \(index + 1) of \(batches.count)…"
-                        let partial = try await self.intelligence.criticalReading(batch)
-                        try Task.checkCancellation()
-                        guard self.accepts(key, revision) else { return }
-                        guard self.workspace?.activePane == pane, self.grants[pane] == page.document,
-                              view.url?.absoluteString == extract.url else {
-                            self.status = "The page changed. Run the search or check again."
-                            return
-                        }
-                        readingFindings.append(contentsOf: partial.value)
-                    }
+                    self.status = "Checking \(candidates.count) passages…"
+                    readingFindings = try await self.intelligence.criticalReading(candidates).value
                 } else {
+                    self.status = "Searching \(candidates.count) page elements…"
                     meaningDecision = try await self.intelligence.meaningFind(query: query, passages: candidates).value
                 }
                 guard self.accepts(key, revision) else { return }
@@ -467,8 +420,7 @@ final class BrowserAssistance {
                 }
                 self.resultDocument = extract.document
                 self.lastDecisionStatus = "Jev decision received for " + (reading ? "reading" : "find")
-                let limited = extract.truncated || candidates.count < extract.passages.count
-                let coverage = "Checked \(candidates.count) passages" + (limited ? "; page coverage is limited." : ".")
+                let coverage = "Checked \(candidates.count) passages."
                 if reading {
                     self.findings = readingFindings
                     self.status = (self.findings.isEmpty ? "No clear signals selected. " : "Possible wording signals. ") + coverage
@@ -505,36 +457,6 @@ final class BrowserAssistance {
         }
     }
 
-    func searchHistory(_ text: String, editing: Bool) {
-        let key = "history", revision = token(key)
-        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let eligible = editing && query.count >= 2 && navigationURL(from: query) == nil
-        historyResults = eligible ? history.exact(query) : []
-        guard eligible else { historyStatus = ""; return }
-        historyStatus = "Vault matches use saved text and metadata, not page images."
-        let candidates = history.candidates(query)
-        guard !candidates.isEmpty else { historyStatus = "Your Vault is empty. Save a page with the Vault button first."; return }
-        tasks[key] = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(500))
-                var decision: IntelligenceDecision<[HistoryVisit]>?
-                if self.enabled, self.hasJevAccess {
-                    decision = try await self.intelligence.vaultMatches(query: query, visits: candidates)
-                }
-                guard self.accepts(key, revision), self.workspace?.editing?.text == text else { return }
-                let live = Set(self.history.visits.map(\.id))
-                if let decision {
-                    self.historyResults = decision.value.filter { live.contains($0.id) }
-                    self.lastDecisionStatus = "\(decision.source.rawValue) decision received for Vault"
-                }
-                self.historyStatus = self.historyResults.isEmpty ? "No clear matches in saved pages." : "Saved pages matching your description"
-            } catch {
-                guard self.accepts(key, revision) else { return }
-                self.historyStatus = self.errorMessage(error)
-            }
-        }
-    }
     func related() {
         guard let workspace else { return }
         let pages = workspace.tabs.prefix(8).compactMap { tab -> ResearchPage? in

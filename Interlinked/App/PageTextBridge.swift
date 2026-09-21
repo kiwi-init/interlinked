@@ -3,11 +3,12 @@ import Foundation
 @MainActor
 protocol PageJavaScriptEvaluating: AnyObject {
     func interlinkedEvaluate(_ body: String, arguments: [String: Any]) async throws -> Any?
-    func httpOnlyCookieNames() async -> [String]
+    /// Whether Interlinked is darkening this page.
+    var rendersDark: Bool { get }
 }
 
 extension PageJavaScriptEvaluating {
-    func httpOnlyCookieNames() async -> [String] { [] }
+    var rendersDark: Bool { false }
 }
 
 /// Runs on demand in the page. Reading annotations track only their source nodes.
@@ -19,6 +20,20 @@ extension PageJavaScriptEvaluating {
       let stopReading, lastLink;
       let siteMenuNode, siteMenuPrevious, siteMenuSpacer;
       let siteMenuExtras=[];
+      // Dark pages, whether darkened by Interlinked or dark by design, get a
+      // deep amber mark with cream text. Chromium's auto dark mode leaves
+      // colors like these alone, so the text never turns white on yellow.
+      let darkened=false;
+      const darkSurface = node => {
+        for (let el=node; el; el=el.parentElement) {
+          const m=getComputedStyle(el).backgroundColor.match(/[\d.]+/g);
+          if (m && (m.length<4 || +m[3]>0.5)) return (0.2126*m[0]+0.7152*m[1]+0.0722*m[2])/255 < 0.4;
+        }
+        return matchMedia('(prefers-color-scheme: dark)').matches;
+      };
+      const markColors = dark => dark
+        ? {mark:'#6b5200',current:'#8f6c00',text:'#fff4cc'}
+        : {mark:'#ffe66a',current:'#ffcc32',text:'#151515'};
       const clean = value => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
       const excluded = node => node.closest('form,input,textarea,select,[contenteditable],[hidden],[aria-hidden="true"],script,style');
       const nodeText = node => {
@@ -37,9 +52,7 @@ extension PageJavaScriptEvaluating {
             heading:clean(document.querySelector('main h1,article h1,h1')?.textContent).slice(0,120),
             summary:meta('description') || meta('og:description'),siteName:meta('og:site_name'),
             breadcrumbs:Array.from(document.querySelectorAll('[aria-label*="readcrumb"] a,[itemprop="itemListElement"] [itemprop="name"]')).slice(0,5).map(n=>clean(n.textContent).slice(0,60)),
-            sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]'),
-            cookieNames:document.cookie.split(';').map(part=>part.split('=')[0].trim()).filter(Boolean).slice(0,40),
-            hasLogoutControl:Array.from(document.querySelectorAll('a,button,[role="button"],[role="link"]')).slice(0,200).some(node=>/\b(log\s*out|sign\s*out|sign\s*off)\b/i.test(clean(node.innerText||node.getAttribute('aria-label')||node.title)))};
+            sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]')};
         },
         navigationLink(destination) {
           if (!lastLink || Date.now()-lastLink.at>5000) return null;
@@ -49,24 +62,34 @@ extension PageJavaScriptEvaluating {
         },
         extract() {
           const root = document.body;
-          const passages = [], limit = 1000; let truncated = false;
+          const passages = [];
           const elements = Array.from(root.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,[role="heading"],blockquote,pre,td,a,button,[role="button"],[role="link"],img,video'));
           const seen = new Set();
+          // A list item or cell is prose when most of its text is its own. One
+          // that is mostly links is navigation, and its links are read instead.
+          const mostlyControls = node => {
+            const controls = node.querySelectorAll('a,button');
+            if (!controls.length) return false;
+            let inner = 0; for (const control of controls) inner += clean(control.textContent).length;
+            return inner >= clean(node.textContent).length * 0.6;
+          };
           for (const node of elements) {
             if (excluded(node) || !node.getClientRects().length) continue;
-            if (node.querySelector('p,li,blockquote,pre,a,button') && !node.matches('p,blockquote')) continue;
+            if (!node.matches('p,blockquote') &&
+                (node.querySelector('p,li,blockquote,pre') || (node.matches('li,td') && mostlyControls(node)) ||
+                 (!node.matches('li,td') && node.querySelector('a,button')))) continue;
             const role = node.matches('img') ? 'image' : node.matches('video') ? 'video' : node.matches('a,[role="link"]') ? 'link' : node.matches('button,[role="button"]') ? 'button' : node.matches('h1,h2,h3,h4,h5,h6,[role="heading"]') ? 'heading' : 'passage';
             const text = nodeText(node), media = role==='image' || role==='video';
             if (!text.length || (!media && seen.has(text))) continue;
-            if (passages.length>=limit) { truncated=true; continue; }
             if (!ids.has(node)) ids.set(node, 'p'+(++next));
             const id = ids.get(node); nodes.set(id,node); if (!media) seen.add(text);
             passages.push({id,text,role});
           }
-          return {document:documentID,url:location.href,passages,truncated};
+          return {document:documentID,url:location.href,passages};
         },
-        highlight(items, current, document, scroll = true) {
+        highlight(items, current, document, scroll = true, dark) {
           if (document!==documentID) return false;
+          if (dark!==undefined) darkened=!!dark;
           const ranges=[]; let active;
           for (const item of items) {
             const node=nodes.get(item.id);
@@ -79,7 +102,7 @@ extension PageJavaScriptEvaluating {
           if (globalThis.CSS?.highlights && globalThis.Highlight) {
             let style=window.document.getElementById(name);
             if (!style) { style=window.document.createElement('style');style.id=name;window.document.head.append(style); }
-            style.textContent='::highlight('+name+'){background-color:#ffe66a;color:#151515}::highlight('+selected+'){background-color:#ffcc32;color:#151515;text-decoration:underline}';
+            this.paintMarks(darkened || darkSurface(active.node));
             CSS.highlights.set(name,new Highlight(...ranges));
             CSS.highlights.set(selected,new Highlight(active.range));
           } else {
@@ -87,14 +110,27 @@ extension PageJavaScriptEvaluating {
             for (const item of items) {
               const node=nodes.get(item.id);
               if (!node.dataset.interlinkedMarked) node.dataset.interlinkedPreviousBackground=node.style.backgroundColor;
-              node.style.backgroundColor='#ffe66a';node.dataset.interlinkedMarked='true';
+              node.style.backgroundColor=markColors(darkened || darkSurface(node)).mark;node.dataset.interlinkedMarked='true';
             }
           }
           if (scroll) active.node.scrollIntoView({block:'center',behavior:'instant'});
           return true;
         },
-        annotate(items, document) {
+        paintMarks(dark) {
+          const name='interlinked-'+documentID, selected=name+'-current', c=markColors(dark);
+          const style=window.document.getElementById(name);
+          if (style) style.textContent='::highlight('+name+'){background-color:'+c.mark+';color:'+c.text+'}::highlight('+selected+'){background-color:'+c.current+';color:'+c.text+';text-decoration:underline}';
+          return true;
+        },
+        appearance(dark) {
+          darkened=!!dark;
+          const marked=[...nodes.values()].find(node=>node.isConnected && node.dataset.interlinkedMarked);
+          for (const node of nodes.values()) if (node.dataset?.interlinkedMarked) node.style.backgroundColor=markColors(darkened || darkSurface(node)).mark;
+          return this.paintMarks(darkened || (marked ? darkSurface(marked) : false));
+        },
+        annotate(items, document, dark) {
           if (document!==documentID) return false;
+          darkened=!!dark;
           this.clear();
           if (!items.length) return true;
           const visible = item => { const r=nodes.get(item.id)?.getBoundingClientRect(); return r && r.bottom>0 && r.top<innerHeight-80; };
@@ -189,7 +225,13 @@ extension PageJavaScriptEvaluating {
               return text.length>=2 && text.length<=28 && !/^\d+$/.test(text) ? text : '';
             };
             const a11y=el=>clean(el.getAttribute('aria-label')||el.getAttribute('title')||el.getAttribute('placeholder')||'');
-            const isSearch=el=>el.matches('input[type="search"],input[name="q"],textarea[name="q"],[role="combobox"]') || /search|jump to/i.test((el.getAttribute('name')||'')+' '+a11y(el)+' '+(el.getAttribute('placeholder')||''));
+            // Many sites spell search only in their own language, or expose it
+            // as a link to /search rather than a field. Both still count.
+            const searchWord=/(^|[\s\/?&=._-])(search|busca|buscar|pesquisa|pesquisar|recherche|rechercher|suche|suchen|buscador|cerca|ricerca|zoeken|szukaj|sok|haku|поиск|搜索|搜尋|検索|검색)([\s\/?&=._-]|$)/i;
+            const isSearch=el=>el.matches('input[type="search"],input[name="q"],textarea[name="q"],[role="combobox"]')
+              || /jump to/i.test(a11y(el))
+              || searchWord.test((el.getAttribute('name')||'')+' '+a11y(el)+' '+(el.getAttribute('placeholder')||''))
+              || (el.matches('a[href]') && searchWord.test(el.getAttribute('href')||''));
             const inBar=(el,top,bottom)=>{ const b=el.getBoundingClientRect(); const mid=b.top+b.height/2; return mid>=top-2 && mid<=bottom+2; };
             const mark=(el,kind,href,label,current,children=[])=>{
               const id='m'+(++next);
@@ -249,8 +291,14 @@ extension PageJavaScriptEvaluating {
               let search=readSearch(node.querySelector('input[type="search"],input[name="q"],textarea[name="q"],[role="combobox"]'));
               const bottom=Math.min(top+(search?150:96), search?176:128);
               if (!search) {
-                const button=[...node.querySelectorAll('button,[role="combobox"],[role="search"]')].find(el=>isSearch(el) && inBar(el, top-8, bottom));
-                if (button) search={action:origin+'/search',placeholder:'Search',queryParam:'q'};
+                const control=[...node.querySelectorAll('a[href],button,[role="combobox"],[role="search"]')]
+                  .find(el=>isSearch(el) && visible(el) && inBar(el, top-8, bottom));
+                if (control) {
+                  // A search that is only a link or a button: query its own
+                  // destination when it has one, otherwise the site's /search.
+                  const target=control.matches('a[href]') ? httpURL(control.href) : null;
+                  search={action:(target?target.href:origin+'/search'),placeholder:'Search',queryParam:'q'};
+                }
               }
               const items=itemsFrom(node, top-8, bottom);
               if (items.length && items.every(item=>/^(accept|reject|agree|decline|allow|deny|got it|dismiss)$/i.test(item.label))) return null;
@@ -403,9 +451,7 @@ extension PageJavaScriptEvaluating {
     """#
 
     static func metadata<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageMetadata {
-        var page = try await value(view, call: "return interlinkedContext.metadata();", type: PageMetadata.self)
-        page.httpOnlyCookieNames = await view.httpOnlyCookieNames()
-        return page
+        try await value(view, call: "return interlinkedContext.metadata();", type: PageMetadata.self)
     }
     static func siteMenu<View: PageJavaScriptEvaluating>(_ view: View) async -> SiteMenu? {
         try? await value(view, call: "return interlinkedContext.siteMenu();", type: SiteMenu.self)
@@ -453,9 +499,14 @@ extension PageJavaScriptEvaluating {
     static func highlight<View: PageJavaScriptEvaluating>(
         _ passages: [PagePassage], current: String, document: String, view: View
     ) async -> Bool {
-        (try? await execute(view, body: "return globalThis.interlinkedContext?.highlight(items, current, document) ?? false;",
+        (try? await execute(view, body: "return globalThis.interlinkedContext?.highlight(items, current, document, true, dark) ?? false;",
             arguments: ["items": passages.map { ["id": $0.id, "text": $0.text] },
-                        "current": current, "document": document])) as? Bool ?? false
+                        "current": current, "document": document, "dark": view.rendersDark])) as? Bool ?? false
+    }
+    /// Recolors marks already on the page after Dark Page is switched.
+    static func appearanceChanged<View: PageJavaScriptEvaluating>(_ view: View) {
+        let dark = view.rendersDark
+        Task { _ = try? await execute(view, body: "return globalThis.interlinkedContext?.appearance(dark) ?? false;", arguments: ["dark": dark]) }
     }
     static func clear<View: PageJavaScriptEvaluating>(_ view: View?) {
         guard let view else { return }
@@ -468,8 +519,8 @@ extension PageJavaScriptEvaluating {
         let items = findings.map { ["id": $0.passage.id, "text": $0.passage.text,
                                     "label": $0.signal.label, "explanation": $0.signal.explanation] }
         return (try? await execute(view,
-            body: "return globalThis.interlinkedContext?.annotate(items, document) ?? false;",
-            arguments: ["items": items, "document": document])) as? Bool ?? false
+            body: "return globalThis.interlinkedContext?.annotate(items, document, dark) ?? false;",
+            arguments: ["items": items, "document": document, "dark": view.rendersDark])) as? Bool ?? false
     }
 
     private static func execute<View: PageJavaScriptEvaluating>(

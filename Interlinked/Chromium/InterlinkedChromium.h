@@ -100,6 +100,12 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 
 @interface ILChromiumView : NSView
 
+/// Interlinked's controls float over the page. While this returns YES the
+/// page may not change the cursor; its latest cursor is kept for later.
++ (void)setChromeOwnsCursor:(nullable BOOL (^)(void))owns;
+/// Shows the page's latest cursor again once the mouse leaves the controls.
++ (void)restorePageCursor;
+
 @property(nonatomic, weak, nullable) id<ILChromiumViewDelegate> delegate;
 @property(nonatomic, readonly, nullable) NSURL *URL;
 @property(nonatomic, readonly, copy) NSString *title;
@@ -125,8 +131,6 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 - (void)closeBrowser;
 - (void)evaluateJavaScript:(NSString *)script
                 completion:(void (^)(id _Nullable result, NSError * _Nullable error))completion;
-- (void)httpOnlyCookieNamesForURL:(NSURL *)URL
-                       completion:(void (^)(NSArray<NSString *> *names))completion;
 - (void)findText:(NSString *)text
        backwards:(BOOL)backwards
         findNext:(BOOL)findNext

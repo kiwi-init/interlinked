@@ -121,19 +121,19 @@ final class NewTabPageTests: XCTestCase {
 
     func testNewTabHandleStaysExpandedWithoutHover() {
         XCTAssertTrue(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, identityOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
         ))
         XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: true, identityOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+            overviewOpen: true, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
         ))
         XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, identityOpen: false, hovering: false, editing: false, isNewTab: false, voiceActive: false
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: false, voiceActive: false
         ))
         XCTAssertTrue(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, identityOpen: false, hovering: true, editing: false, isNewTab: false, voiceActive: false
+            overviewOpen: false, panelOpen: false, hovering: true, editing: false, isNewTab: false, voiceActive: false
         ))
         XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, identityOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: true
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: true
         ))
     }
 }
@@ -164,7 +164,6 @@ final class PageURLCopyShortcutTests: XCTestCase {
 final class ToolboxShortcutTests: XCTestCase {
     func testToolboxUsesConventionalMacShortcuts() {
         XCTAssertEqual(ToolboxShortcut.find.label, "⌘F")
-        XCTAssertEqual(ToolboxShortcut.vault.label, "⌘S")
         XCTAssertEqual(ToolboxShortcut.settings.label, "⌘,")
         XCTAssertEqual(ToolboxShortcut.reading.label, "")
     }
@@ -806,20 +805,7 @@ final class DomainIconCacheTests: XCTestCase {
         XCTAssertNil(DomainIconCache<String>.domain(URL(string: "file:///tmp/page.html")))
     }
 
-    func testPinnedDomainsKeepIconsAfterTheLastTabLeaves() throws {
-        var cache = DomainIconCache<String>()
-        _ = cache.retain([PaneID(1): "example.com"])
-        let token = try XCTUnwrap(cache.begin("example.com"))
-        XCTAssertTrue(cache.complete("example.com", token: token, value: "icon"))
-        XCTAssertTrue(cache.retain([:], pinned: ["example.com"]).isEmpty)
-        XCTAssertEqual(cache.value(forDomain: "example.com"), "icon")
-        XCTAssertNil(cache.begin("example.com"))
-        XCTAssertEqual(cache.retain([:], pinned: []), ["example.com"])
-        XCTAssertNil(cache.value(forDomain: "example.com"))
-        _ = cache.retain([:], pinned: ["example.com"])
-        XCTAssertTrue(cache.restore("example.com", value: "saved"))
-        XCTAssertEqual(cache.value(forDomain: "example.com"), "saved")
-    }
+
 }
 
 @MainActor
@@ -950,33 +936,6 @@ final class SiteMenuPolicyTests: XCTestCase {
         XCTAssertTrue(SiteMenuPreference.enabled(in: defaults))
         SiteMenuPreference.set(false, in: defaults)
         XCTAssertFalse(SiteMenuPreference.enabled(in: defaults))
-    }
-}
-
-final class FaviconCandidatesTests: XCTestCase {
-    func testGitHubHTMLPrefersRasterIconsOverSVG() throws {
-        let page = try XCTUnwrap(URL(string: "https://github.com"))
-        let html = """
-        <link rel="icon" type="image/svg+xml" href="/favicons/favicon.svg">
-        <link rel="alternate icon" type="image/png" href="https://github.githubassets.com/favicons/favicon.png" sizes="32x32">
-        """
-        let urls = FaviconCandidates.urls(for: page, html: html)
-        XCTAssertEqual(urls.first?.absoluteString, "https://github.githubassets.com/favicons/favicon.png")
-        XCTAssertTrue(urls.contains { $0.path.hasSuffix("/favicon.ico") })
-        XCTAssertTrue(urls.contains { $0.path.hasSuffix("/favicon.svg") })
-        XCTAssertLessThan(
-            try XCTUnwrap(urls.firstIndex { $0.pathExtension == "png" }),
-            try XCTUnwrap(urls.firstIndex { $0.pathExtension == "svg" })
-        )
-    }
-
-    func testRelativeIconHrefsResolveAgainstThePage() throws {
-        let page = try XCTUnwrap(URL(string: "https://example.com/app/"))
-        let html = #"<link rel="apple-touch-icon" href="../icon.png">"#
-        XCTAssertEqual(
-            FaviconCandidates.fromHTML(html, base: page).first?.absoluteString,
-            "https://example.com/icon.png"
-        )
     }
 }
 

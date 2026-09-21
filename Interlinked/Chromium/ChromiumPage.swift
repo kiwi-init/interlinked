@@ -66,6 +66,7 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
         get { nativeView.forcedDarkMode }
         set { nativeView.forcedDarkMode = newValue }
     }
+    var rendersDark: Bool { forcedDarkMode }
 
     init(initialURL: URL) {
         nativeView = ILChromiumView(frame: .zero, initialURL: initialURL)
@@ -96,15 +97,6 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
             nativeView.evaluateJavaScript(script) { result, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume(returning: result) }
-            }
-        }
-    }
-
-    func httpOnlyCookieNames() async -> [String] {
-        guard let url else { return [] }
-        return await withCheckedContinuation { continuation in
-            nativeView.httpOnlyCookieNames(for: url) { names in
-                continuation.resume(returning: names)
             }
         }
     }

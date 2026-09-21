@@ -211,7 +211,8 @@ actor JevService {
         let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         if let result = cache.value(for: key) { return result }
         guard cooldown < Date() else { throw JevError.rateLimited }
-        guard pending.count < 2 else { throw JevError.busy }
+        // Page checks send a few batches at once; leave room for one more feature.
+        guard pending.count < PassageDecisions.parallelRequests + 2 else { throw JevError.busy }
         let revision = generation, id = UUID(), provider = provider
         let task = Task { try await provider.decide(request) }
         pending[id] = task

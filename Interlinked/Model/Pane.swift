@@ -90,26 +90,24 @@ enum NewTabPage {
 enum PageHandleExpansion {
     static func showsOpenWork(
         overviewOpen: Bool,
-        identityOpen: Bool,
+        panelOpen: Bool,
         hovering: Bool,
         editing: Bool,
         isNewTab: Bool,
         voiceActive: Bool
     ) -> Bool {
-        !overviewOpen && !identityOpen && !voiceActive && (hovering || editing || isNewTab)
+        !overviewOpen && !panelOpen && !voiceActive && (hovering || editing || isNewTab)
     }
 }
 
 enum ToolboxShortcut: Equatable {
     case find
-    case vault
     case reading
     case settings
 
     var label: String {
         switch self {
         case .find: "⌘F"
-        case .vault: "⌘S"
         case .reading: ""
         case .settings: "⌘,"
         }

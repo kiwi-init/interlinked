@@ -18,11 +18,10 @@ enum LineTarget: Hashable {
 
 enum SettingsDestination: String, CaseIterable, Identifiable {
     case general = "General"
+    case pages = "Pages"
     case intelligence = "Intelligence"
-    case builtIns = "Built-ins"
-    case data = "Data"
     case sites = "Sites"
-    case about = "About"
+    case privacy = "Privacy"
 
     var id: Self { self }
 }
@@ -71,9 +70,7 @@ final class Workspace {
     let permissions = WebsitePermissionStore()
     let navigationExceptions = NavigationExceptionStore()
     let browserHistory = BrowserHistoryStore()
-    let savedSites = SavedSites()
     let builtIns = PageBuiltIns()
-    var newTabEditor: SavedSiteKind?
     var usesSiteMenu = SiteMenuPreference.enabled() {
         didSet {
             SiteMenuPreference.set(usesSiteMenu)
@@ -86,6 +83,10 @@ final class Workspace {
         }
     }
     private(set) var siteMenus: [PaneID: SiteMenu] = [:]
+    /// Set when a page's menu has been read and is about to be shown, so the
+    /// bar arrives with the same spectrum glow as an AI-refined page label.
+    private(set) var siteMenuEffect: AILabelEffect?
+    @ObservationIgnored private var siteMenuEffectTask: Task<Void, Never>?
     var siteMenuExpanded: String?
     var siteMenuSearching = false
     private var declinedSiteMenu: Set<PaneID> = []
@@ -130,9 +131,10 @@ final class Workspace {
     func setOverviewOpen(_ open: Bool) {
         guard open != overviewOpen else { return }
         if open {
-            newTabEditor = nil
             discardLine()
             closeIdentity()
+            pageHistoryOpen = false
+            downloads.closePanel()
             hosts.capturePreviews()
             assistance.closePanel()
             assistance.related()
@@ -183,79 +185,9 @@ final class Workspace {
     }
 
     func beginEmptyPageEditingIfNeeded() {
-        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil, newTabEditor == nil else { return }
+        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil else { return }
         guard case .idle = voice.state else { return }
         editActiveLine()
-    }
-
-    func beginNewTabEditor(_ kind: SavedSiteKind) {
-        newTabEditor = kind
-        discardLine()
-    }
-
-    func cancelNewTabEditor() {
-        guard newTabEditor != nil else { return }
-        newTabEditor = nil
-        beginEmptyPageEditingIfNeeded()
-    }
-
-    @discardableResult
-    func submitNewTabSite(_ text: String) -> Bool {
-        guard let kind = newTabEditor else { return false }
-        guard let site = savedSites.add(text, title: nil, to: kind) else { return false }
-        newTabEditor = nil
-        rememberFavicon(for: site.url)
-        beginEmptyPageEditingIfNeeded()
-        return true
-    }
-
-    func openPage(_ address: String) {
-        if newTabEditor != nil { newTabEditor = nil }
-        if isEmptyActivePage, let pane = activePane {
-            discardLine()
-            surfaces.setKind(pane, .browser)
-            surfaces.setLine(pane, address)
-            navigate(pane, address)
-            keep()
-            return
-        }
-        openAddress(address)
-    }
-
-    func toggleCurrentPage(in kind: SavedSiteKind) {
-        guard let url = currentPageURL else { return }
-        let title = activePane.flatMap { hosts.titles[$0] }
-        _ = savedSites.toggle(url.absoluteString, title: title, in: kind)
-        if savedSites.contains(url.absoluteString, in: kind) {
-            rememberFavicon(for: url.absoluteString)
-        }
-    }
-
-    func rememberFavicon(for address: String) {
-        guard let url = URL(string: address),
-              let domain = DomainIconCache<NSImage>.domain(url) else { return }
-        keep()
-        if let data = hosts.storedIconData(for: domain) {
-            savedSites.fillMissingIcon(data, domain: domain)
-            return
-        }
-        if let pane = activePane, let image = hosts.favicons[pane],
-           DomainIconCache<NSImage>.domain(currentPageURL) == domain,
-           let data = hosts.pngData(image) {
-            savedSites.fillMissingIcon(data, domain: domain)
-            hosts.rememberIcon(data, for: domain)
-            return
-        }
-        Task { @MainActor [weak self] in
-            guard let self, let data = await self.hosts.fetchIcon(for: url) else { return }
-            self.savedSites.fillMissingIcon(data, domain: domain)
-        }
-    }
-
-    func refreshMissingSavedSiteIcons() {
-        for site in savedSites.favorites + savedSites.bookmarks where site.icon == nil {
-            rememberFavicon(for: site.url)
-        }
     }
 
     @discardableResult
@@ -283,7 +215,6 @@ final class Workspace {
             openAddress(address)
             return
         }
-        if newTabEditor != nil { newTabEditor = nil }
         discardLine()
         surfaces.setKind(pane, .browser)
         surfaces.setLine(pane, address)
@@ -294,12 +225,34 @@ final class Workspace {
     func noteSiteMenuDocumentChanged(_ pane: PaneID) {
         siteMenus[pane] = nil
         declinedSiteMenu.remove(pane)
+        if siteMenuEffect?.pane == pane { siteMenuEffect = nil }
         if activePane == pane { collapseSiteMenuChrome() }
     }
 
     func collapseSiteMenuChrome() {
         siteMenuExpanded = nil
         siteMenuSearching = false
+    }
+
+    /// Light the bar with the spectrum glow, then retire the effect so that
+    /// redisplaying the same menu later does not replay it.
+    private func revealSiteMenu(_ pane: PaneID) {
+        siteMenuEffect = AILabelEffect(pane: pane)
+        siteMenuEffectTask?.cancel()
+        siteMenuEffectTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let self, self.siteMenuEffect?.pane == pane else { return }
+            self.siteMenuEffect = nil
+        }
+    }
+
+    /// The search icon morphs the pill into a field, so the destination list
+    /// and any open submenu step aside while it is up.
+    func beginSiteMenuSearch() {
+        guard siteMenu?.search != nil else { return }
+        if editing != nil { discardLine() }
+        siteMenuExpanded = nil
+        siteMenuSearching = true
     }
 
     func activateSiteMenuItem(_ item: SiteMenuItem) {
@@ -357,7 +310,11 @@ final class Workspace {
                       self.hosts.existingBrowser(pane) === view, view.url == pageURL,
                       self.usesSiteMenu, !self.declinedSiteMenu.contains(pane) else { return }
             }
+            let arrived = self.siteMenus[pane] != accepted
             self.siteMenus[pane] = accepted
+            // The read menu is the browser reading the page for you. Announce
+            // it the way a refined page label is announced.
+            if arrived, pane == self.activePane { self.revealSiteMenu(pane) }
         }
     }
 
@@ -401,8 +358,7 @@ final class Workspace {
     }
 
     func escape() {
-        if newTabEditor != nil { cancelNewTabEditor() }
-        else if pageHistoryOpen { pageHistoryOpen = false }
+        if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
@@ -424,7 +380,32 @@ final class Workspace {
         discardLine()
         setOverviewOpen(false)
         assistance.closePanel()
+        pageHistoryOpen = false
+        downloads.closePanel()
         identityOpen = true
+    }
+
+    /// History and downloads morph the page handle, so they take its place
+    /// from whatever else it was showing.
+    func togglePageHistory() {
+        let open = !pageHistoryOpen
+        if open { preparePagePanel() }
+        pageHistoryOpen = open
+    }
+
+    func toggleDownloads() {
+        let open = !downloads.panelOpen
+        if open { preparePagePanel() }
+        downloads.togglePanel()
+    }
+
+    private func preparePagePanel() {
+        discardLine()
+        setOverviewOpen(false)
+        closeIdentity()
+        assistance.closePanel()
+        pageHistoryOpen = false
+        downloads.closePanel()
     }
 
     func closeIdentity() {
@@ -453,6 +434,13 @@ final class Workspace {
         guard !started else { return }
         started = true
         Workspace.shared = self
+        ChromeCursor.install()
+        // Vault, favorites, and bookmarks were removed. Nothing reads their files.
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        for file in ["Interlinked/vault.json", "Interlinked/saved-sites.json"] {
+            try? FileManager.default.removeItem(at: support.appendingPathComponent(file))
+        }
+        UserDefaults.standard.removeObject(forKey: "newTab.savedSites")
         builtIns.start(workspace: self)
         assistance.workspace = self
         downloads.refreshNotificationStatus()
@@ -486,7 +474,6 @@ final class Workspace {
     func stop() {
         copiedPageURLTask?.cancel()
         downloads.prepareForTermination()
-        assistance.history.save()
         browserHistory.save()
         hosts.stopMemoryPressureMonitoring()
         builtIns.stop()
@@ -577,7 +564,7 @@ final class Workspace {
     }
 
     func keep() {
-        hosts.syncFavicons(tabs: tabs, surfaces: surfaces, pinned: savedSites.domains)
+        hosts.syncFavicons(tabs: tabs, surfaces: surfaces)
         assistance.prune()
         let session = session()
         guard let data = Session.data(session) else { return }
@@ -760,7 +747,6 @@ final class Workspace {
     }
 
     private func refreshSearch() {
-        assistance.searchHistory(editing?.text ?? "", editing: editing?.pane != nil)
         searchTask?.cancel()
         searchResults = []
         selectedSearchResult = nil
@@ -779,12 +765,7 @@ final class Workspace {
         }
     }
 
-    var addressResults: [SearchResult] {
-        assistance.historyResults.compactMap { visit in URL(string: visit.url).map { SearchResult(title: visit.title, url: $0) } } + searchResults
-    }
-
     func moveSearchSelection(_ step: Int) {
-        let searchResults = addressResults
         guard !searchResults.isEmpty else { return }
         if let selectedSearchResult {
             let next = selectedSearchResult + step
@@ -814,7 +795,6 @@ final class Workspace {
     }
 
     func submitLine() {
-        let searchResults = addressResults
         if let index = selectedSearchResult, searchResults.indices.contains(index) {
             openSearchResult(searchResults[index])
         } else { commitLine() }
@@ -1112,8 +1092,6 @@ final class Workspace {
         switch (character, modifiers) {
         case ("t", .command):
             newPage()
-        case ("s", .command):
-            assistance.saveToVault()
         case ("s", [.command, .control]):
             toggleOverview()
         case ("]", .command):
@@ -1127,8 +1105,7 @@ final class Workspace {
         case ("g", [.command, .shift]):
             assistance.moveMatch(-1)
         case ("j", .command):
-            if assistance.panel != nil { assistance.closePanel() }
-            downloads.togglePanel()
+            toggleDownloads()
         case ("w", .command):
             closeActive()
         case ("l", .command):

@@ -3,9 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.colorScheme) private var colorScheme
-    #if DEBUG
-    @State private var intelligenceDebug = DebugIntelligenceMonitor.shared
-    #endif
 
     var body: some View {
         let palette = Palette.of(colorScheme, tint: workspace.tint)
@@ -30,12 +27,6 @@ struct ContentView: View {
                 PageActions(palette: palette, available: geometry.size)
                     .padding(18)
             }
-            #if DEBUG
-            .overlay(alignment: .top) {
-                DebugIntelligenceBadge(monitor: intelligenceDebug, palette: palette)
-                    .padding(.top, 18)
-            }
-            #endif
         }
         .background(palette.pane)
         .background(WindowChrome())
@@ -63,44 +54,3 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
-
-#if DEBUG
-private struct DebugIntelligenceBadge: View {
-    @Bindable var monitor: DebugIntelligenceMonitor
-    var palette: Palette
-
-    var body: some View {
-        if let activity = monitor.current {
-            HStack(spacing: 7) {
-                switch activity.phase {
-                case .running:
-                    ProgressView().controlSize(.mini)
-                case .completed:
-                    Image(systemName: "checkmark")
-                case .failed:
-                    Image(systemName: "xmark")
-                }
-                Text(activity.source.rawValue)
-                    .fontWeight(.semibold)
-                Text("·")
-                Text(activity.action)
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(palette.text)
-            .padding(.horizontal, 11)
-            .frame(height: 30)
-            .modifier(PageGlass(radius: 12))
-            .accessibilityLabel("\(activity.source.rawValue), \(activity.action), \(phaseLabel(activity.phase))")
-            .transition(.opacity)
-        }
-    }
-
-    private func phaseLabel(_ phase: DebugIntelligencePhase) -> String {
-        switch phase {
-        case .running: "running"
-        case .completed: "completed"
-        case .failed: "failed"
-        }
-    }
-}
-#endif
