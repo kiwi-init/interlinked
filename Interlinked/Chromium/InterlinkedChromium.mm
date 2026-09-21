@@ -19,6 +19,7 @@
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_parser.h"
+#include "include/cef_permission_handler.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_version.h"
@@ -37,6 +38,26 @@ NSString *NSStringFromCef(const CefString& value) {
 
 CefString CefFromNSString(NSString *value) {
   return CefString(value.UTF8String ?: "");
+}
+
+std::string RequestSignature(CefRefPtr<CefRequest> request) {
+  return request->GetMethod().ToString() + "\n" + request->GetURL().ToString();
+}
+
+ILNavigationKind NavigationKind(CefRefPtr<CefRequest> request, bool is_redirect) {
+  if (is_redirect) {
+    return ILNavigationKindRedirect;
+  }
+  const int transition = static_cast<int>(request->GetTransitionType());
+  if ((transition & TT_FORWARD_BACK_FLAG) != 0) {
+    return ILNavigationKindHistory;
+  }
+  switch (transition & TT_SOURCE_MASK) {
+    case TT_LINK: return ILNavigationKindLink;
+    case TT_FORM_SUBMIT: return ILNavigationKindForm;
+    case TT_RELOAD: return ILNavigationKindReload;
+    default: return ILNavigationKindOther;
+  }
 }
 
 // Main-queue blocks never run while the main queue is already inside a block,
@@ -250,7 +271,11 @@ class InterlinkedBrowserApp final : public CefApp,
       const CefString& process_type,
       CefRefPtr<CefCommandLine> command_line) override {
     if (process_type.empty()) {
+#ifdef DEBUG
+      // Development builds use an isolated password store so a local build
+      // cannot alter the user's installed-browser profile.
       command_line->AppendSwitch("use-mock-keychain");
+#endif
       command_line->AppendSwitch("disable-component-update");
       // Interlinked ships its own page features instead of Chrome extensions.
       command_line->AppendSwitch("disable-extensions");
@@ -272,6 +297,7 @@ class InterlinkedClient final : public CefClient,
                                 public CefFindHandler,
                                 public CefLifeSpanHandler,
                                 public CefLoadHandler,
+                                public CefPermissionHandler,
                                 public CefRequestHandler,
                                 public CefResourceRequestHandler {
  public:
@@ -282,6 +308,7 @@ class InterlinkedClient final : public CefClient,
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
@@ -306,6 +333,27 @@ class InterlinkedClient final : public CefClient,
                       CefRefPtr<CefRequest> request,
                       bool user_gesture,
                       bool is_redirect) override;
+  bool OnCertificateError(CefRefPtr<CefBrowser> browser,
+                          cef_errorcode_t cert_error,
+                          const CefString& request_url,
+                          CefRefPtr<CefSSLInfo> ssl_info,
+                          CefRefPtr<CefCallback> callback) override;
+  void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                 TerminationStatus status,
+                                 int error_code,
+                                 const CefString& error_string) override;
+  bool OnRequestMediaAccessPermission(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      const CefString& requesting_origin,
+      uint32_t requested_permissions,
+      CefRefPtr<CefMediaAccessCallback> callback) override;
+  bool OnShowPermissionPrompt(
+      CefRefPtr<CefBrowser> browser,
+      uint64_t prompt_id,
+      const CefString& requesting_origin,
+      uint32_t requested_permissions,
+      CefRefPtr<CefPermissionPromptCallback> callback) override;
   void OnDevToolsEvent(CefRefPtr<CefBrowser> browser,
                        const CefString& method,
                        const void* params,
@@ -388,7 +436,13 @@ class InterlinkedClient final : public CefClient,
   // Stand-in responses chosen in OnBeforeResourceLoad, keyed by request id.
   std::mutex replacements_mutex_;
   std::map<uint64_t, std::string> replacements_;
+  uint64_t navigation_review_generation_ = 0;
+  std::string approved_navigation_;
+  bool certificate_error_reported_ = false;
   void CountBlockedRequest();
+  void ContinueNavigation(uint64_t generation,
+                          CefRefPtr<CefFrame> frame,
+                          CefRefPtr<CefRequest> request);
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
 };
 
@@ -669,7 +723,7 @@ std::atomic_bool g_running(false);
 
   CefMainArgs main_args(static_cast<int>(argument_values.size()), argument_values.data());
   CefSettings settings;
-  settings.no_sandbox = true;
+  settings.no_sandbox = false;
   settings.external_message_pump = true;
   settings.persist_session_cookies = true;
   settings.log_severity = LOGSEVERITY_WARNING;
@@ -1471,10 +1525,146 @@ bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                        bool user_gesture,
                                        bool is_redirect) {
   CEF_REQUIRE_UI_THREAD();
-  if (frame->IsMain()) {
-    [view_ prepareBlockingForURLString:NSStringFromCef(request->GetURL())];
+  if (!frame->IsMain()) {
+    return false;
   }
-  return false;
+  const std::string signature = RequestSignature(request);
+  if (!approved_navigation_.empty() && approved_navigation_ == signature) {
+    approved_navigation_.clear();
+    certificate_error_reported_ = false;
+    [view_ prepareBlockingForURLString:NSStringFromCef(request->GetURL())];
+    return false;
+  }
+
+  const uint64_t generation = ++navigation_review_generation_;
+  ILChromiumView *view = view_;
+  id<ILChromiumViewDelegate> delegate = view.delegate;
+  if (!view || !delegate) {
+    [view prepareBlockingForURLString:NSStringFromCef(request->GetURL())];
+    return false;
+  }
+  NSURL *destination = [NSURL URLWithString:NSStringFromCef(request->GetURL())];
+  NSURL *source = [NSURL URLWithString:NSStringFromCef(browser->GetMainFrame()->GetURL())];
+  if (!destination) {
+    return true;
+  }
+  CefRefPtr<InterlinkedClient> self(this);
+  const BOOL reviewing = [delegate chromiumView:view
+                          decideNavigationToURL:destination
+                                      sourceURL:source
+                                           kind:NavigationKind(request, is_redirect)
+                                     completion:^(BOOL allow) {
+    if (allow) {
+      self->ContinueNavigation(generation, frame, request);
+    }
+  }];
+  if (!reviewing) {
+    certificate_error_reported_ = false;
+    [view prepareBlockingForURLString:NSStringFromCef(request->GetURL())];
+  }
+  return reviewing;
+}
+
+void InterlinkedClient::ContinueNavigation(uint64_t generation,
+                                           CefRefPtr<CefFrame> frame,
+                                           CefRefPtr<CefRequest> request) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!view_ || generation != navigation_review_generation_ || !frame || !frame->IsValid()) {
+    return;
+  }
+  approved_navigation_ = RequestSignature(request);
+  frame->LoadRequest(request);
+}
+
+bool InterlinkedClient::OnCertificateError(CefRefPtr<CefBrowser> browser,
+                                           cef_errorcode_t cert_error,
+                                           const CefString& request_url,
+                                           CefRefPtr<CefSSLInfo> ssl_info,
+                                           CefRefPtr<CefCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  callback->Cancel();
+  if (!certificate_error_reported_) {
+    certificate_error_reported_ = true;
+    NSURL *URL = [NSURL URLWithString:NSStringFromCef(request_url)];
+    if (URL) {
+      NSString *message = [NSString stringWithFormat:@"Chromium rejected certificate error %d.", cert_error];
+      [view_.delegate chromiumView:view_ didRejectCertificateAtURL:URL error:message];
+    }
+  }
+  return true;
+}
+
+void InterlinkedClient::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                                  TerminationStatus status,
+                                                  int error_code,
+                                                  const CefString& error_string) {
+  CEF_REQUIRE_UI_THREAD();
+  [view_.delegate chromiumViewWebContentProcessDidTerminate:view_];
+}
+
+bool InterlinkedClient::OnRequestMediaAccessPermission(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    const CefString& requesting_origin,
+    uint32_t requested_permissions,
+    CefRefPtr<CefMediaAccessCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  const uint32_t audio = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE;
+  const uint32_t video = CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+  const uint32_t supported = audio | video;
+  if ((requested_permissions & supported) == 0 ||
+      (requested_permissions & ~supported) != 0 || !view_.delegate) {
+    callback->Cancel();
+    return true;
+  }
+  const ILWebsitePermissionKind kind =
+      (requested_permissions & supported) == supported
+          ? ILWebsitePermissionKindCameraAndMicrophone
+          : (requested_permissions & video) != 0
+                ? ILWebsitePermissionKindCamera
+                : ILWebsitePermissionKindMicrophone;
+  [view_.delegate chromiumView:view_
+      decidePermissionForOrigin:NSStringFromCef(requesting_origin)
+                           kind:kind
+                     completion:^(BOOL allow) {
+    callback->Continue(allow ? requested_permissions : CEF_MEDIA_PERMISSION_NONE);
+  }];
+  return true;
+}
+
+bool InterlinkedClient::OnShowPermissionPrompt(
+    CefRefPtr<CefBrowser> browser,
+    uint64_t prompt_id,
+    const CefString& requesting_origin,
+    uint32_t requested_permissions,
+    CefRefPtr<CefPermissionPromptCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  const uint32_t camera = CEF_PERMISSION_TYPE_CAMERA_STREAM;
+  const uint32_t microphone = CEF_PERMISSION_TYPE_MIC_STREAM;
+  const uint32_t location = CEF_PERMISSION_TYPE_GEOLOCATION;
+  const uint32_t supported = camera | microphone | location;
+  if ((requested_permissions & supported) == 0 ||
+      (requested_permissions & ~supported) != 0 ||
+      ((requested_permissions & location) != 0 && (requested_permissions & (camera | microphone)) != 0) ||
+      !view_.delegate) {
+    callback->Continue(CEF_PERMISSION_RESULT_DENY);
+    return true;
+  }
+  ILWebsitePermissionKind kind = ILWebsitePermissionKindLocation;
+  if ((requested_permissions & (camera | microphone)) == (camera | microphone)) {
+    kind = ILWebsitePermissionKindCameraAndMicrophone;
+  } else if ((requested_permissions & camera) != 0) {
+    kind = ILWebsitePermissionKindCamera;
+  } else if ((requested_permissions & microphone) != 0) {
+    kind = ILWebsitePermissionKindMicrophone;
+  }
+  [view_.delegate chromiumView:view_
+      decidePermissionForOrigin:NSStringFromCef(requesting_origin)
+                           kind:kind
+                     completion:^(BOOL allow) {
+    callback->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+  }];
+  return true;
 }
 
 void InterlinkedClient::OnDevToolsEvent(CefRefPtr<CefBrowser> browser,
@@ -1542,10 +1732,26 @@ bool InterlinkedClient::OnBeforeDownload(
     const CefString& suggested_name,
     CefRefPtr<CefBeforeDownloadCallback> callback) {
   CEF_REQUIRE_UI_THREAD();
-  [view_ didStartDownload:download_item->GetId()
-                URLString:NSStringFromCef(download_item->GetURL())
-        suggestedFilename:NSStringFromCef(suggested_name)];
-  callback->Continue(CefString(), true);
+  ILChromiumView *view = view_;
+  id<ILChromiumViewDelegate> delegate = view.delegate;
+  NSURL *destination = [NSURL URLWithString:NSStringFromCef(download_item->GetURL())];
+  NSURL *source = [NSURL URLWithString:NSStringFromCef(browser->GetMainFrame()->GetURL())];
+  if (!view || !delegate || !destination) {
+    return true;
+  }
+  const uint32_t identifier = download_item->GetId();
+  NSString *URLString = [destination.absoluteString copy];
+  NSString *filename = [NSStringFromCef(suggested_name) copy];
+  [delegate chromiumView:view
+      decideDownloadFromURL:source
+                      toURL:destination
+                 completion:^(BOOL allow) {
+    if (!allow || !view) {
+      return;
+    }
+    [view didStartDownload:identifier URLString:URLString suggestedFilename:filename];
+    callback->Continue(CefString(), true);
+  }];
   return true;
 }
 

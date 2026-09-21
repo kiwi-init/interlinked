@@ -22,6 +22,27 @@ protocol ChromiumPageDelegate: AnyObject {
     func chromiumPage(_ page: ChromiumPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String)
     func chromiumPage(_ page: ChromiumPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool)
     func chromiumPage(_ page: ChromiumPage, didBlockRequests count: Int)
+    func chromiumPage(
+        _ page: ChromiumPage,
+        decideNavigationTo destination: URL,
+        source: URL?,
+        kind: NavigationKind,
+        completion: @escaping (Bool) -> Void
+    ) -> Bool
+    func chromiumPage(
+        _ page: ChromiumPage,
+        decidePermissionFor origin: String,
+        kind: WebsitePermissionKind,
+        completion: @escaping (Bool) -> Void
+    )
+    func chromiumPage(
+        _ page: ChromiumPage,
+        decideDownloadFrom source: URL?,
+        to destination: URL,
+        completion: @escaping (Bool) -> Void
+    )
+    func chromiumPage(_ page: ChromiumPage, didRejectCertificateAt url: URL, error: String)
+    func chromiumPageWebContentProcessDidTerminate(_ page: ChromiumPage)
     func chromiumPageDidClose(_ page: ChromiumPage)
 }
 
@@ -157,7 +178,83 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
         delegate?.chromiumPage(self, didBlockRequests: count)
     }
 
+    func chromiumView(
+        _ view: ILChromiumView,
+        decideNavigationTo url: URL,
+        sourceURL: URL?,
+        kind: ILNavigationKind,
+        completion: @escaping (Bool) -> Void
+    ) -> Bool {
+        guard let delegate else { return false }
+        return delegate.chromiumPage(
+            self,
+            decideNavigationTo: url,
+            source: sourceURL,
+            kind: kind.navigationKind,
+            completion: completion
+        )
+    }
+
+    func chromiumView(
+        _ view: ILChromiumView,
+        decidePermissionForOrigin origin: String,
+        kind: ILWebsitePermissionKind,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard let delegate, let kind = kind.websitePermissionKind else {
+            completion(false)
+            return
+        }
+        delegate.chromiumPage(self, decidePermissionFor: origin, kind: kind, completion: completion)
+    }
+
+    func chromiumView(
+        _ view: ILChromiumView,
+        decideDownloadFrom sourceURL: URL?,
+        to url: URL,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard let delegate else {
+            completion(false)
+            return
+        }
+        delegate.chromiumPage(self, decideDownloadFrom: sourceURL, to: url, completion: completion)
+    }
+
+    func chromiumView(_ view: ILChromiumView, didRejectCertificateAt url: URL, error: String) {
+        delegate?.chromiumPage(self, didRejectCertificateAt: url, error: error)
+    }
+
+    func chromiumViewWebContentProcessDidTerminate(_ view: ILChromiumView) {
+        delegate?.chromiumPageWebContentProcessDidTerminate(self)
+    }
+
     func chromiumViewDidClose(_ view: ILChromiumView) {
         delegate?.chromiumPageDidClose(self)
+    }
+}
+
+private extension ILNavigationKind {
+    var navigationKind: NavigationKind {
+        switch self {
+        case .link: return .link
+        case .form: return .form
+        case .redirect: return .redirect
+        case .reload: return .reload
+        case .history: return .history
+        default: return .other
+        }
+    }
+}
+
+private extension ILWebsitePermissionKind {
+    var websitePermissionKind: WebsitePermissionKind? {
+        switch self {
+        case .camera: return .camera
+        case .microphone: return .microphone
+        case .cameraAndMicrophone: return .cameraAndMicrophone
+        case .location: return .location
+        default: return nil
+        }
     }
 }

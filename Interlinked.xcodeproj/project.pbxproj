@@ -63,6 +63,7 @@
 		BD03E3978CB96601BB693B77 /* PersonalFilters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59577E185B5E6E9BA28D35EB /* PersonalFilters.swift */; };
 		BE7D6688CAA7F6798E9BC2BA /* IntelligenceAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0A730071C252AF5FD2B21D /* IntelligenceAudit.swift */; };
 		BE978D61A6C4059E25E3BEA9 /* DomainIconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E70578C29838456B518AAEFC /* DomainIconStore.swift */; };
+		BF2FF3871E42F474FDE483EA /* BrowserPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE2ECB2A4F4B5B8EE6C36B88 /* BrowserPrompts.swift */; };
 		C39ED4D1DD2BF46B8687FDAA /* NavigationSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE8C070DD6BDDD3ED213AB1 /* NavigationSafety.swift */; };
 		C98E1017D27E916A462253A8 /* Jev.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AFB0B76340D2698E0D4C367 /* Jev.swift */; };
 		CA2A87D6262E00FAA14C1C5C /* Jev.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AFB0B76340D2698E0D4C367 /* Jev.swift */; };
@@ -85,6 +86,16 @@
 		F8549824CCE6DD7169346B04 /* Pane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435F2450025DF29A3A41E8BD /* Pane.swift */; };
 		F877CECF615A637DB218FB5E /* NavigationExceptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349C2F07BFC76E9B8D30D992 /* NavigationExceptions.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6626476DDB437C7DD4B559AD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7AC4D9DFF607FEBADA009B15 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 729C8F9419A6AAD008144E8C;
+			remoteInfo = Interlinked;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		006BEDBBB8410587A822BEE4 /* PageBuiltIns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageBuiltIns.swift; sourceTree = "<group>"; };
@@ -138,6 +149,7 @@
 		C2F3550BDFB88FDDAC2AB788 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		C7A63BB66AAE88A236169AE0 /* ChromiumPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromiumPage.swift; sourceTree = "<group>"; };
 		CD0A730071C252AF5FD2B21D /* IntelligenceAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceAudit.swift; sourceTree = "<group>"; };
+		CE2ECB2A4F4B5B8EE6C36B88 /* BrowserPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPrompts.swift; sourceTree = "<group>"; };
 		DEC74DAB3A1CAC7068890F9C /* WindowChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChrome.swift; sourceTree = "<group>"; };
 		E5FC2D43F5AD109D2B641E94 /* Control.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Control.swift; sourceTree = "<group>"; };
 		E70578C29838456B518AAEFC /* DomainIconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainIconStore.swift; sourceTree = "<group>"; };
@@ -195,13 +207,6 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		6888D11C26816C26A0EB6A78 /* Fixtures */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Fixtures;
-			sourceTree = "<group>";
-		};
 		76FB4210C38618E3D22EA371 /* Panes */ = {
 			isa = PBXGroup;
 			children = (
@@ -214,6 +219,7 @@
 			isa = PBXGroup;
 			children = (
 				716BCB12B88AADF106FE8204 /* BrowserAssistance.swift */,
+				CE2ECB2A4F4B5B8EE6C36B88 /* BrowserPrompts.swift */,
 				E5FC2D43F5AD109D2B641E94 /* Control.swift */,
 				1FD89572BFBA560954BE69C5 /* DownloadCenter.swift */,
 				BD8690072D6C5044123D49BD /* Intent.swift */,
@@ -299,7 +305,6 @@
 				250E93FD485BA830B1615420 /* JevTests.swift */,
 				A8E4C8B25ADECA1B3861AF97 /* PageBuiltInsTests.swift */,
 				65EFBE627665B7B6F8A6F7A3 /* PaneTests.swift */,
-				6888D11C26816C26A0EB6A78 /* Fixtures */,
 			);
 			path = InterlinkedTests;
 			sourceTree = "<group>";
@@ -336,6 +341,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				074DBAB3FFA2477E5195BBE1 /* PBXTargetDependency */,
 			);
 			name = InterlinkedTests;
 			packageProductDependencies = (
@@ -512,6 +518,7 @@
 				50FBEA02F492F3E5004B3954 /* BrowserIntelligence.swift in Sources */,
 				9B3DDA113FE01C46D9554A0C /* BrowserLifecycle.swift in Sources */,
 				CB9FBB9D2BD46B66DEC61C6B /* BrowserPane.swift in Sources */,
+				BF2FF3871E42F474FDE483EA /* BrowserPrompts.swift in Sources */,
 				8BE915C201CDEAE081BFA04F /* BrowsingHistory.swift in Sources */,
 				7946D0CEC47421058390E594 /* ChromiumPage.swift in Sources */,
 				D314A2F9649E8DE03A46817B /* ContentView.swift in Sources */,
@@ -554,6 +561,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		074DBAB3FFA2477E5195BBE1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 729C8F9419A6AAD008144E8C /* Interlinked */;
+			targetProxy = 6626476DDB437C7DD4B559AD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		3AD1254F42870EF13B70D841 /* TestFlight */ = {
@@ -600,6 +615,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.tests;
 				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Interlinked.app/Contents/MacOS/Interlinked";
 			};
 			name = Release;
 		};
@@ -837,6 +853,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path";
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.cli;
+				PRODUCT_MODULE_NAME = InterlinkedControl;
 				PRODUCT_NAME = interlinked;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -852,6 +869,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path";
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.cli;
+				PRODUCT_MODULE_NAME = InterlinkedControl;
 				PRODUCT_NAME = interlinked;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -872,6 +890,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.tests;
 				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Interlinked.app/Contents/MacOS/Interlinked";
 			};
 			name = TestFlight;
 		};
@@ -913,6 +932,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path";
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.cli;
+				PRODUCT_MODULE_NAME = InterlinkedControl;
 				PRODUCT_NAME = interlinked;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -933,6 +953,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = computer.interlinked.tests;
 				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Interlinked.app/Contents/MacOS/Interlinked";
 			};
 			name = Debug;
 		};

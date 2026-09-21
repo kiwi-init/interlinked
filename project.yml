@@ -96,6 +96,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.cli
         PRODUCT_NAME: interlinked
+        PRODUCT_MODULE_NAME: InterlinkedControl
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_FORCE_DYNAMIC_LINK_STDLIB: YES
         SKIP_INSTALL: YES
@@ -104,6 +105,8 @@ targets:
   InterlinkedTests:
     type: bundle.unit-test
     platform: macOS
+    dependencies:
+      - target: Interlinked
     sources:
       - path: InterlinkedTests
       - path: Interlinked/Model
