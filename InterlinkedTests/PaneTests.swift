@@ -163,7 +163,6 @@ final class PageURLCopyShortcutTests: XCTestCase {
 
 final class ToolboxShortcutTests: XCTestCase {
     func testToolboxUsesConventionalMacShortcuts() {
-        XCTAssertEqual(ToolboxShortcut.filters.label, "⇧⌘F")
         XCTAssertEqual(ToolboxShortcut.find.label, "⌘F")
         XCTAssertEqual(ToolboxShortcut.vault.label, "⌘S")
         XCTAssertEqual(ToolboxShortcut.settings.label, "⌘,")

@@ -101,7 +101,6 @@ enum PageHandleExpansion {
 }
 
 enum ToolboxShortcut: Equatable {
-    case filters
     case find
     case vault
     case reading
@@ -109,7 +108,6 @@ enum ToolboxShortcut: Equatable {
 
     var label: String {
         switch self {
-        case .filters: "⇧⌘F"
         case .find: "⌘F"
         case .vault: "⌘S"
         case .reading: ""

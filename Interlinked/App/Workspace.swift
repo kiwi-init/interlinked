@@ -162,11 +162,6 @@ final class Workspace {
         shortcut.label
     }
 
-    func togglePersonalFilters() {
-        downloads.closePanel()
-        assistance.filterPanelOpen ? assistance.closeFilters() : assistance.openFilters()
-    }
-
     var currentPageURL: URL? {
         guard let pane = activePane else { return nil }
         if let url = hosts.existingBrowser(pane)?.url,
@@ -409,7 +404,6 @@ final class Workspace {
         if newTabEditor != nil { cancelNewTabEditor() }
         else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
-        else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
         else if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
@@ -1034,7 +1028,7 @@ final class Workspace {
                 return event
             }
             if event.keyCode == 53,
-               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
+               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.panel != nil ||
                self.editing != nil || self.overviewOpen {
                 self.escape()
                 return nil
@@ -1126,8 +1120,6 @@ final class Workspace {
             cycleTabs(1)
         case ("[", .command):
             cycleTabs(-1)
-        case ("f", [.command, .shift]):
-            togglePersonalFilters()
         case ("f", .command):
             assistance.openFind()
         case ("g", .command):
@@ -1135,7 +1127,6 @@ final class Workspace {
         case ("g", [.command, .shift]):
             assistance.moveMatch(-1)
         case ("j", .command):
-            assistance.closeFilters()
             if assistance.panel != nil { assistance.closePanel() }
             downloads.togglePanel()
         case ("w", .command):
@@ -1154,7 +1145,6 @@ final class Workspace {
 
     private func openNativeSettings() {
         settingsDestination = .general
-        assistance.closeFilters()
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
         overviewOpen = false

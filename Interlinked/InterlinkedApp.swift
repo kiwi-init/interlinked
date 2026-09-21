@@ -41,8 +41,6 @@ struct InterlinkedApp: App {
                     .keyboardShortcut(.tab, modifiers: [.control, .shift])
             }
             CommandMenu("Page") {
-                Button("Personal Filters") { workspace.togglePersonalFilters() }
-                    .keyboardShortcut("f", modifiers: [.command, .shift])
                 Button("Find in Page") { workspace.assistance.openFind() }
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Find Next") { workspace.assistance.moveMatch(1) }
@@ -54,7 +52,6 @@ struct InterlinkedApp: App {
                 Button("Stop Sharing This Page") { workspace.assistance.revokePage() }
                     .disabled(!workspace.assistance.shared)
                 Button("Downloads") {
-                    workspace.assistance.closeFilters()
                     if workspace.assistance.panel != nil { workspace.assistance.closePanel() }
                     workspace.downloads.togglePanel()
                 }
