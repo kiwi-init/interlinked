@@ -64,6 +64,7 @@ struct MeaningDecision: Sendable {
 protocol LocalBrowserIntelligence: Sendable {
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait?
     func navigationAdvice(_ review: NavigationReview) async throws -> String?
+    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool?
 }
 
 private final class NavigationAdviceRace: @unchecked Sendable {
@@ -106,6 +107,7 @@ private final class NavigationAdviceRace: @unchecked Sendable {
 struct UnavailableLocalIntelligence: LocalBrowserIntelligence {
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait? { nil }
     func navigationAdvice(_ review: NavigationReview) async throws -> String? { nil }
+    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { nil }
 }
 
 enum LocalIntelligenceRuntime {
@@ -171,6 +173,12 @@ actor BrowserIntelligence {
             await DebugIntelligenceMonitor.shared.finish(activity, failed: true)
             #endif
             throw error
+        }
+    }
+
+    func shouldReplaceSiteMenu(host: String, labels: String) async -> Bool? {
+        try? await observed(source: .appleIntelligence, action: "Site menu") {
+            try await local.shouldReplaceSiteMenu(host: host, labels: labels)
         }
     }
 
@@ -278,6 +286,12 @@ actor BrowserIntelligence {
 }
 
 @available(macOS 26.0, *)
+@Generable private struct AppleSiteMenuOutput {
+    @Guide(description: "True if this top chrome is site navigation Interlinked can replace")
+    var replace: Bool
+}
+
+@available(macOS 26.0, *)
 @Generable private struct AppleNavigationOutput {
     @Guide(description: "One short sentence that restates the supplied warning facts, or empty if they are already clear")
     var explanation: String
@@ -299,6 +313,19 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
         )
         guard let label = PageLabels.generated(response.content.label) else { return nil }
         return PagePortrait(label: label, about: PageLabels.generatedAbout(response.content.about) ?? "")
+    }
+
+    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? {
+        guard available else { return nil }
+        let session = LanguageModelSession(
+            instructions: IntelligencePromptPreferences.text(for: .appleSiteMenu)
+        )
+        let response = try await session.respond(
+            to: "Untrusted chrome labels for \(host):\n\(labels)",
+            generating: AppleSiteMenuOutput.self,
+            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 16)
+        )
+        return response.content.replace
     }
 
     func navigationAdvice(_ review: NavigationReview) async throws -> String? {

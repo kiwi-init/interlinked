@@ -19,6 +19,13 @@ struct ContentView: View {
                 Toolbox(palette: palette)
                     .padding(18)
             }
+            .overlay(alignment: .top) {
+                if workspace.siteMenu != nil {
+                    SiteMenuBar(palette: palette, available: geometry.size)
+                        .padding(.top, 18)
+                        .padding(.horizontal, 160)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 PageActions(palette: palette, available: geometry.size)
                     .padding(18)

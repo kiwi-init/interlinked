@@ -447,6 +447,7 @@ class InterlinkedClient final : public CefClient,
   bool certificate_error_reported_ = false;
   void CountBlockedRequest();
   void ContinueNavigation(uint64_t generation,
+                          CefRefPtr<CefBrowser> browser,
                           CefRefPtr<CefFrame> frame,
                           CefRefPtr<CefRequest> request);
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
@@ -1635,7 +1636,7 @@ bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                            kind:NavigationKind(request, is_redirect)
                                      completion:^(BOOL allow) {
     if (allow) {
-      self->ContinueNavigation(generation, frame, request);
+      self->ContinueNavigation(generation, browser, frame, request);
     }
   }];
   if (!reviewing) {
@@ -1646,14 +1647,34 @@ bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
 }
 
 void InterlinkedClient::ContinueNavigation(uint64_t generation,
+                                           CefRefPtr<CefBrowser> browser,
                                            CefRefPtr<CefFrame> frame,
                                            CefRefPtr<CefRequest> request) {
   CEF_REQUIRE_UI_THREAD();
-  if (!view_ || generation != navigation_review_generation_ || !frame || !frame->IsValid()) {
+  if (!view_ || !browser || generation != navigation_review_generation_ || !frame || !frame->IsValid()) {
     return;
   }
   approved_navigation_ = RequestSignature(request);
-  frame->LoadRequest(request);
+  // Replaying through the captured frame is renderer-initiated: CEF sends the
+  // request to the frame's render frame, which starts the navigation with that
+  // document as the initiator. If another navigation began while the review
+  // was pending, the captured frame is stale and the initiator no longer
+  // matches the browser's navigation state, so Chromium kills the renderer
+  // for an invalid initiator origin ("This page stopped responding").
+  // Re-resolve the current main frame and replay idempotent navigations as
+  // browser-initiated loads instead, the same path typed URLs take.
+  CefRefPtr<CefFrame> current = browser->GetMainFrame();
+  if (!current || !current->IsValid()) {
+    return;
+  }
+  const std::string method = request->GetMethod().ToString();
+  const std::string url = request->GetURL().ToString();
+  if ((method.empty() || method == "GET") && current->IsMain()) {
+    current->LoadURL(url);
+    return;
+  }
+  // State-changing methods keep their body by replaying the original request.
+  current->LoadRequest(request);
 }
 
 bool InterlinkedClient::OnCertificateError(CefRefPtr<CefBrowser> browser,

@@ -1,4 +1,250 @@
+import CoreGraphics
 import Foundation
+
+struct SiteMenuItem: Codable, Equatable, Hashable, Identifiable, Sendable {
+    var id: String
+    var label: String
+    var title: String
+    var href: String
+    var kind: String
+    var icon: String
+    var iconKind: String
+    var side: String
+    var current: Bool
+    var children: [SiteMenuItem]
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, title, href, kind, icon, iconKind, side, current, children
+    }
+
+    init(
+        id: String,
+        label: String,
+        href: String,
+        kind: String = "link",
+        current: Bool,
+        children: [SiteMenuItem] = [],
+        title: String = "",
+        icon: String = "",
+        iconKind: String = "",
+        side: String = "leading"
+    ) {
+        self.id = id
+        self.label = label
+        self.title = title.isEmpty ? label : title
+        self.href = href
+        self.kind = kind
+        self.icon = icon
+        self.iconKind = iconKind
+        self.side = side
+        self.current = current
+        self.children = children
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        href = try c.decodeIfPresent(String.self, forKey: .href) ?? ""
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? label
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "link"
+        icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        iconKind = try c.decodeIfPresent(String.self, forKey: .iconKind) ?? ""
+        side = try c.decodeIfPresent(String.self, forKey: .side) ?? "leading"
+        current = try c.decodeIfPresent(Bool.self, forKey: .current) ?? false
+        children = try c.decodeIfPresent([SiteMenuItem].self, forKey: .children) ?? []
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? href + "\n" + label
+    }
+}
+
+struct SiteMenuSearch: Codable, Equatable, Hashable, Sendable {
+    var action: String
+    var placeholder: String
+    var queryParam: String
+}
+
+struct SiteMenu: Codable, Equatable, Sendable {
+    var home: String
+    var name: String
+    var items: [SiteMenuItem]
+    var search: SiteMenuSearch?
+    var height: Double
+    /// True when a site header was found and should be hidden behind this bar.
+    var replacesChrome: Bool
+
+    init(
+        home: String,
+        name: String = "",
+        items: [SiteMenuItem],
+        search: SiteMenuSearch? = nil,
+        height: Double,
+        replacesChrome: Bool = false
+    ) {
+        self.home = home
+        self.name = name
+        self.items = items
+        self.search = search
+        self.height = height
+        self.replacesChrome = replacesChrome
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        home = try container.decode(String.self, forKey: .home)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        items = try container.decodeIfPresent([SiteMenuItem].self, forKey: .items) ?? []
+        search = try container.decodeIfPresent(SiteMenuSearch.self, forKey: .search)
+        height = try container.decodeIfPresent(Double.self, forKey: .height) ?? 44
+        replacesChrome = try container.decodeIfPresent(Bool.self, forKey: .replacesChrome) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(home, forKey: .home)
+        try container.encode(name, forKey: .name)
+        try container.encode(items, forKey: .items)
+        try container.encodeIfPresent(search, forKey: .search)
+        try container.encode(height, forKey: .height)
+        try container.encode(replacesChrome, forKey: .replacesChrome)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case home, name, items, search, height, replacesChrome
+    }
+}
+
+enum SiteMenuLayout {
+    static let visibleCap = 5
+
+    /// How many destinations fit before the rest belong behind More.
+    /// `moreWidth` is reserved only while something remains hidden.
+    static func visibleCount(itemWidths: [CGFloat], budget: CGFloat, moreWidth: CGFloat = 64) -> Int {
+        var used: CGFloat = 0
+        var count = 0
+        for width in itemWidths {
+            if count == visibleCap { break }
+            let reserve = count + 1 < itemWidths.count ? moreWidth : 0
+            if used + width + reserve > budget { break }
+            used += width
+            count += 1
+        }
+        return count
+    }
+}
+
+enum SiteMenuPolicy {
+    static let maxItems = 24
+
+    /// A bar for any web page, before the page has told us its destinations.
+    static func baseline(line: String) -> SiteMenu? {
+        let url = address(from: line)
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = url.host, !host.isEmpty,
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        parts.path = "/"
+        parts.query = nil
+        parts.fragment = nil
+        parts.user = nil
+        parts.password = nil
+        guard let home = parts.url else { return nil }
+        return SiteMenu(home: home.absoluteString, name: hostLabel(host), items: [], height: 44)
+    }
+
+    static func accept(_ menu: SiteMenu, minimum: Int? = nil) -> SiteMenu? {
+        guard let homeURL = URL(string: menu.home),
+              let scheme = homeURL.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = homeURL.host, !host.isEmpty else { return nil }
+        let name = tidyName(menu.name, host: host)
+        var seen = Set<String>()
+        var items = menu.items.compactMap { clean($0, seen: &seen) }
+        items.removeAll { isSiteNameHome($0, name: name, home: homeURL) }
+        items = Array(items.prefix(maxItems))
+        var search = menu.search
+        if var found = search {
+            if URL(string: found.action)?.scheme?.lowercased().hasPrefix("http") != true {
+                search = nil
+            } else {
+                found.placeholder = "Search"
+                search = found
+            }
+        }
+        if let minimum, items.count < minimum { return nil }
+        let replacesChrome = menu.replacesChrome && (!items.isEmpty || search != nil)
+        return SiteMenu(
+            home: menu.home,
+            name: name,
+            items: items,
+            search: search,
+            height: menu.height,
+            replacesChrome: replacesChrome
+        )
+    }
+
+    static func hostLabel(_ host: String) -> String {
+        var label = host.lowercased()
+        if label.hasPrefix("www.") { label = String(label.dropFirst(4)) }
+        return label
+    }
+
+    private static func tidyName(_ raw: String, host: String) -> String {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (2...24).contains(name.count), !name.contains("://"), !name.contains("/") {
+            return name
+        }
+        return hostLabel(host)
+    }
+
+    private static func isSiteNameHome(_ item: SiteMenuItem, name: String, home: URL) -> Bool {
+        guard item.children.isEmpty,
+              item.label.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame else { return false }
+        guard let url = URL(string: item.href), url.host?.lowercased() == home.host?.lowercased() else { return item.href.isEmpty }
+        let path = url.path.isEmpty ? "/" : url.path
+        return path == "/"
+    }
+
+    private static func clean(_ item: SiteMenuItem, seen: inout Set<String>) -> SiteMenuItem? {
+        let label = item.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (2...48).contains(label.count) else { return nil }
+        var href = item.href
+        if let url = URL(string: href), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            href = url.absoluteString
+        } else {
+            href = ""
+        }
+        var childSeen = Set<String>()
+        let children = item.children.compactMap { clean($0, seen: &childSeen) }
+        let key = label + "|" + href
+        guard seen.insert(key).inserted else { return nil }
+        return SiteMenuItem(
+            id: item.id.isEmpty ? key : item.id,
+            label: label,
+            href: href,
+            kind: item.kind,
+            current: item.current,
+            children: Array(children.prefix(12)),
+            title: title.isEmpty ? label : title,
+            icon: "",
+            iconKind: "",
+            side: "leading"
+        )
+    }
+}
+
+extension SiteMenuItem {
+    static let moreID = "__more__"
+}
+
+enum SiteMenuPreference {
+    static let key = "siteMenu.enabled"
+
+    static func enabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? true
+    }
+
+    static func set(_ enabled: Bool, in defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: key)
+    }
+}
 
 struct PageMetadata: Equatable, Sendable {
     var document: String

@@ -806,6 +806,179 @@ final class DomainIconCacheTests: XCTestCase {
         XCTAssertEqual(DomainIconCache<String>.domain(URL(string: "https://studio.example.com/")), "studio.example.com")
         XCTAssertNil(DomainIconCache<String>.domain(URL(string: "file:///tmp/page.html")))
     }
+
+    func testPinnedDomainsKeepIconsAfterTheLastTabLeaves() throws {
+        var cache = DomainIconCache<String>()
+        _ = cache.retain([PaneID(1): "example.com"])
+        let token = try XCTUnwrap(cache.begin("example.com"))
+        XCTAssertTrue(cache.complete("example.com", token: token, value: "icon"))
+        XCTAssertTrue(cache.retain([:], pinned: ["example.com"]).isEmpty)
+        XCTAssertEqual(cache.value(forDomain: "example.com"), "icon")
+        XCTAssertNil(cache.begin("example.com"))
+        XCTAssertEqual(cache.retain([:], pinned: []), ["example.com"])
+        XCTAssertNil(cache.value(forDomain: "example.com"))
+        _ = cache.retain([:], pinned: ["example.com"])
+        XCTAssertTrue(cache.restore("example.com", value: "saved"))
+        XCTAssertEqual(cache.value(forDomain: "example.com"), "saved")
+    }
+}
+
+@MainActor
+final class SiteMenuPolicyTests: XCTestCase {
+    func testPublicPagesWithAShortSameSiteListAreAccepted() {
+        let menu = SiteMenu(
+            home: "https://www.spacex.com/",
+            items: [
+                SiteMenuItem(id: "1", label: "Vehicles", href: "https://www.spacex.com/vehicles", current: false, children: [
+                    SiteMenuItem(id: "1a", label: "Falcon 9", href: "https://www.spacex.com/vehicles/falcon-9", current: false)
+                ]),
+                SiteMenuItem(id: "2", label: "Human Spaceflight", href: "https://www.spacex.com/human-spaceflight", current: true),
+                SiteMenuItem(id: "3", label: "Starlink", href: "https://www.spacex.com/starlink", current: false),
+                SiteMenuItem(id: "4", label: "Starshield", href: "https://www.spacex.com/starshield", current: false)
+            ],
+            search: SiteMenuSearch(action: "https://www.spacex.com/search", placeholder: "Search", queryParam: "q"),
+            height: 64
+        )
+        let accepted = SiteMenuPolicy.accept(menu)
+        XCTAssertEqual(accepted?.items.count, 4)
+        XCTAssertEqual(accepted?.items.first?.children.first?.label, "Falcon 9")
+        XCTAssertEqual(accepted?.search?.queryParam, "q")
+        let noisy = SiteMenu(
+            home: "https://github.com/",
+            items: [SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true)],
+            search: SiteMenuSearch(action: "https://github.com/search", placeholder: "Open quick search dialog, type / to search", queryParam: "q"),
+            height: 56
+        )
+        XCTAssertEqual(SiteMenuPolicy.accept(noisy)?.search?.placeholder, "Search")
+    }
+
+    func testSignedInDashboardsAndIconBarsAreAccepted() {
+        let github = SiteMenu(
+            home: "https://github.com/",
+            items: [
+                SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true),
+                SiteMenuItem(id: "2", label: "Create new", href: "", kind: "button", current: false),
+                SiteMenuItem(id: "3", label: "Issues", href: "https://github.com/issues", current: false)
+            ],
+            search: SiteMenuSearch(action: "https://github.com/search", placeholder: "Type / to search", queryParam: "q"),
+            height: 56
+        )
+        XCTAssertEqual(SiteMenuPolicy.accept(github)?.items.count, 3)
+        let iconOnly = SiteMenuItem(id: "i", label: "", href: "", kind: "button", current: false, title: "Issues", icon: "data:image/svg+xml,test", iconKind: "svg")
+        let withoutIcons = SiteMenuPolicy.accept(SiteMenu(
+            home: "https://github.com/",
+            items: [
+                SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true),
+                iconOnly
+            ],
+            height: 56,
+            replacesChrome: true
+        ))
+        XCTAssertEqual(withoutIcons?.items.map(\.label), ["Dashboard"])
+        XCTAssertEqual(withoutIcons?.replacesChrome, true)
+        let searchOnly = SiteMenu(
+            home: "https://github.com/",
+            items: [SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true)],
+            search: SiteMenuSearch(action: "https://github.com/search", placeholder: "Search", queryParam: "q"),
+            height: 56
+        )
+        XCTAssertNotNil(SiteMenuPolicy.accept(searchOnly))
+    }
+
+    func testEveryWebPageKeepsAMenu() {
+        let few = SiteMenu(home: "https://www.example.com/", name: "Example", items: [
+            SiteMenuItem(id: "1", label: "Home", href: "https://www.example.com/", current: true)
+        ], height: 48, replacesChrome: true)
+        let accepted = SiteMenuPolicy.accept(few)
+        XCTAssertEqual(accepted?.items.map(\.label), ["Home"])
+        XCTAssertEqual(accepted?.name, "Example")
+        XCTAssertEqual(accepted?.replacesChrome, true)
+        let unnamed = SiteMenuPolicy.accept(SiteMenu(
+            home: "https://www.example.com/",
+            items: [
+                SiteMenuItem(id: "a", label: "", href: "", current: false),
+                SiteMenuItem(id: "b", label: "", href: "javascript:void(0)", current: false)
+            ],
+            height: 48,
+            replacesChrome: true
+        ))
+        XCTAssertEqual(unnamed?.items.count, 0)
+        XCTAssertEqual(unnamed?.name, "example.com")
+        XCTAssertEqual(unnamed?.replacesChrome, false)
+        XCTAssertNil(SiteMenuPolicy.accept(SiteMenu(home: "javascript:void(0)", items: [
+            SiteMenuItem(id: "1", label: "Home", href: "https://example.com/", current: true)
+        ], height: 40)))
+        let many = (0..<30).map {
+            SiteMenuItem(id: "\($0)", label: "Item \($0)", href: "https://example.com/\($0)", current: false)
+        }
+        XCTAssertEqual(SiteMenuPolicy.accept(SiteMenu(home: "https://example.com/", items: many, height: 48))?.items.count, 24)
+        let google = SiteMenuPolicy.baseline(line: "https://www.google.com/search?q=google")
+        XCTAssertEqual(google?.home, "https://www.google.com/")
+        XCTAssertEqual(google?.name, "google.com")
+        XCTAssertEqual(google?.items.count, 0)
+        XCTAssertEqual(google?.replacesChrome, false)
+        XCTAssertNil(SiteMenuPolicy.baseline(line: ""))
+        XCTAssertNil(SiteMenuPolicy.baseline(line: "about:blank"))
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [80, 80, 80, 80, 80, 80], budget: 10_000), 5)
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [100, 100, 100], budget: 200, moreWidth: 64), 1)
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [80, 80], budget: 200, moreWidth: 64), 2)
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [500], budget: 100, moreWidth: 64), 0)
+    }
+
+    func testBridgeCanHideAndRestoreADetectedBanner() {
+        XCTAssertTrue(PageTextBridge.install.contains("siteMenu()"))
+        XCTAssertTrue(PageTextBridge.install.contains("hideSiteMenu()"))
+        XCTAssertTrue(PageTextBridge.install.contains("showSiteMenu()"))
+        XCTAssertTrue(PageTextBridge.install.contains("interlinkedSiteMenu"))
+        XCTAssertTrue(PageTextBridge.install.contains("document.body.children"))
+        XCTAssertFalse(PageTextBridge.install.contains("querySelectorAll('body *')"))
+        XCTAssertTrue(PageTextBridge.install.contains("visibility','hidden','important'"))
+        XCTAssertTrue(PageTextBridge.install.contains("interlinked-site-menu-spacer"))
+        XCTAssertTrue(PageTextBridge.install.contains("inBar"))
+        XCTAssertTrue(PageTextBridge.install.contains("next.score"))
+        XCTAssertTrue(PageTextBridge.install.contains("replacesChrome"))
+        XCTAssertTrue(PageTextBridge.install.contains("og:site_name"))
+        XCTAssertFalse(PageTextBridge.install.contains("captureIcon"))
+        XCTAssertFalse(PageTextBridge.install.contains("next.items.length>best.items.length"))
+        XCTAssertTrue(PageTextBridge.install.contains("hideSiteMenu()"))
+    }
+
+    func testSiteMenuDefaultsOnAndCanBeTurnedOff() {
+        let suite = "site-menu-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(SiteMenuPreference.enabled(in: defaults))
+        SiteMenuPreference.set(false, in: defaults)
+        XCTAssertFalse(SiteMenuPreference.enabled(in: defaults))
+    }
+}
+
+final class FaviconCandidatesTests: XCTestCase {
+    func testGitHubHTMLPrefersRasterIconsOverSVG() throws {
+        let page = try XCTUnwrap(URL(string: "https://github.com"))
+        let html = """
+        <link rel="icon" type="image/svg+xml" href="/favicons/favicon.svg">
+        <link rel="alternate icon" type="image/png" href="https://github.githubassets.com/favicons/favicon.png" sizes="32x32">
+        """
+        let urls = FaviconCandidates.urls(for: page, html: html)
+        XCTAssertEqual(urls.first?.absoluteString, "https://github.githubassets.com/favicons/favicon.png")
+        XCTAssertTrue(urls.contains { $0.path.hasSuffix("/favicon.ico") })
+        XCTAssertTrue(urls.contains { $0.path.hasSuffix("/favicon.svg") })
+        XCTAssertLessThan(
+            try XCTUnwrap(urls.firstIndex { $0.pathExtension == "png" }),
+            try XCTUnwrap(urls.firstIndex { $0.pathExtension == "svg" })
+        )
+    }
+
+    func testRelativeIconHrefsResolveAgainstThePage() throws {
+        let page = try XCTUnwrap(URL(string: "https://example.com/app/"))
+        let html = #"<link rel="apple-touch-icon" href="../icon.png">"#
+        XCTAssertEqual(
+            FaviconCandidates.fromHTML(html, base: page).first?.absoluteString,
+            "https://example.com/icon.png"
+        )
+    }
 }
 
 final class DomainIconStoreTests: XCTestCase {
