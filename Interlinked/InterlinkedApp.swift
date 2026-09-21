@@ -71,6 +71,16 @@ struct InterlinkedApp: App {
                 Button("Copy Page URL") { workspace.copyCurrentPageURL() }
                     .disabled(workspace.currentPageURL == nil)
                     .keyboardShortcut("c", modifiers: [.command, .shift])
+                Divider()
+                Button(workspace.savedSites.contains(workspace.currentPageURL?.absoluteString ?? "", in: .favorite) ? "Remove from Favorites" : "Add to Favorites") {
+                    workspace.toggleCurrentPage(in: .favorite)
+                }
+                .disabled(workspace.currentPageURL == nil)
+                Button(workspace.savedSites.contains(workspace.currentPageURL?.absoluteString ?? "", in: .bookmark) ? "Remove Bookmark" : "Bookmark This Page") {
+                    workspace.toggleCurrentPage(in: .bookmark)
+                }
+                .disabled(workspace.currentPageURL == nil)
+                .keyboardShortcut("d", modifiers: .command)
             }
         }
         Window("About Interlinked", id: "about") {

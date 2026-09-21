@@ -24,9 +24,9 @@ struct LineEditor: View {
                           workspace.beginEmptyPageEditingIfNeeded()
                       },
                       moveSelection: workspace.moveSearchSelection,
-                      autofocus: workspace.editing != nil || (workspace.isEmptyActivePage && !workspace.overviewOpen && !workspace.identityOpen),
+                      autofocus: workspace.editing != nil || (workspace.isEmptyActivePage && !workspace.overviewOpen && !workspace.identityOpen && workspace.newTabEditor == nil),
                       beginEditing: {
-                          if workspace.editing == nil, !workspace.overviewOpen, !workspace.identityOpen {
+                          if workspace.editing == nil, !workspace.overviewOpen, !workspace.identityOpen, workspace.newTabEditor == nil {
                               workspace.editActiveLine()
                           }
                       })

@@ -10,7 +10,7 @@ struct BrowserPage: View {
             if let recovery = workspace.hosts.recovery(for: pane) {
                 BrowserRecoveryView(pane: pane, recovery: recovery, palette: palette)
             } else if workspace.surfaces.line(pane).isEmpty {
-                EmptyPaneView(palette: palette)
+                EmptyPaneView()
             } else {
                 BrowserPane(pane: pane)
             }
