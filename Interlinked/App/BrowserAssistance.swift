@@ -407,6 +407,7 @@ final class BrowserAssistance {
                       extract.url == view.url?.absoluteString else { return }
                 var selected: [UUID: [PageFilterCandidate]] = [:]
                 var usedJev = false
+                var jevFailed = false
                 for rule in rules {
                     var matches = PersonalFilterDecisions.localMatches(
                         description: rule.description, candidates: extract.candidates)
@@ -415,12 +416,18 @@ final class BrowserAssistance {
                         let matched = Set(matches.map(\.id))
                         let remainder = PersonalFilterDecisions.jevCandidates(extract.candidates)
                             .filter { !matched.contains($0.id) }
-                        for candidates in PersonalFilterDecisions.batches(remainder) {
-                            let decision = try await self.intelligence.personalFilterMatches(
-                                description: rule.description, candidates: candidates)
-                            try Task.checkCancellation()
-                            matches.append(contentsOf: decision.value)
-                            usedJev = true
+                        do {
+                            for candidates in PersonalFilterDecisions.batches(remainder) {
+                                let decision = try await self.intelligence.personalFilterMatches(
+                                    description: rule.description, candidates: candidates)
+                                try Task.checkCancellation()
+                                matches.append(contentsOf: decision.value)
+                                usedJev = true
+                            }
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            jevFailed = true
                         }
                     }
                     var seen = Set<String>()
@@ -434,8 +441,15 @@ final class BrowserAssistance {
                 if usedJev { self.grants[pane] = page.document; self.lastDecisionStatus = "Jev decision received for Personal Filters" }
                 if self.workspace?.activePane == pane {
                     self.filterBusy = false
-                    let result = self.appliedFilterCount > 0 ? self.hiddenFilterSummary : "No matching page content found."
-                    self.filterStatus = extract.truncated ? result + " This page exceeded the safe scan limit." : result
+                    if self.appliedFilterCount > 0 {
+                        let result = self.hiddenFilterSummary
+                        self.filterStatus = extract.truncated ? result + " This page exceeded the safe scan limit." : result
+                    } else if jevFailed {
+                        self.filterStatus = JevError.unavailable.errorDescription!
+                    } else {
+                        let result = "No matching page content found."
+                        self.filterStatus = extract.truncated ? result + " This page exceeded the safe scan limit." : result
+                    }
                 }
             } catch {
                 guard self.accepts(key, revision) else { return }
@@ -688,7 +702,11 @@ final class BrowserAssistance {
                 let decision = try await self.intelligence.relatedPageGroups(pages: pages)
                 guard self.accepts(key, revision), workspace.overviewOpen else { return }
                 if let decision {
-                    self.groups = decision.value
+                    self.groups = ResearchRelations.merge(
+                        remote: decision.value,
+                        fallback: ResearchRelations.groups(pages),
+                        pages: pages
+                    )
                     self.lastDecisionStatus = "\(decision.source.rawValue) decision received for related pages"
                 }
             } catch { /* Local groups remain stable. */ }

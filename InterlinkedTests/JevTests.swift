@@ -648,6 +648,27 @@ final class BrowserIntelligenceTests: XCTestCase {
         ]))
         XCTAssertEqual(clique.map { Set($0.members) }, [Set(["a", "b", "c"])])
     }
+    func testRelatedMergeKeepsFallbackGroupsThatIncludeUndescribedTabs() {
+        let pages = [
+            ResearchPage(id: "a", title: "Sony A7 camera review", detail: "", host: "a.test", about: "Sony A7 review"),
+            ResearchPage(id: "b", title: "Sony A7 camera shop", detail: "", host: "b.test", about: "Sony A7 shop"),
+            ResearchPage(id: "c", title: "Sony A7 camera listing", detail: "", host: "c.test", about: ""),
+            ResearchPage(id: "d", title: "Cooking dinner recipes", detail: "", host: "d.test", about: "")
+        ]
+        let fallback = ResearchRelations.groups(pages)
+        XCTAssertEqual(Set(fallback.first?.members ?? []), Set(["a", "b", "c"]))
+        let remote = [ResearchGroup(id: "a", title: pages[0].title, members: ["a", "b"])]
+        let merged = ResearchRelations.merge(remote: remote, fallback: fallback, pages: pages)
+        XCTAssertEqual(Set(merged.first { $0.members.contains("a") }?.members ?? []), Set(["a", "b", "c"]))
+        XCTAssertFalse(merged.contains { Set($0.members) == Set(["a", "b", "c", "d"]) })
+        let declined = ResearchRelations.merge(remote: [], fallback: fallback, pages: pages)
+        XCTAssertEqual(Set(declined.first?.members ?? []), Set(["a", "b", "c"]))
+        XCTAssertTrue(ResearchRelations.merge(
+            remote: [],
+            fallback: [ResearchGroup(id: "a", title: "Sony", members: ["a", "b"])],
+            pages: pages
+        ).isEmpty)
+    }
     func testSensitiveAndLocalPagesCannotBeShared() {
         XCTAssertFalse(page("http://127.0.0.1:8000/").publicWebPage)
         XCTAssertFalse(page("http://company.local/").publicWebPage)
@@ -700,6 +721,9 @@ final class BrowserIntelligenceTests: XCTestCase {
                        ["image", "video"])
         let words = [PageFilterCandidate(id: "pace", text: "pace", role: "text token", context: "We must pace the frontier")]
         XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "the word pace", candidates: words).map(\.id), ["pace"])
+        let accented = [PageFilterCandidate(id: "cafe", text: "café", role: "text token", context: "A café nearby")]
+        XCTAssertEqual(PersonalFilterDecisions.intent("the word café"), .word("cafe"))
+        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "the word café", candidates: accented).map(\.id), ["cafe"])
         XCTAssertEqual(PersonalFilterDecisions.intent("all images and videos"), .media(["image", "video"]))
         XCTAssertEqual(PersonalFilterDecisions.intent("the word pace"), .word("pace"))
         XCTAssertEqual(PersonalFilterDecisions.intent("hide layoff posts"), .meaning)

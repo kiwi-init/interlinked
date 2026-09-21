@@ -217,6 +217,34 @@ enum ResearchRelations {
         }
     }
 
+    /// Keep Jev cliques for described tabs, and lexical groups that still involve
+    /// tabs Apple never described. Do not revive a described-only lexical group
+    /// that Jev declined.
+    static func merge(remote: [ResearchGroup], fallback: [ResearchGroup], pages: [ResearchPage]) -> [ResearchGroup] {
+        let described = Set(pages.filter { !$0.about.isEmpty }.map(\.id))
+        var groups = remote
+        var claimed = Set(remote.flatMap(\.members))
+        for group in fallback {
+            let extra = group.members.filter { !claimed.contains($0) }
+            let undescribed = extra.filter { !described.contains($0) }
+            guard !undescribed.isEmpty else { continue }
+            if let host = group.members.first(where: { claimed.contains($0) }),
+               let index = groups.firstIndex(where: { $0.members.contains(host) }) {
+                let attached = pages.map(\.id).filter { undescribed.contains($0) && !groups[index].members.contains($0) }
+                groups[index].members.append(contentsOf: attached)
+                claimed.formUnion(attached)
+            } else if extra.count > 1, let first = extra.first {
+                groups.append(ResearchGroup(
+                    id: first,
+                    title: pages.first { $0.id == first }?.title ?? group.title,
+                    members: extra
+                ))
+                claimed.formUnion(extra)
+            }
+        }
+        return groups
+    }
+
     private static func connected(
         _ pages: [ResearchPage],
         related: (ResearchPage, ResearchPage, String) -> Bool

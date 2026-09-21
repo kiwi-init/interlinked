@@ -87,7 +87,7 @@ enum PersonalFilterDecisions {
         let folded = normalized(description)
         if folded.contains("word") || folded.contains("palavra") {
             let leftover = usefulWords(description).subtracting(["word", "words", "palavra", "palavras"])
-            if leftover.count == 1, let word = leftover.first { return .word(word) }
+            if leftover.count == 1, let word = leftover.first { return .word(normalized(word)) }
         }
         let words = usefulWords(description)
         var roles = Set<String>()
