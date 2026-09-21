@@ -22,6 +22,7 @@ struct SiteMenuBar: View {
     private static let radius: CGFloat = 14
     private static let rowHeight: CGFloat = 44
     private static let chevronWidth: CGFloat = 44
+    private static let homeWidth: CGFloat = 44
     private static let searchIconWidth: CGFloat = 44
     private static let moreWidth: CGFloat = 64
     private static let labelSize: CGFloat = 13
@@ -91,7 +92,7 @@ struct SiteMenuBar: View {
         case .destinations:
             let parts = split(menu)
             let items = parts.visible.reduce(0) { $0 + itemWidth($1) }
-            return min(maxWidth, items + (parts.extra.isEmpty ? 0 : Self.moreWidth) + search + 8)
+            return min(maxWidth, Self.homeWidth + items + (parts.extra.isEmpty ? 0 : Self.moreWidth) + search + 12)
         case .more:
             let extra = split(menu).extra
             return min(maxWidth, Self.chevronWidth + scrollWidth(extra) + search + Self.chevronWidth)
@@ -108,7 +109,7 @@ struct SiteMenuBar: View {
     private func split(_ menu: SiteMenu) -> (visible: [SiteMenuItem], extra: [SiteMenuItem]) {
         let items = menu.items.filter { !$0.label.isEmpty }
         let search: CGFloat = menu.search == nil ? 0 : Self.searchIconWidth
-        let budget = max(0, maxWidth - search - 8)
+        let budget = max(0, maxWidth - Self.homeWidth - search - 12)
         let count = SiteMenuLayout.visibleCount(itemWidths: items.map(itemWidth), budget: budget,
                                                 moreWidth: Self.moreWidth)
         return (Array(items.prefix(count)), Array(items.dropFirst(count)))
@@ -131,6 +132,7 @@ struct SiteMenuBar: View {
     private func topRow(_ menu: SiteMenu) -> some View {
         let parts = split(menu)
         return HStack(spacing: 0) {
+            homeButton(menu)
             ForEach(parts.visible) { itemButton($0) }
             if !parts.extra.isEmpty {
                 moreButton
@@ -240,6 +242,22 @@ struct SiteMenuBar: View {
     }
 
     /// Resting state: search is one glyph beside the destinations.
+    /// Interlinked replaces the site's header, so its home is always one
+    /// click away, however deep you navigate.
+    private func homeButton(_ menu: SiteMenu) -> some View {
+        let atHome = workspace.currentPageURL.map { SiteMenuHome.matches($0, home: menu.home) } ?? false
+        return Button { workspace.goSiteHome() } label: {
+            Image(systemName: atHome ? "house.fill" : "house")
+                .font(.system(size: Self.glyphSize, weight: .medium))
+                .frame(width: Self.homeWidth, height: Self.rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pointing)
+        .help(menu.name.isEmpty ? "Home" : "\(menu.name) home")
+        .accessibilityLabel(menu.name.isEmpty ? "Site home" : "\(menu.name) home")
+        .accessibilityIdentifier("site-menu-home")
+    }
+
     private var searchButton: some View {
         Button { workspace.beginSiteMenuSearch() } label: {
             Image(systemName: "magnifyingglass")

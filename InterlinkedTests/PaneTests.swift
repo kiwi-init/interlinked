@@ -303,6 +303,22 @@ final class SplitViewTests: XCTestCase {
     }
 }
 
+final class SiteMenuHomeTests: XCTestCase {
+    func testHomeIsTheLogoLinkOrTheOrigin() throws {
+        let page = try XCTUnwrap(URL(string: "https://www.example.com/shop/item?id=4"))
+        XCTAssertEqual(SiteMenuHome.url("https://www.example.com/en/", current: page)?.absoluteString, "https://www.example.com/en/")
+        XCTAssertEqual(SiteMenuHome.url("", current: page)?.absoluteString, "https://www.example.com/")
+        XCTAssertEqual(SiteMenuHome.url("javascript:void(0)", current: page)?.absoluteString, "https://www.example.com/")
+    }
+
+    func testOnlyTheHomePageItselfCountsAsHome() throws {
+        XCTAssertTrue(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com/")), home: "https://example.com/"))
+        XCTAssertTrue(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com")), home: ""))
+        XCTAssertFalse(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com/docs")), home: "https://example.com/"))
+        XCTAssertFalse(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com/?q=x")), home: "https://example.com/"))
+    }
+}
+
 final class IntentTests: XCTestCase {
     func testBrowserCommands() {
         XCTAssertEqual(Intent.command("new tab"), "new-tab")

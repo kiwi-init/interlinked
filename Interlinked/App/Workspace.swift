@@ -134,8 +134,11 @@ final class Workspace {
         OpenWork.switcherTabs(tabs, current: activeTab?.id)
     }
 
+    /// The name a tab goes by everywhere: your name for it, else the label
+    /// the page handle shows, else the page's own title.
     func title(_ tab: Tab) -> String {
-        OpenWork.title(customName: tab.name, pageTitle: hosts.titles[tab.active], fallback: surfaces.tabTitle(tab))
+        OpenWork.title(customName: tab.name, pageTitle: assistance.labels[tab.active] ?? hosts.titles[tab.active],
+                       fallback: surfaces.tabTitle(tab))
     }
 
     func setOverviewOpen(_ open: Bool) {
@@ -277,6 +280,12 @@ final class Workspace {
         }
         guard let pane = activePane, let view = hosts.existingBrowser(pane) else { return }
         Task { _ = await PageTextBridge.activateSiteMenuItem(view, id: item.id) }
+    }
+
+    func goSiteHome() {
+        guard let menu = siteMenu, let home = SiteMenuHome.url(menu.home, current: currentPageURL) else { return }
+        collapseSiteMenuChrome()
+        navigateActive(home.absoluteString)
     }
 
     func submitSiteSearch(_ query: String) {
@@ -766,7 +775,8 @@ final class Workspace {
     func title(_ pane: PaneID) -> String {
         let line = surfaces.line(pane)
         let fallback = line.isEmpty ? "New page" : surfaces.kind(pane).compactLabel(for: line)
-        return OpenWork.title(customName: nil, pageTitle: hosts.titles[pane], fallback: fallback.isEmpty ? line : fallback)
+        return OpenWork.title(customName: nil, pageTitle: assistance.labels[pane] ?? hosts.titles[pane],
+                              fallback: fallback.isEmpty ? line : fallback)
     }
 
     func toggleSplitView() {

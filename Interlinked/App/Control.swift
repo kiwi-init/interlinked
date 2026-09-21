@@ -31,7 +31,7 @@ enum Control {
         "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
-        "site-menu [state|search|close]",
+        "site-menu [state|search|close|home]",
         "quit",
     ]
 
@@ -78,6 +78,7 @@ enum Control {
             switch words.first {
             case "search": workspace.beginSiteMenuSearch()
             case "close": workspace.collapseSiteMenuChrome()
+            case "home": workspace.goSiteHome()
             case "state", nil: break
             default: return error("usage: site-menu [state|search|close]")
             }

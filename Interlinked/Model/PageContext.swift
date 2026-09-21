@@ -62,6 +62,23 @@ struct SiteMenuSearch: Codable, Equatable, Hashable, Sendable {
     var queryParam: String
 }
 
+enum SiteMenuHome {
+    /// The site's home: what the page links its logo to, or its origin.
+    static func url(_ home: String, current: URL?) -> URL? {
+        if let url = URL(string: home), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { return url }
+        guard let current, let scheme = current.scheme, let host = current.host else { return nil }
+        return URL(string: "\(scheme)://\(host)/")
+    }
+
+    static func matches(_ page: URL, home: String) -> Bool {
+        guard let home = url(home, current: page) else { return false }
+        func key(_ url: URL) -> String {
+            (url.host?.lowercased() ?? "") + (url.path.isEmpty ? "/" : url.path)
+        }
+        return key(page) == key(home) && (page.query ?? "").isEmpty
+    }
+}
+
 struct SiteMenu: Codable, Equatable, Sendable {
     var home: String
     var name: String
