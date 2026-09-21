@@ -75,7 +75,7 @@ struct AboutView: View {
 
     private var safetyAndPrivacy: some View {
         aboutSection("Safety and privacy") {
-            statement("What AI receives", "Critical Reading sends readable text from pages you allow to Jev. Fresh installs leave Always-on off. Enabling it requires an explicit privacy warning, then a per-site grant. Meaning search sends your query and extracted page text to Jev. Optional label refinement gives Apple Intelligence page titles, headings, site, host, summary, and breadcrumbs; it returns one label and a short description, cached on this Mac. Related tabs send those local descriptions to Jev. Models return supplied candidate IDs, not executable page code.")
+            statement("What AI receives", "Critical Reading sends readable text from pages you allow to Jev. Fresh installs leave Always-on off. Enabling it requires accepting an explicit privacy warning once; after that it checks every public page without asking again. Meaning search sends your query and extracted page text to Jev. Optional label refinement gives Apple Intelligence page titles, headings, site, host, summary, and breadcrumbs; it returns one label and a short description, cached on this Mac. Related tabs send those local descriptions to Jev. Models return supplied candidate IDs, not executable page code.")
 
             statement("What stays out", "Interlinked excludes forms and form values, password fields, editable pages, cookies, and local pages from AI reading tools. It does not try to detect whether you are signed in: sharing a signed-in page, or asking for Critical Reading on one, sends what that page shows. Critical Reading does not send the page URL. Ordinary browsing, exact find, and deterministic page labels do not use an AI model.")
 

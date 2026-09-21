@@ -331,7 +331,7 @@ private struct IntelligenceSettingsPane: View {
                 } label: {
                     Text("Run Critical Reading")
                     Text(assistant.automaticReadingEnabled
-                         ? "Checks every page on sites you have granted. Revoke a site in Sites to stop."
+                         ? "Checks every page you open, without asking. Page → Stop Sharing This Page pauses a site."
                          : "Checks a page when you choose Critical Reading in the toolbox.")
                 }
 
@@ -521,7 +521,7 @@ private struct PrivacySettingsPane: View {
                 PrivacyFact(symbol: "person.crop.circle.badge.exclamationmark", title: "Signed-in pages are not detected",
                             detail: "Sharing a page while you are signed in sends what it shows, including messages or balances.")
                 PrivacyFact(symbol: "hand.tap.fill", title: "Nothing runs without you",
-                            detail: "Jev reads a page only when you ask, or on sites you granted after turning on Always on.")
+                            detail: "Jev reads a page only when you ask, or on every page once you turn on Always on and accept its warning.")
                 LabeledContent {
                     Button("Read Full Details…") { openWindow(id: "about") }
                         .pointingHandCursor()

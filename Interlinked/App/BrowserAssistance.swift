@@ -335,12 +335,9 @@ final class BrowserAssistance {
         guard enabled, hasJevAccess, automaticReadingEnabled, page.publicWebPage,
               workspace?.activePane == pane, workspace?.hosts.existingBrowser(pane) === view,
               panel == nil || panel == .reading || panel == .permission else { return }
-        guard originGrants.allows(page.origin) else {
-            if panel == nil, !declinedOrigins.contains(page.origin) {
-                requestSharing(for: .reading)
-            }
-            return
-        }
+        // Turning on Always on is the consent: it never asks again per site.
+        // A site you stopped sharing this session stays stopped.
+        guard !declinedOrigins.contains(page.origin) else { return }
         if let result = readingResults[pane], result.document == page.document {
             panel = .reading; busy = false; findings = result.findings; status = result.status
             grants[pane] = page.document
