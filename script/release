@@ -96,5 +96,6 @@ if [ -n "$identity" ]; then
   fi
 fi
 
-shasum -a 256 "$dmg" | tee "$dmg.sha256"
+# Named by file, not path, so `shasum -c` works next to the download.
+(cd "$out" && shasum -a 256 "$name.dmg") | tee "$dmg.sha256"
 echo "$dmg"
