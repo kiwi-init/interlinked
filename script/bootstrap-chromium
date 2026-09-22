@@ -4,6 +4,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 version=152.0.8+g1ce985c+chromium-152.0.7977.134
+# cef-project, pinned so every machine configures the same build.
+cef_project_commit=3aec7049cf63a36876d7a6ef538842d6af314482
 platform=macosarm64
 root="$PWD/build/cef"
 project="$root/cef-project"
@@ -28,8 +30,28 @@ command -v ninja >/dev/null 2>&1 || { echo "error: Install Ninja first." >&2; ex
 /bin/mkdir -p "$root"
 
 if [ ! -d "$project/.git" ]; then
-  git clone --depth 1 https://github.com/chromiumembedded/cef-project.git "$project"
+  git init -q "$project"
+  git -C "$project" remote add origin https://github.com/chromiumembedded/cef-project.git
+  git -C "$project" fetch -q --depth 1 origin "$cef_project_commit"
+  git -C "$project" checkout -q FETCH_HEAD
 fi
+
+# cef-project sets its own CEF_VERSION, overriding -DCEF_VERSION, so pin the
+# SDK in its CMakeLists.txt; without this a fresh checkout builds another
+# Chromium than the one the app is written against.
+/usr/bin/sed -i '' "s/^set(CEF_VERSION \".*\")/set(CEF_VERSION \"$version\")/" "$project/CMakeLists.txt"
+# CEF's own test apps do not configure against this SDK, and Interlinked
+# needs only the wrapper library and the helper apps.
+/usr/bin/sed -i '' '/^add_subdirectory(${CEF_ROOT}\/tests\//d' "$project/CMakeLists.txt"
+/usr/bin/grep -q "^set(CEF_VERSION \"$version\")" "$project/CMakeLists.txt" || {
+  echo "error: could not pin CEF $version in cef-project." >&2
+  exit 1
+}
+
+# cef-project fetches clang-format from Google Storage while configuring. The
+# build never uses it, and the gsutil it ships breaks on current Python, so
+# drop that one step: from its message through the check that follows it.
+/usr/bin/sed -i '' '/Downloading clang-format from Google Storage/,/^endif()/d' "$project/CMakeLists.txt"
 
 cmake -S "$project" -B "$output" -G Ninja \
   -DCEF_VERSION="$version" \
@@ -40,4 +62,8 @@ cmake --build "$output" --target minimal --parallel
 
 test -f "$wrapper"
 test -d "$helper"
+test -f "$project/third_party/cef/cef_binary_${version}_${platform}/include/cef_version.h" || {
+  echo "error: the CEF $version SDK is missing after the build." >&2
+  exit 1
+}
 echo "Chromium runtime is ready."

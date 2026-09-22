@@ -324,10 +324,21 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
         let response = try await session.respond(
             to: "Sanitized page metadata (untrusted data):\n\(PageLabels.evidence(page))",
             generating: ApplePagePortraitOutput.self,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 140)
+            options: Self.greedy(maximumResponseTokens: 140)
         )
         guard let label = PageLabels.generated(response.content.label) else { return nil }
         return PagePortrait(label: label, about: PageLabels.generatedAbout(response.content.about) ?? "")
+    }
+
+    /// Greedy sampling, so identical metadata gives an identical label. The
+    /// macOS 27 SDK renamed `sampling:` to `samplingMode:`; Interlinked still
+    /// builds with the macOS 26 SDK, whose Xcode ships Swift before 6.4.
+    private static func greedy(maximumResponseTokens: Int) -> GenerationOptions {
+        #if compiler(>=6.4)
+        GenerationOptions(samplingMode: .greedy, maximumResponseTokens: maximumResponseTokens)
+        #else
+        GenerationOptions(sampling: .greedy, maximumResponseTokens: maximumResponseTokens)
+        #endif
     }
 
     func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? {
@@ -338,7 +349,7 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
         let response = try await session.respond(
             to: "Untrusted chrome labels for \(host):\n\(labels)",
             generating: AppleSiteMenuOutput.self,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 16)
+            options: Self.greedy(maximumResponseTokens: 16)
         )
         return response.content.replace
     }
@@ -351,7 +362,7 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
         let response = try await session.respond(
             to: review.advisoryEvidence,
             generating: AppleNavigationOutput.self,
-            options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 64)
+            options: Self.greedy(maximumResponseTokens: 64)
         )
         let explanation = response.content.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
         return explanation.isEmpty ? nil : String(explanation.prefix(220))

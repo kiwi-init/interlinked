@@ -1,0 +1,125 @@
+name: Release
+
+# A tag like v1.2.3 publishes a release; v1.2.3-rc.1 publishes a pre-release.
+# Signing and notarization run only when their secrets are set; without them
+# the DMG is published unsigned and labeled so, for testing the pipeline.
+#
+# Secrets:
+#   DEVELOPER_ID_P12           base64 of the Developer ID Application .p12
+#   DEVELOPER_ID_P12_PASSWORD  its password
+#   NOTARY_KEY_P8              base64 of an App Store Connect API key (.p8)
+#   NOTARY_KEY_ID              that key's ID
+#   NOTARY_ISSUER_ID           the key's issuer ID
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    # Interlinked requires macOS 26 on Apple silicon (M1 or later).
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version from the tag
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          full="${tag#v}"
+          # The app shows 1.2.3 for 1.2.3-rc.1; the build number tells RCs apart.
+          echo "version=${full%%-*}" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          case "$full" in
+            *-rc.*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Install build tools
+        run: brew install xcodegen ninja
+
+      - name: Cache the Chromium SDK
+        uses: actions/cache@v4
+        with:
+          path: build/cef
+          key: cef-${{ runner.os }}-${{ hashFiles('script/bootstrap-chromium') }}
+
+      - name: Import the signing certificate
+        id: signing
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then
+            echo "No signing secrets: building unsigned."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password="$(uuidgen)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$keychain" -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/developer-id.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the notarization key
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          if [ -n "$NOTARY_KEY_P8" ]; then
+            echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            echo "NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the release
+        env:
+          DEVELOPER_ID_IDENTITY: ${{ steps.signing.outputs.identity }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: script/release "${{ steps.version.outputs.version }}" "${{ github.run_number }}"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ steps.signing.outputs.identity != '' }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "Requires macOS 26 on an Apple silicon Mac (M1 or later)."
+            echo
+            if [ "$SIGNED" != "true" ]; then
+              echo "**This build is not signed or notarized.** macOS will refuse to open it until you right-click the app and choose Open."
+              echo
+            fi
+            echo "Jev features use your own OpenRouter key, added in Settings → Intelligence."
+            echo
+            echo "SHA-256: \`$(cut -d' ' -f1 .build/release/*.dmg.sha256)\`"
+          } > "$notes"
+          flags=""
+          [ "${{ steps.version.outputs.prerelease }}" = "true" ] && flags="--prerelease"
+          gh release create "$GITHUB_REF_NAME" .build/release/*.dmg .build/release/*.dmg.sha256 \
+            --title "Interlinked ${{ steps.version.outputs.full }}" \
+            --notes-file "$notes" $flags
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8"
