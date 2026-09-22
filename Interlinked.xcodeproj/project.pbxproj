@@ -721,7 +721,7 @@
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal $(SRCROOT)/blocker";
+				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/build/cef/cef-project/third_party/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64 $(SRCROOT)/blocker";
 				INFOPLIST_FILE = Interlinked/Info.plist;
 				INTERLINKED_JEV_RELAY_URL = "https://interlinked-jev.187-77-224-188.sslip.io/v1/jev";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
@@ -906,7 +906,7 @@
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal $(SRCROOT)/blocker";
+				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/build/cef/cef-project/third_party/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64 $(SRCROOT)/blocker";
 				INFOPLIST_FILE = Interlinked/Info.plist;
 				INTERLINKED_JEV_RELAY_URL = "";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
@@ -1052,7 +1052,7 @@
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal $(SRCROOT)/blocker";
+				HEADER_SEARCH_PATHS = "$(inherited) $(SRCROOT)/build/cef/cef-project/third_party/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64 $(SRCROOT)/blocker";
 				INFOPLIST_FILE = Interlinked/Info.plist;
 				INTERLINKED_JEV_RELAY_URL = "";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";

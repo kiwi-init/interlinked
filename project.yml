@@ -69,7 +69,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
-        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal $(SRCROOT)/blocker"
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project/third_party/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64 $(SRCROOT)/blocker"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project-out/libcef_dll_wrapper $(SRCROOT)/blocker/target/release"
         OTHER_LDFLAGS: "$(inherited) -lcef_dll_wrapper -linterlinked_blocker -framework Cocoa -framework IOSurface"
         CLANG_CXX_LANGUAGE_STANDARD: c++20
