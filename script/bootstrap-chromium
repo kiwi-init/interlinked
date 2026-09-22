@@ -40,6 +40,9 @@ fi
 # SDK in its CMakeLists.txt; without this a fresh checkout builds another
 # Chromium than the one the app is written against.
 /usr/bin/sed -i '' "s/^set(CEF_VERSION \".*\")/set(CEF_VERSION \"$version\")/" "$project/CMakeLists.txt"
+# CEF's own test apps do not configure against this SDK, and Interlinked
+# needs only the wrapper library and the helper apps.
+/usr/bin/sed -i '' '/^add_subdirectory(${CEF_ROOT}\/tests\//d' "$project/CMakeLists.txt"
 /usr/bin/grep -q "^set(CEF_VERSION \"$version\")" "$project/CMakeLists.txt" || {
   echo "error: could not pin CEF $version in cef-project." >&2
   exit 1
