@@ -18,6 +18,8 @@ struct InterlinkedApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Page") { workspace.newPage() }
                     .keyboardShortcut("t", modifiers: .command)
+                Button("New Page Beside") { workspace.newPageBeside() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
                 Button("Close Tab") { workspace.closeActive() }
                     .keyboardShortcut("w", modifiers: .command)
             }
@@ -26,6 +28,9 @@ struct InterlinkedApp: App {
             CommandGroup(replacing: .sidebar) {
                 Button("All Tabs") { workspace.toggleOverview() }
                     .keyboardShortcut("s", modifiers: [.command, .control])
+            }
+            CommandGroup(replacing: .help) {
+                Button("Show Onboarding") { workspace.openOnboarding() }
             }
             CommandMenu("Tab") {
                 Button(workspace.isSplit ? "Move Side Page to Its Own Tab" : "Split View") { workspace.toggleSplitView() }

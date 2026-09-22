@@ -72,6 +72,7 @@ final class Workspace {
     let browserHistory = BrowserHistoryStore()
     let builtIns = PageBuiltIns()
     let usefulInfo = UsefulInfo()
+    let onboarding = OnboardingGuide()
     /// Blurs emails, phone numbers, card and document numbers, keys, and
     /// passwords on every page, for presenting or sharing the screen.
     var sharingScreenMode = SharingScreenModePreference.enabled() {
@@ -84,6 +85,7 @@ final class Workspace {
     var usesSiteMenu = SiteMenuPreference.enabled() {
         didSet {
             SiteMenuPreference.set(usesSiteMenu)
+            noteOnboarding()
             if usesSiteMenu, let pane = activePane {
                 declinedSiteMenu.remove(pane)
                 captureSiteMenu(pane)
@@ -93,6 +95,7 @@ final class Workspace {
         }
     }
     private(set) var siteMenus: [PaneID: SiteMenu] = [:]
+    @ObservationIgnored private var resizeTasks: [PaneID: Task<Void, Never>] = [:]
     /// Set when a page's menu has been read and is about to be shown, so the
     /// bar arrives with the same spectrum glow as an AI-refined page label.
     private(set) var siteMenuEffect: AILabelEffect?
@@ -128,16 +131,20 @@ final class Workspace {
 
     var activePane: PaneID? { activeTab?.active }
 
-    var siteMenu: SiteMenu? { activePane.flatMap { siteMenus[$0] } }
+    var siteMenu: SiteMenu? {
+        guard let pane = activePane else { return nil }
+        return siteMenus[pane]
+    }
 
     var quickTabs: [Tab] {
-        OpenWork.switcherTabs(tabs, current: activeTab?.id)
+        OpenWork.switcherTabs(tabs, current: activeTab?.id, pinned: onboardingTab?.id)
     }
 
     /// The name a tab goes by everywhere: your name for it, else the label
     /// the page handle shows, else the page's own title.
     func title(_ tab: Tab) -> String {
-        OpenWork.title(customName: tab.name, pageTitle: assistance.labels[tab.active] ?? hosts.titles[tab.active],
+        if tab.panes == [onboarding.pane] { return Self.onboardingTitle }
+        return OpenWork.title(customName: tab.name, pageTitle: assistance.labels[tab.active] ?? hosts.titles[tab.active],
                        fallback: surfaces.tabTitle(tab))
     }
 
@@ -190,6 +197,7 @@ final class Workspace {
 
     var isEmptyActivePage: Bool {
         guard let pane = activePane else { return true }
+        if onboarding.contains(pane) { return false }
         return NewTabPage.matches(line: surfaces.line(pane))
     }
 
@@ -224,7 +232,7 @@ final class Workspace {
     }
 
     func navigateActive(_ address: String) {
-        guard let pane = activePane else {
+        guard let pane = activePane, !onboarding.contains(pane) else {
             openAddress(address)
             return
         }
@@ -283,6 +291,7 @@ final class Workspace {
     }
 
     func goSiteHome() {
+        guard !onboarding.contains(activePane) else { return }
         guard let menu = siteMenu, let home = SiteMenuHome.url(menu.home, current: currentPageURL) else { return }
         collapseSiteMenuChrome()
         navigateActive(home.absoluteString)
@@ -337,6 +346,35 @@ final class Workspace {
         }
     }
 
+    /// Responsive sites redraw their header when their page changes size,
+    /// which can bring it back beside the Interlinked menu. Once the size
+    /// settles, read and hide the header again, or restore it if the new
+    /// layout has no menu worth replacing.
+    func paneResized(_ pane: PaneID) {
+        guard usesSiteMenu, !declinedSiteMenu.contains(pane) else { return }
+        resizeTasks[pane]?.cancel()
+        resizeTasks[pane] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled, let self, self.usesSiteMenu, self.paneAlive(pane) else { return }
+            self.resizeTasks[pane] = nil
+            guard self.siteMenus[pane] != nil else {
+                self.captureSiteMenu(pane)
+                return
+            }
+            guard let view = self.hosts.existingBrowser(pane) else { return }
+            let pageURL = view.url
+            let refreshed = await PageTextBridge.refreshSiteMenu(view)
+            guard self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
+                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
+            let accepted = refreshed.flatMap { SiteMenuPolicy.accept($0) }
+                ?? SiteMenuPolicy.baseline(line: self.surfaces.line(pane))
+            if accepted?.replacesChrome != true {
+                await PageTextBridge.showSiteMenu(view)
+            }
+            self.siteMenus[pane] = accepted
+        }
+    }
+
     func restoreSiteHeader(_ pane: PaneID? = nil) {
         let target = pane ?? activePane
         guard let target else { return }
@@ -367,6 +405,10 @@ final class Workspace {
     }
 
     func closeTab(_ id: TabID) {
+        if let pane = onboarding.pane, tabs.first(where: { $0.id == id })?.contains(pane) == true {
+            onboarding.protect()
+            return
+        }
         if activeTab?.id == id { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let selected = activeTab?.id
@@ -467,11 +509,14 @@ final class Workspace {
         downloads.refreshNotificationStatus()
         if ProcessInfo.processInfo.arguments.contains("-interlinked-ui-testing") {
             openTab()
-        } else if let session = Session.read() {
-            restore(session)
-            if tabs.isEmpty { openTab() }
         } else {
-            openTab()
+            if let session = Session.read() { restore(session) }
+            #if DEBUG
+            // Developer option: the whole flow, from the start, every launch.
+            if onboarding.alwaysShow { onboarding.reset() }
+            #endif
+            if onboarding.showsAtLaunch { openOnboarding() }
+            if tabs.isEmpty { openTab() }
         }
         hosts.startMemoryPressureMonitoring(workspace: self)
         if let appDelegate = NSApp.delegate as? AppDelegate {
@@ -552,10 +597,22 @@ final class Workspace {
     // MARK: - Session
 
     func session() -> Session {
-        Session(
+        // Onboarding is rebuilt at launch from its own saved progress.
+        var saved = tabs
+        if let pane = onboarding.pane {
+            saved = tabs.compactMap { tab in
+                guard tab.contains(pane) else { return tab }
+                guard tab.isSplit else { return nil }
+                var rest = tab
+                rest.close(pane)
+                return rest
+            }
+        }
+        let current = activeTab?.id
+        return Session(
             version: 0,
-            tabs: tabs,
-            active: active,
+            tabs: saved,
+            active: saved.firstIndex { $0.id == current } ?? min(active, max(0, saved.count - 1)),
             next_tab: nextTab,
             next_pane: nextPane,
             next_split: nextSplit,
@@ -585,6 +642,7 @@ final class Workspace {
     }
 
     func keep() {
+        noteOnboarding()
         hosts.syncFavicons(tabs: tabs, surfaces: surfaces)
         assistance.prune()
         let session = session()
@@ -606,6 +664,7 @@ final class Workspace {
         tabs.append(tab)
         active = tabs.count - 1
         if let pane = activePane { _ = setKind(pane, .browser) }
+        onboarding.record(.openedTab)
         keep()
     }
 
@@ -687,8 +746,16 @@ final class Workspace {
 
     @discardableResult
     func closePane(_ target: PaneID) -> Bool {
+        // ⌘W and close buttons never close onboarding by accident.
+        if onboarding.contains(target) {
+            onboarding.protect()
+            return false
+        }
         if activePane == target { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.contains(target) }) else { return false }
+        if tabs[index].isSplit, let pane = onboarding.pane, tabs[index].contains(pane) {
+            onboarding.record(.closedPane)
+        }
         if tabs[index].close(target) {
             finishClosing()
             return true
@@ -705,7 +772,229 @@ final class Workspace {
         if let pane = activePane { _ = closePane(pane) }
     }
 
+    // MARK: - Onboarding
+
+    static let onboardingTitle = "Welcome to Interlinked"
+
+    var onboardingTab: Tab? {
+        guard let pane = onboarding.pane else { return nil }
+        return tabs.first { $0.contains(pane) }
+    }
+
+    /// Away from the Onboarding tab with something still to do: the coach
+    /// carries the rest of the instruction onto whatever page is showing.
+    var showsOnboardingCoach: Bool {
+        guard let tab = onboardingTab else { return false }
+        return activeTab?.id != tab.id && onboarding.progress.next != nil && !overviewOpen
+    }
+
+    /// Opens the Onboarding tab first in line, or goes back to it.
+    func openOnboarding() {
+        if editing != nil { discardLine() }
+        overviewOpen = false
+        if let pane = onboarding.pane, tabs.contains(where: { $0.contains(pane) }) {
+            activatePane(pane)
+            return
+        }
+        if onboarding.progress.done.isEmpty { switchOffOnboardingFeatures() }
+        let pane = takePane()
+        tabs.insert(Tab(id: TabID(nextTab), pane: pane), at: 0)
+        nextTab += 1
+        active = 0
+        onboarding.opened(in: pane)
+        assistance.changedTab()
+        keep()
+        prepareOnboardingScene()
+    }
+
+    /// Records a step taken on the Onboarding page, like Next, and sets up
+    /// whatever the scene it leads to needs.
+    func advanceOnboarding(_ step: OnboardingStep) {
+        onboarding.record(step)
+        if step == .finished {
+            closeOnboarding()
+            return
+        }
+        prepareOnboardingScene()
+    }
+
+    /// A scene with a real page opens it beside Onboarding, focused, so its
+    /// features act there. One side pane is reused from scene to scene, and
+    /// a scene without a page closes it.
+    private func prepareOnboardingScene() {
+        guard onboarding.progress.next != nil, let pane = onboarding.pane,
+              let index = tabs.firstIndex(where: { $0.contains(pane) }) else { return }
+        let side = onboarding.sidePane.flatMap { tabs[index].contains($0) ? $0 : nil }
+        guard let page = onboarding.progress.scene.page else {
+            if let side {
+                onboarding.sidePane = nil
+                closePane(side)
+            }
+            return
+        }
+        if activeTab?.id != tabs[index].id { activateTab(index) }
+        let target: PaneID
+        if let existing = side ?? tabs[index].otherPane {
+            target = existing
+        } else {
+            target = takePane()
+            guard tabs[index].split(pane, axis: .columns, new: target, id: SplitID(nextSplit)) else { return }
+            nextSplit += 1
+        }
+        onboarding.sidePane = target
+        // The page gets the room; the instructions need little.
+        tabs[index].ratio = page.onboardingShare
+        let address = page.url.absoluteString
+        if surfaces.line(target) != address {
+            surfaces.setKind(target, .browser)
+            surfaces.setLine(target, address)
+            navigate(target, address)
+        }
+        activatePane(target)
+        assistance.changedTab()
+        keep()
+        restoreFocus()
+    }
+
+    /// Find for me or Critical Reading came back with something to show.
+    func noteOnboardingResult(meaning: Bool, reading: Bool) {
+        guard onboardingTab != nil else { return }
+        if meaning { onboarding.record(.foundWithMeaning) }
+        if reading { onboarding.record(.readCritically) }
+    }
+
+    /// The deliberate way out. It will not open at launch again.
+    func closeOnboarding() {
+        guard let pane = onboarding.pane, let index = tabs.firstIndex(where: { $0.contains(pane) }) else {
+            onboarding.dismissed()
+            return
+        }
+        onboarding.dismissed()
+        if tabs[index].isSplit {
+            tabs[index].close(pane)
+        } else {
+            let selected = activeTab?.id
+            tabs.remove(at: index)
+            active = tabs.firstIndex { $0.id == selected } ?? min(active, max(0, tabs.count - 1))
+        }
+        finishClosing()
+    }
+
+    /// Steps that are states rather than actions: being back on the
+    /// Onboarding tab, and seeing it split.
+    func noteOnboarding() {
+        guard let tab = onboardingTab else { return }
+        if activeTab?.id == tab.id { onboarding.record(.cameBack) }
+        if tab.isSplit { onboarding.record(.split) }
+    }
+
+
+    func binding(for feature: OnboardingFeature) -> Binding<Bool> {
+        switch feature {
+        case .siteMenu:
+            Binding(get: { self.usesSiteMenu }, set: { on in
+                self.usesSiteMenu = on
+                // The menu shows on the focused page: hand focus back to the
+                // real page beside onboarding, where the change happens.
+                if on, let side = self.onboarding.sidePane, self.paneAlive(side) {
+                    self.clickPane(side)
+                    self.captureSiteMenu(side)
+                }
+            })
+        case .appleIntelligence:
+            Binding(
+                get: { self.assistance.appleEnabled && LocalIntelligenceRuntime.isAvailable },
+                set: { on in
+                    // Not set up on this Mac yet: take them to where it is.
+                    if on && !LocalIntelligenceRuntime.isAvailable {
+                        Self.openAppleIntelligenceSettings()
+                        return
+                    }
+                    self.assistance.appleEnabled = on
+                    self.assistance.configure()
+                }
+            )
+        case .jev:
+            Binding(get: { self.assistance.enabled }, set: { on in
+                self.assistance.enabled = on
+                self.assistance.configure()
+            })
+        case .sharingScreen:
+            Binding(get: { self.sharingScreenMode }, set: { self.sharingScreenMode = $0 })
+        case .usefulInfo:
+            Binding(get: { self.usefulInfo.showsAddress && self.usefulInfo.showsContact }, set: { on in
+                self.usefulInfo.showsAddress = on
+                self.usefulInfo.showsContact = on
+            })
+        case .criticalReadingAlwaysOn:
+            Binding(get: { self.assistance.automaticReadingEnabled }, set: { on in
+                if on {
+                    // The same informed consent Settings asks for, before anything is sent.
+                    if self.assistance.automaticReadingConsented {
+                        self.assistance.criticalReadingMode = .automatic
+                        self.assistance.configure()
+                    } else {
+                        self.onboardingAsksReadingConsent = true
+                    }
+                } else {
+                    self.assistance.automaticReadingConsented = false
+                    self.assistance.criticalReadingMode = .onRequest
+                    self.assistance.configure()
+                }
+            })
+        case .adBlocking:
+            Binding(get: { self.builtIns.blockingEnabled }, set: { self.builtIns.blockingEnabled = $0 })
+        case .darkPages:
+            Binding(get: { self.builtIns.darkMode != .off }, set: { self.builtIns.darkMode = $0 ? .system : .off })
+        }
+    }
+
+    /// A line under a feature's description when it cannot simply switch on.
+    func note(for feature: OnboardingFeature) -> String? {
+        switch feature {
+        case .appleIntelligence where !LocalIntelligenceRuntime.isAvailable:
+            "Off on this Mac. The switch opens System Settings."
+        default: nil
+        }
+    }
+
+    static func openAppleIntelligenceSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Siri-Settings.extension") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Set while the Onboarding page shows the Always-on privacy warning.
+    var onboardingAsksReadingConsent = false
+
+    /// Features a fresh onboarding introduces start off, so switching them
+    /// on is part of learning them.
+    private func switchOffOnboardingFeatures() {
+        usesSiteMenu = false
+        builtIns.blockingEnabled = false
+        builtIns.darkMode = .off
+        assistance.automaticReadingConsented = false
+        assistance.criticalReadingMode = .onRequest
+        sharingScreenMode = false
+        usefulInfo.showsAddress = false
+        usefulInfo.showsContact = false
+        assistance.appleEnabled = false
+        assistance.enabled = false
+        assistance.configure()
+    }
+
+    /// ⌘⇧T: a new page beside this one, or a new tab when already split.
+    func newPageBeside() {
+        if activeTab?.canSplit == true { splitActive() } else { newPage() }
+    }
+
     // MARK: - Split view
+
+    /// Sets the first page's share of the width for the active tab's split.
+    func setSplitRatio(_ ratio: Double) {
+        guard activeTab?.isSplit == true else { return }
+        tabs[active].ratio = ratio.clamped(to: Tab.ratioRange)
+        keep()
+    }
 
     var isSplit: Bool { activeTab?.isSplit ?? false }
 
@@ -773,6 +1062,7 @@ final class Workspace {
 
     /// Best title for one page: what it calls itself, else where it is.
     func title(_ pane: PaneID) -> String {
+        if onboarding.contains(pane) { return Self.onboardingTitle }
         let line = surfaces.line(pane)
         let fallback = line.isEmpty ? "New page" : surfaces.kind(pane).compactLabel(for: line)
         return OpenWork.title(customName: nil, pageTitle: assistance.labels[pane] ?? hosts.titles[pane],
@@ -891,7 +1181,7 @@ final class Workspace {
 
     func openHistoryVisit(_ visit: BrowserHistoryVisit) {
         pageHistoryOpen = false
-        guard let pane = activePane else {
+        guard let pane = activePane, !onboarding.contains(pane) else {
             openAddress(visit.url)
             return
         }
@@ -913,6 +1203,9 @@ final class Workspace {
         let written = editing.value
         self.editing = nil
         switch editing.target {
+        case .pane(let pane) where onboarding.contains(pane):
+            // The Onboarding tab is not a web page: an address opens a new tab.
+            if !written.isEmpty { openAddress(written) }
         case .pane(let pane):
             if surfaces.kind(pane) == .blank && !written.isEmpty {
                 surfaces.setKind(pane, .browser)
@@ -1055,6 +1348,7 @@ final class Workspace {
     }
 
     private func canReuseForExternalURL(_ pane: PaneID) -> Bool {
+        guard !onboarding.contains(pane) else { return false }
         let line = surfaces.line(pane).trimmingCharacters(in: .whitespacesAndNewlines)
         guard line.isEmpty || line == "about:blank" else { return false }
         guard let url = hosts.existingBrowser(pane)?.url else { return true }
@@ -1204,6 +1498,8 @@ final class Workspace {
         switch (character, modifiers) {
         case ("t", .command):
             newPage()
+        case ("t", [.command, .shift]):
+            newPageBeside()
         case ("s", [.command, .control]):
             toggleOverview()
         case ("]", .command):

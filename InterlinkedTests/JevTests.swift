@@ -449,6 +449,11 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertTrue(PageTextBridge.install.contains("nodeText(node)!==item.text"))
         XCTAssertFalse(PageTextBridge.install.contains("clean(node.innerText)!==item.text"))
     }
+    func testPageBridgeWorksOnPlainHTTPPages() {
+        // randomUUID is missing outside secure contexts; the bridge must not depend on it.
+        XCTAssertTrue(PageTextBridge.install.contains("crypto.randomUUID?.()"))
+        XCTAssertTrue(PageTextBridge.install.contains("crypto.getRandomValues"))
+    }
     func testPageBridgeExtractsTheWholePage() {
         XCTAssertFalse(PageTextBridge.install.contains("passages.length>=limit"))
         XCTAssertTrue(PageTextBridge.install.contains("return {document:documentID,url:location.href,passages};"))

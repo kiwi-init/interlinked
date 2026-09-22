@@ -19,16 +19,14 @@ struct ContentView: View {
                 }
                 .padding(18)
             }
-            .overlay(alignment: .top) {
-                if workspace.siteMenu != nil {
-                    SiteMenuBar(palette: palette, available: geometry.size)
-                        .padding(.top, 18)
-                        .padding(.horizontal, 160)
-                }
-            }
             .overlay(alignment: .topTrailing) {
                 PageActions(palette: palette, available: geometry.size)
                     .padding(18)
+            }
+            .overlay {
+                // Where the eye is after ⌘T, just below the new tab page's quote.
+                OnboardingCoach(palette: palette)
+                    .offset(y: 120)
             }
         }
         .background(palette.pane)

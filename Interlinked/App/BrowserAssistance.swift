@@ -36,6 +36,11 @@ final class BrowserAssistance {
     private(set) var grants: [PaneID: String] = [:]
     var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.object(forKey: "jev.labels") as? Bool ?? true
+    /// Every on-device model call: tab names and descriptions, link warnings,
+    /// and the site menu check. Off, the browser uses its own rules for each.
+    var appleEnabled = UserDefaults.standard.object(forKey: "apple.enabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(appleEnabled, forKey: "apple.enabled") }
+    }
     var criticalReadingMode = CriticalReadingMode()
     var automaticReadingConsented = AutomaticReadingConsent.accepted()
     let originGrants = AIContentGrantStore()
@@ -155,7 +160,8 @@ final class BrowserAssistance {
     }
 
     func shouldReplaceSiteMenu(host: String, labels: String) async -> Bool? {
-        await intelligence.shouldReplaceSiteMenu(host: host, labels: labels)
+        guard appleEnabled else { return nil }
+        return await intelligence.shouldReplaceSiteMenu(host: host, labels: labels)
     }
 
     func configure() {
@@ -236,6 +242,7 @@ final class BrowserAssistance {
         cancel("find"); cancel("reading"); cancel("groups"); busy = false; matches = []; findings = []; groups = []
     }
     private func describePage(_ pane: PaneID, page: PageMetadata) {
+        guard appleEnabled else { return }
         let key = "label-\(pane.rawValue)", revision = token("label-\(pane.rawValue)")
         tasks[key] = Task { [weak self] in
             guard let self else { return }
@@ -254,7 +261,8 @@ final class BrowserAssistance {
     }
 
     func navigationAdvice(_ review: NavigationReview) async -> String? {
-        await intelligence.navigationAdvice(review)
+        guard appleEnabled else { return nil }
+        return await intelligence.navigationAdvice(review)
     }
 
     func openFind() {
@@ -425,6 +433,7 @@ final class BrowserAssistance {
                     if !self.accepts(key, revision) || self.panel != .reading { return }
                     if shown {
                         self.readingResults[pane] = ReadingResult(document: extract.document, findings: self.findings, status: self.status)
+                        self.workspace?.noteOnboardingResult(meaning: false, reading: !self.findings.isEmpty)
                     } else {
                         self.findings = []; self.status = "The page changed. Run the check again."
                         self.readingResults.removeValue(forKey: pane)
@@ -434,6 +443,7 @@ final class BrowserAssistance {
                     self.matches = meaningDecision?.matches ?? []
                     self.status = self.matches.isEmpty ? "No clear meaning matches. \(coverage)" : "\(self.matches.count) possible matches. \(coverage)"
                     if let first = self.matches.first { self.show(first) }
+                    self.workspace?.noteOnboardingResult(meaning: !self.matches.isEmpty, reading: false)
                 }
             } catch {
                 guard self.accepts(key, revision) else { return }

@@ -9,6 +9,8 @@ struct SiteMenuBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var palette: Palette
     var available: CGSize
+    /// Kept clear on each side: the window's corner controls, or less in a split pane.
+    var margin: CGFloat = 160
     @State private var searchDraft = ""
 
     /// What the pill is currently shaped around.
@@ -31,7 +33,7 @@ struct SiteMenuBar: View {
 
     private var menu: SiteMenu? { workspace.siteMenu }
     /// Room for the page actions on the right, matched on the left so the pill stays centered.
-    private var maxWidth: CGFloat { max(220, available.width - 320) }
+    private var maxWidth: CGFloat { max(220, available.width - margin * 2) }
 
     var body: some View {
         if let menu, showsBar(menu) {

@@ -30,6 +30,7 @@ struct PageHandle: View {
     private var trustedOrigin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
     private var identity: String {
         guard let pane else { return "All tabs" }
+        if workspace.onboarding.contains(pane) { return Workspace.onboardingTitle }
         let label = workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
         return label.isEmpty ? "Search or enter an address" : label
     }
@@ -668,10 +669,16 @@ extension View {
     func pointingHandCursor() -> some View {
         background(PointingCursorRegion())
     }
+
+    /// A region that shows `cursor` instead of the pointing hand, like a divider's.
+    func cursorRegion(_ cursor: NSCursor) -> some View {
+        background(PointingCursorRegion(cursor: cursor))
+    }
 }
 
 private struct PointingCursorRegion: NSViewRepresentable {
     @Environment(\.isEnabled) private var isEnabled
+    var cursor: NSCursor = .pointingHand
     fileprivate static let regions = NSHashTable<CursorView>.weakObjects()
 
     final class CursorView: NSView {
@@ -692,7 +699,7 @@ private struct PointingCursorRegion: NSViewRepresentable {
     }
 
     func updateNSView(_ view: CursorView, context: Context) {
-        view.cursor = isEnabled ? .pointingHand : .arrow
+        view.cursor = isEnabled ? cursor : .arrow
         view.window?.invalidateCursorRects(for: view)
     }
 }
@@ -776,6 +783,10 @@ enum ChromeCursor {
             return view.bounds.contains(view.convert(location, from: nil))
         }
         if !controls.isEmpty {
+            // A special cursor, like a divider's resize, wins over the hand.
+            if let special = controls.first(where: { $0.cursor != .pointingHand && $0.cursor != .arrow }) {
+                return special.cursor
+            }
             return controls.contains { $0.cursor == .pointingHand } ? .pointingHand : .arrow
         }
         return PageControlRegion.contains(location, in: window) ? .arrow : nil
