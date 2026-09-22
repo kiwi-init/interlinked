@@ -7,7 +7,8 @@ enum Control {
         "new-tab [kind]",
         "open-url URL",
         "sharing-mode on|off|state|check",
-        "split-view on|off|other|drop TAB left|right|state",
+        "split-view on|off|other|ratio N|drop TAB left|right|state",
+        "onboarding open|close|reset|state",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -31,7 +32,7 @@ enum Control {
         "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
-        "site-menu [state|search|close|home]",
+        "site-menu [state|search|close|home|enable|disable|page]",
         "quit",
     ]
 
@@ -79,6 +80,27 @@ enum Control {
             case "search": workspace.beginSiteMenuSearch()
             case "close": workspace.collapseSiteMenuChrome()
             case "home": workspace.goSiteHome()
+            case "page":
+                // Writes what the page shows at the top, to check for a doubled header.
+                guard let view = workspace.activePane.flatMap(workspace.hosts.existingBrowser) else { return error("no loaded web page") }
+                Task { @MainActor in
+                    let report = try? await view.evaluateJavaScript("""
+                    (() => {
+                      const hidden = [...document.querySelectorAll('[data-interlinked-site-menu]')]
+                        .filter(n => n.isConnected && getComputedStyle(n).visibility === 'hidden').length;
+                      const shown = [...document.querySelectorAll('a[href],button')].filter(el => {
+                        const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+                        return r.bottom > 0 && r.top < 120 && r.width > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+                      }).map(el => (el.innerText || '').trim()).filter(Boolean).slice(0, 12);
+                      return {hidden, siteLinksAtTop: shown};
+                    })()
+                    """)
+                    let output = ProcessInfo.processInfo.environment["INTERLINKED_SITE_MENU_REPORT"] ?? "/tmp/interlinked-site-menu-report.json"
+                    try? json(["report": report ?? NSNull()]).write(toFile: output, atomically: true, encoding: .utf8)
+                }
+                return ok()
+            case "enable": workspace.usesSiteMenu = true
+            case "disable": workspace.usesSiteMenu = false
             case "state", nil: break
             default: return error("usage: site-menu [state|search|close]")
             }
@@ -426,11 +448,34 @@ enum Control {
                 return error("builtins takes state, blocking on|off, or dark off|system|always")
             }
 
+        case "onboarding":
+            switch words.first ?? "state" {
+            case "open": workspace.openOnboarding()
+            case "close": workspace.closeOnboarding()
+            case "reset": workspace.onboarding.reset()
+            case "state": break
+            default: return error("onboarding takes open, close, reset, or state")
+            }
+            return json([
+                "open": workspace.onboarding.pane != nil,
+                "focused": workspace.onboarding.contains(workspace.activePane),
+                "scene": workspace.onboarding.progress.scene.id,
+                "done": workspace.onboarding.progress.done.map(\.rawValue),
+                "next": workspace.onboarding.progress.next?.rawValue ?? "",
+                "notice": workspace.onboarding.notice ?? "",
+                "coach": workspace.showsOnboardingCoach,
+                "shortcut_1": workspace.quickTabs.first.map { workspace.title($0) } ?? "",
+                "tabs": workspace.tabs.count,
+            ])
+
         case "split-view":
             switch words.first ?? "state" {
             case "on": if !workspace.isSplit { workspace.splitActive() }
             case "off": workspace.unsplit()
             case "other": workspace.focusOtherPane()
+            case "ratio":
+                guard words.count == 2, let value = Double(words[1]) else { return error("split-view ratio takes a number") }
+                workspace.setSplitRatio(value)
             case "drop":
                 guard words.count == 3, let raw = UInt64(words[1]), ["left", "right"].contains(words[2]) else {
                     return error("split-view drop takes a tab id and left or right")
@@ -445,6 +490,7 @@ enum Control {
                 "active": workspace.activePane.map { Int($0.rawValue) } ?? 0,
                 "tabs": workspace.tabs.count,
                 "tab_ids": workspace.tabs.map { Int($0.id.rawValue) },
+                "ratio": workspace.activeTab?.splitRatio ?? 0.5,
             ])
 
         case "sharing-mode":

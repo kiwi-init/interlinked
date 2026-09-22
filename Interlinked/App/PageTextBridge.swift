@@ -15,7 +15,10 @@ extension PageJavaScriptEvaluating {
 @MainActor enum PageTextBridge {
     static let install = #"""
     if (!globalThis.interlinkedContext) {
-      const documentID = crypto.randomUUID();
+      // crypto.randomUUID exists only on secure (https) pages; plain http
+      // sites still get a random ID from getRandomValues, which works anywhere.
+      const documentID = crypto.randomUUID?.()
+        ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
       const ids = new WeakMap(), nodes = new Map(); let next = 0;
       let stopReading, lastLink;
       let siteMenuNode, siteMenuPrevious, siteMenuSpacer;
@@ -448,6 +451,15 @@ extension PageJavaScriptEvaluating {
           }
           return true;
         },
+        // After the page re-lays itself out, for example on resize: restore,
+        // read again, and hide the header now on screen, all in one task so the
+        // site's own header never paints in between.
+        refreshSiteMenu() {
+          this.showSiteMenu();
+          const menu=this.siteMenu();
+          if (menu && menu.replacesChrome) this.hideSiteMenu();
+          return menu;
+        },
         showSiteMenu() {
           const saved=Array.isArray(siteMenuPrevious)?siteMenuPrevious:[];
           for (const prev of saved) {
@@ -489,6 +501,9 @@ extension PageJavaScriptEvaluating {
     }
     static func siteMenu<View: PageJavaScriptEvaluating>(_ view: View) async -> SiteMenu? {
         try? await value(view, call: "return interlinkedContext.siteMenu();", type: SiteMenu.self)
+    }
+    static func refreshSiteMenu<View: PageJavaScriptEvaluating>(_ view: View) async -> SiteMenu? {
+        try? await value(view, call: "return interlinkedContext.refreshSiteMenu();", type: SiteMenu.self)
     }
     static func hideSiteMenu<View: PageJavaScriptEvaluating>(_ view: View) async -> Bool {
         (try? await execute(view, body: "return globalThis.interlinkedContext?.hideSiteMenu() ?? false;")) as? Bool ?? false

@@ -172,10 +172,48 @@ private struct GeneralSettingsPane: View {
                     Text("Interlinked tells you when a download finishes or fails.")
                 }
             }
+
+            #if DEBUG
+            DeveloperSection()
+            #endif
         }
         .settingsPane()
     }
 }
+
+#if DEBUG
+/// Debug builds only. Not compiled into TestFlight or release.
+private struct DeveloperSection: View {
+    @Environment(Workspace.self) private var workspace
+
+    var body: some View {
+        @Bindable var onboarding = workspace.onboarding
+        Section {
+            Toggle(isOn: $onboarding.alwaysShow) {
+                Text("Always show onboarding")
+                Text("Opens the Onboarding tab at every launch, starting from the first scene.")
+            }
+            .toggleStyle(PointingSwitch())
+            .accessibilityIdentifier("settings-debug-onboarding")
+            LabeledContent {
+                HStack(spacing: 8) {
+                    Button("Reset Progress") { workspace.onboarding.reset() }
+                        .pointingHandCursor()
+                    Button("Show Now", action: workspace.openOnboarding)
+                        .pointingHandCursor()
+                }
+            } label: {
+                Text("Onboarding")
+                Text("Scene \(workspace.onboarding.progress.scene.id) of \(OnboardingScene.all.count)")
+            }
+        } header: {
+            Text("Developer")
+        } footer: {
+            SettingsFooter("Shown in debug builds only.")
+        }
+    }
+}
+#endif
 
 // MARK: - Pages
 
@@ -348,12 +386,20 @@ private struct IntelligenceSettingsPane: View {
                 SettingsFooter("An anti-bias aid, not a fact checker. Read the highlighted source and decide for yourself.")
             }
 
-            Section("Page labels") {
+            Section("Apple Intelligence") {
+                Toggle(isOn: workspace.binding(for: .appleIntelligence)) {
+                    Text("Use Apple Intelligence")
+                    Text(workspace.note(for: .appleIntelligence)
+                         ?? "Tab names, link warnings, and the site menu check. Runs on this Mac; nothing it reads leaves it.")
+                }
+                .toggleStyle(PointingSwitch())
+                .accessibilityIdentifier("settings-apple-intelligence")
                 Toggle(isOn: $assistant.automaticLabels) {
                     Text("Refine page labels")
                     Text("Apple Intelligence writes a short tab label from the page's title, headings, and description.")
                 }
                 .toggleStyle(PointingSwitch())
+                .disabled(!assistant.appleEnabled)
                 .onChange(of: assistant.automaticLabels) { _, _ in assistant.configure() }
             }
         }

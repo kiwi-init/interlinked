@@ -388,8 +388,13 @@ struct Tab: Codable, Equatable, Identifiable {
     var root: Pane
     var active: PaneID
     var name: String?
+    /// The first page's share of the width in split view. Nil is half.
+    var ratio: Double?
+
+    static let ratioRange = 0.2...0.8
 
     var panes: [PaneID] { root.leaves() }
+    var splitRatio: Double { min(max(ratio ?? 0.5, Self.ratioRange.lowerBound), Self.ratioRange.upperBound) }
     var isSplit: Bool { panes.count > 1 }
     var canSplit: Bool { panes.count < Self.maxPanes }
     /// The pane beside the focused one in split view.
@@ -418,6 +423,7 @@ struct Tab: Codable, Equatable, Identifiable {
     mutating func close(_ target: PaneID) -> Bool {
         if let focus = root.close(target) {
             active = focus
+            if !isSplit { ratio = nil }
             return true
         }
         return false

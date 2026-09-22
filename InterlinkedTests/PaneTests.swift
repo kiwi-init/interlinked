@@ -284,6 +284,25 @@ final class SplitViewTests: XCTestCase {
         XCTAssertEqual(tab.panes.count, Tab.maxPanes)
     }
 
+    func testASplitRemembersItsRatioUntilItEnds() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertEqual(tab.splitRatio, 0.5)
+        _ = tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        tab.ratio = 0.95
+        XCTAssertEqual(tab.splitRatio, Tab.ratioRange.upperBound, "neither page can be squeezed away")
+        tab.ratio = 0.34
+        XCTAssertEqual(tab.splitRatio, 0.34)
+        tab.close(PaneID(2))
+        XCTAssertNil(tab.ratio)
+    }
+
+    func testTabsSavedBeforeRatiosStillLoad() throws {
+        let old = #"{"id":1,"root":{"leaf":1},"active":1}"#
+        let tab = try JSONDecoder().decode(Tab.self, from: Data(old.utf8))
+        XCTAssertNil(tab.ratio)
+        XCTAssertEqual(tab.splitRatio, 0.5)
+    }
+
     func testReplacingAPageKeepsItsSide() {
         var root = Pane.leaf(PaneID(1))
         _ = root.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
