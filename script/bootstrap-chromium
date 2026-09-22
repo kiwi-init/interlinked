@@ -31,6 +31,11 @@ if [ ! -d "$project/.git" ]; then
   git clone --depth 1 https://github.com/chromiumembedded/cef-project.git "$project"
 fi
 
+# cef-project fetches clang-format from Google Storage while configuring. The
+# build never uses it, and the gsutil it ships breaks on current Python, so
+# drop that one step: from its message through the check that follows it.
+/usr/bin/sed -i '' '/Downloading clang-format from Google Storage/,/^endif()/d' "$project/CMakeLists.txt"
+
 cmake -S "$project" -B "$output" -G Ninja \
   -DCEF_VERSION="$version" \
   -DCEF_PLATFORM="$platform" \
