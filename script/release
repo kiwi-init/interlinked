@@ -1,0 +1,100 @@
+#!/bin/sh
+# Build a downloadable Interlinked release: a DMG, signed with Developer ID and
+# notarized when the credentials are present, unsigned otherwise.
+#
+#   script/release 1.2.3 [build-number]
+#
+# Signing uses DEVELOPER_ID_IDENTITY ("Developer ID Application: …") from the
+# login or a temporary keychain. Notarization uses an App Store Connect API
+# key: NOTARY_KEY_PATH (.p8), NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Without an
+# identity the DMG is built unsigned and named so, for testing the pipeline.
+#
+# Apple silicon only: the pinned Chromium SDK and the blocker are arm64.
+#
+# Direct downloads have no App Store receipt, so they cannot use the Jev relay:
+# Jev runs with the tester's own OpenRouter key from Settings.
+set -eu
+cd "$(dirname "$0")/.."
+
+version=${1:?usage: script/release <version> [build-number]}
+build_number=${2:-1}
+case "$version" in
+  *[!0-9.]* | "" | .* | *. ) echo "error: version must look like 1.2.3 (got $version)" >&2; exit 64 ;;
+esac
+
+identity=${DEVELOPER_ID_IDENTITY:-}
+team=${DEVELOPMENT_TEAM:-57249C654W}
+out="$PWD/.build/release"
+archive="$out/Interlinked.xcarchive"
+rm -rf "$out"
+mkdir -p "$out"
+
+xcodegen generate
+script/bootstrap-chromium
+
+# The identity has spaces, so the signing settings travel as positional arguments.
+if [ -n "$identity" ]; then
+  set -- CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$identity" "DEVELOPMENT_TEAM=$team"
+else
+  set -- CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+fi
+
+xcodebuild \
+  -project Interlinked.xcodeproj \
+  -scheme Interlinked \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  -archivePath "$archive" \
+  ARCHS=arm64 \
+  MARKETING_VERSION="$version" \
+  CURRENT_PROJECT_VERSION="$build_number" \
+  INTERLINKED_JEV_RELAY_URL= \
+  "$@" \
+  archive
+
+app="$out/Interlinked.app"
+ditto "$archive/Products/Applications/Interlinked.app" "$app"
+frameworks="$app/Contents/Frameworks"
+
+if [ -n "$identity" ]; then
+  # Notarization needs every Mach-O signed with the hardened runtime and a
+  # secure timestamp. The build signs Chromium without timestamps to keep
+  # local builds fast, so re-sign inside-out: libraries, framework, helpers,
+  # then the app that seals them.
+  sign() { codesign --force --options runtime --timestamp --sign "$identity" "$@"; }
+  for library in "$frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/"*.dylib; do
+    sign "$library"
+  done
+  sign "$frameworks/Chromium Embedded Framework.framework"
+  for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
+    sign --entitlements script/chromium-helper.entitlements "$frameworks/Interlinked Helper${suffix}.app"
+  done
+  sign --entitlements script/release.entitlements "$app"
+  codesign --verify --deep --strict --verbose=2 "$app"
+fi
+
+name="Interlinked-$version"
+[ -n "$identity" ] || name="$name-unsigned"
+dmg="$out/$name.dmg"
+stage="$out/dmg"
+mkdir -p "$stage"
+ditto "$app" "$stage/Interlinked.app"
+ln -s /Applications "$stage/Applications"
+hdiutil create -volname "Interlinked $version" -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$dmg" >/dev/null
+rm -rf "$stage"
+
+if [ -n "$identity" ]; then
+  codesign --force --timestamp --sign "$identity" "$dmg"
+  if [ -n "${NOTARY_KEY_PATH:-}" ]; then
+    xcrun notarytool submit "$dmg" \
+      --key "$NOTARY_KEY_PATH" --key-id "${NOTARY_KEY_ID:?}" --issuer "${NOTARY_ISSUER_ID:?}" \
+      --wait
+    xcrun stapler staple "$dmg"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+  else
+    echo "warning: signed but not notarized; set NOTARY_KEY_PATH, NOTARY_KEY_ID, NOTARY_ISSUER_ID." >&2
+  fi
+fi
+
+shasum -a 256 "$dmg" | tee "$dmg.sha256"
+echo "$dmg"

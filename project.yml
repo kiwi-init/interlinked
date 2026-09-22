@@ -6,13 +6,13 @@ configs:
 options:
   bundleIdPrefix: computer.interlinked
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "26.0"
   createIntermediateGroups: true
   defaultConfig: Debug
   xcodeVersion: "16.0"
 settings:
   base:
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: targeted
     ENABLE_HARDENED_RUNTIME: YES

@@ -6,4 +6,4 @@ PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 command -v cargo >/dev/null 2>&1 || { echo "error: Install Rust first (brew install rust)." >&2; exit 1; }
 # Xcode's SDK variables confuse the host toolchain cargo uses for build scripts.
 unset SDKROOT MACOSX_DEPLOYMENT_TARGET 2>/dev/null || true
-MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release --locked
+MACOSX_DEPLOYMENT_TARGET=26.0 cargo build --release --locked
