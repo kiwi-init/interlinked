@@ -47,7 +47,10 @@ jobs:
           esac
 
       - name: Install build tools
-        run: brew install xcodegen ninja
+        run: |
+          brew install xcodegen ninja
+          # CEF's project setup downloads a tool with gsutil, which needs six.
+          python3 -m pip install --quiet --break-system-packages six
 
       - name: Cache the Chromium SDK
         uses: actions/cache@v4
