@@ -33,6 +33,20 @@ codesign -d --entitlements :- "$app" 2>/dev/null | \
   plutil -extract 'com\.apple\.security\.app-sandbox' raw -o - - | \
   /usr/bin/grep -qx true
 
+# Issue #14: iCloud Keychain passkeys for arbitrary sites stay unavailable
+# until Apple approves the managed browser entitlement and the archive is
+# signed with it. Bypass only for emergency releases that knowingly ship
+# without passkeys: INTERLINKED_ALLOW_MISSING_PASSKEY_ENTITLEMENT=1.
+if ! "$PWD/script/assert-passkey-entitlement" "$app"; then
+  if [ "${INTERLINKED_ALLOW_MISSING_PASSKEY_ENTITLEMENT:-}" = "1" ]; then
+    echo "warning: shipping a TestFlight build without iCloud Keychain passkeys." >&2
+  else
+    echo "Set INTERLINKED_ALLOW_MISSING_PASSKEY_ENTITLEMENT=1 to ship anyway," >&2
+    echo "or check approval status with script/assert-passkey-entitlement." >&2
+    exit 1
+  fi
+fi
+
 rm -rf "$export_path"
 
 xcodebuild \

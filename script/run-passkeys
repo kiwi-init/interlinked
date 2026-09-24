@@ -1,0 +1,30 @@
+#!/bin/sh
+# Build a Debug app with Apple's managed browser passkey capability and open it.
+# Fails until Apple approves the entitlement request for this team, so the
+# failure itself is the approval status check (issue #14). Ordinary
+# development keeps using script/run, which stays ad-hoc signed and
+# entitlement-free on purpose.
+set -eu
+cd "$(dirname "$0")/.."
+
+if [ ! -f Interlinked.xcodeproj/project.pbxproj ]; then
+  xcodegen generate
+fi
+
+if [ ! -f build/cef/cef-project-out/libcef_dll_wrapper/libcef_dll_wrapper.a ]; then
+  script/bootstrap-chromium
+fi
+
+xcodebuild \
+  -project Interlinked.xcodeproj \
+  -scheme Interlinked \
+  -configuration Debug \
+  -derivedDataPath build-passkeys \
+  -destination 'platform=macOS' \
+  -allowProvisioningUpdates \
+  CODE_SIGN_ENTITLEMENTS=Interlinked/InterlinkedPasskeys.entitlements \
+  build
+
+script/assert-passkey-entitlement build-passkeys/Build/Products/Debug/Interlinked.app
+
+open build-passkeys/Build/Products/Debug/Interlinked.app

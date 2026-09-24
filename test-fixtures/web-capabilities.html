@@ -45,6 +45,12 @@
 </section>
 
 <section>
+  <h2>Passkeys</h2>
+  <button id="passkey-probe">Probe platform capability</button>
+  <output id="passkeys">No result yet. Registration and authentication need a real provider and Touch ID.</output>
+</section>
+
+<section>
   <h2>Downloads</h2>
   <a href="/download/known" download>Known length</a>
   <a href="/download/unknown" download>Unknown length</a>
@@ -101,6 +107,17 @@
     if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this Chromium build.'; return; }
     try { permissions.textContent = `Notification permission: ${await Notification.requestPermission()}`; }
     catch (error) { permissions.textContent = `Notifications failed: ${error.name}: ${error.message}`; }
+  };
+  document.querySelector('#passkey-probe').onclick = async () => {
+    const passkeys = document.querySelector('#passkeys');
+    if (!('PublicKeyCredential' in window)) { passkeys.textContent = 'WebAuthn unavailable in this Chromium build.'; return; }
+    try {
+      const [platform, conditional] = await Promise.all([
+        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.() ?? 'unknown',
+        PublicKeyCredential.isConditionalMediationAvailable?.() ?? 'unknown',
+      ]);
+      passkeys.textContent = `Platform authenticator: ${platform}. Conditional mediation: ${conditional}.`;
+    } catch (error) { passkeys.textContent = `Probe failed: ${error.name}: ${error.message}`; }
   };
   const popups = document.querySelector('#popups');
   window.addEventListener('message', event => {
