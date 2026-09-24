@@ -672,8 +672,8 @@ final class SurfaceTests: XCTestCase {
 
     func testSearchURLDisplaysTheOriginalWordsAndLiteralPlusSigns() {
         XCTAssertEqual(CompactLine.editable("https://www.google.com/search?q=interlinked+browser&source=abc"), "interlinked browser")
-        XCTAssertEqual(CompactLine.editable(address(from: "C++ & café").absoluteString), "C++ & café")
-        XCTAssertEqual(Kind.browser.compactLabel(for: address(from: "interlinked browser").absoluteString), "interlinked browser")
+        XCTAssertEqual(CompactLine.editable(address(from: "C++ & café", provider: .google).absoluteString), "C++ & café")
+        XCTAssertEqual(Kind.browser.compactLabel(for: address(from: "interlinked browser", provider: .google).absoluteString), "interlinked browser")
         XCTAssertNil(CompactLine.searchQuery("https://google.com.evil.test/search?q=fake"))
         XCTAssertNil(CompactLine.searchQuery("https://example.com/search?q=real"))
     }
@@ -682,22 +682,23 @@ final class SurfaceTests: XCTestCase {
         let data = """
         ["space", ["SpaceX", " spacex ", "space station", "space needle", "space weather"]]
         """.data(using: .utf8)!
-        let results = SearchResult.parse(data)
+        let results = SearchResult.remote(SearchProvider.google.parseSuggestions(data), from: .google, searchingWith: .google)
         XCTAssertEqual(results.map(\.title), ["SpaceX", "space station", "space needle"])
         XCTAssertEqual(results.compactMap { URLComponents(url: $0.url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value },
                        ["SpaceX", "space station", "space needle"])
         XCTAssertTrue(results.allSatisfy { $0.url.host == "www.google.com" && $0.url.path == "/search" })
-        XCTAssertTrue(SearchResult.parse(Data("<broken>".utf8)).isEmpty)
+        XCTAssertTrue(results.allSatisfy { $0.source == .provider(.google) })
+        XCTAssertTrue(SearchProvider.google.parseSuggestions(Data("<broken>".utf8)).isEmpty)
     }
 
     func testBrowserSearchesWordsAndPreservesSearchPunctuation() {
         for query in ["interlinked browser", "weather", "C++ & café #1", "site:paper.design", "what is https://example.com"] {
-            let url = address(from: "  " + query + "  ")
+            let url = address(from: "  " + query + "  ", provider: .google)
             XCTAssertEqual(url.host, "www.google.com")
             XCTAssertEqual(url.path, "/search")
             XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, query)
         }
-        XCTAssertTrue(address(from: "C++ tutorial").absoluteString.contains("C%2B%2B"))
+        XCTAssertTrue(address(from: "C++ tutorial", provider: .google).absoluteString.contains("C%2B%2B"))
     }
 
     func testBrowserKeepsURLsAndLocalDevelopmentAddresses() {

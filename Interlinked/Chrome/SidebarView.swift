@@ -58,7 +58,7 @@ struct WorkspaceOverview: View {
                 .padding(2)
                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button { workspace.openAddress(query) } label: {
-                        Text(navigationURL(from: query) == nil ? "Search Google for \"\(query)\"  ↵" : "Open \(query)  ↵")
+                        Text(navigationURL(from: query) == nil ? "Search \(workspace.search.provider.name) for \"\(query)\"  ↵" : "Open \(query)  ↵")
                         .font(.system(size: 12))
                         .foregroundStyle(palette.textDim)
                         .frame(maxWidth: .infinity, alignment: .leading)
