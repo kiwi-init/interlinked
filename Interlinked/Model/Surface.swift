@@ -110,19 +110,11 @@ enum CompactLine {
 
     static func searchQuery(_ line: String) -> String? {
         guard let parts = URLComponents(string: line),
-              let host = parts.host?.lowercased() else { return nil }
-        let key: String
-        switch host {
-        case "google.com", "www.google.com", "google.com.br", "www.google.com.br", "bing.com", "www.bing.com":
-            guard parts.path == "/search" else { return nil }
-            key = "q"
-        case "duckduckgo.com", "www.duckduckgo.com": key = "q"
-        default: return nil
-        }
+              SearchProvider.allCases.contains(where: { $0.isResultsPage(parts) }) else { return nil }
         // Search engines use form encoding: a literal + means a space, %2B means +.
         let query = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%20") ?? ""
         return URLComponents(string: "https://search.invalid/?" + query)?.queryItems?
-            .first(where: { $0.name == key })?.value
+            .first(where: { $0.name == "q" })?.value
     }
 
     static func editable(_ line: String) -> String {
@@ -167,34 +159,33 @@ enum CompactLine {
 }
 
 struct SearchResult: Identifiable, Equatable {
-    var title: String
-    var url: URL
-    var id: URL { url }
+    enum Source: Equatable {
+        case tab
+        case history
+        case provider(SearchProvider)
 
-    static func fetch(_ query: String) async throws -> [SearchResult] {
-        var endpoint = URLComponents(string: "https://suggestqueries.google.com/complete/search")!
-        endpoint.queryItems = [
-            URLQueryItem(name: "client", value: "firefox"),
-            URLQueryItem(name: "q", value: query)
-        ]
-        let request = URLRequest(url: endpoint.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_000_000 else { return [] }
-        return parse(data)
+        /// The heading over this source's rows in the suggestion list.
+        var label: String {
+            switch self {
+            case .tab, .history: "On this Mac"
+            case .provider(let provider): "\(provider.name) suggestions"
+            }
+        }
     }
 
-    static func parse(_ data: Data) -> [SearchResult] {
-        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [Any],
-              payload.count > 1,
-              let suggestions = payload[1] as? [String] else { return [] }
+    var title: String
+    var url: URL
+    var source: Source
+    var id: URL { url }
+
+    /// The first three unique suggestions, each opening a search with the
+    /// search provider.
+    static func remote(_ suggestions: [String], from source: SearchProvider, searchingWith search: SearchProvider) -> [SearchResult] {
         var seen = Set<String>()
         return suggestions.compactMap { suggestion in
             let title = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty, seen.insert(title.localizedLowercase).inserted else { return nil }
-            var search = URLComponents(string: "https://www.google.com/search")!
-            search.queryItems = [URLQueryItem(name: "q", value: title)]
-            guard let url = search.url else { return nil }
-            return SearchResult(title: title, url: url)
+            return SearchResult(title: title, url: search.searchURL(for: title), source: .provider(source))
         }.prefix(3).map { $0 }
     }
 }
@@ -298,14 +289,11 @@ struct SurfacePair: Codable {
     }
 }
 
-func address(from line: String) -> URL {
+func address(from line: String, provider: SearchProvider = SearchSettings.storedProvider()) -> URL {
     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty { return URL(string: "about:blank")! }
     if let url = navigationURL(from: trimmed) { return url }
-    var search = URLComponents(string: "https://www.google.com/search")!
-    search.queryItems = [URLQueryItem(name: "q", value: trimmed)]
-    search.percentEncodedQuery = search.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-    return search.url!
+    return provider.searchURL(for: trimmed)
 }
 
 /// Dotted hosts, local servers, and explicit schemes navigate; everything else searches.

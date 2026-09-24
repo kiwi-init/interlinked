@@ -318,7 +318,7 @@ extension Control {
         return json([
             "selected": workspace.selectedSearchResult.map { $0 as Any } ?? NSNull(),
             "results": workspace.searchResults.enumerated().map { index, result in
-                ["index": index, "title": result.title, "url": result.url.absoluteString] as [String: Any]
+                ["index": index, "title": result.title, "url": result.url.absoluteString, "source": result.source.label] as [String: Any]
             },
         ])
     }
@@ -413,6 +413,9 @@ extension Control {
         case .sharingScreenMode: return workspace.sharingScreenMode
         case .browsingHistory: return workspace.browserHistory.enabled
         case .onboardingAlwaysShow: return workspace.onboarding.alwaysShow
+        case .searchProvider: return workspace.search.provider.rawValue
+        case .remoteSuggestions: return workspace.search.remoteSuggestions
+        case .suggestionProvider: return workspace.search.suggestionOverride?.rawValue ?? ControlSetting.sameAsSearch
         }
     }
 
@@ -453,6 +456,12 @@ extension Control {
         case (.sharingScreenMode, .bool(let on)): workspace.sharingScreenMode = on
         case (.browsingHistory, .bool(let on)): workspace.browserHistory.enabled = on
         case (.onboardingAlwaysShow, .bool(let on)): workspace.onboarding.alwaysShow = on
+        case (.searchProvider, .choice(let raw)):
+            guard let provider = SearchProvider(rawValue: raw) else { return "no search provider \(raw)" }
+            workspace.search.provider = provider
+        case (.remoteSuggestions, .bool(let on)): workspace.search.remoteSuggestions = on
+        case (.suggestionProvider, .choice(let raw)):
+            workspace.search.suggestionOverride = SearchProvider(rawValue: raw)
         default: return "\(setting.rawValue) takes \(setting.choices.joined(separator: " or "))"
         }
         return nil

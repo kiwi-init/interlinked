@@ -54,7 +54,8 @@ struct PageHandle: View {
     }
     private var quickTabs: [Tab] { workspace.quickTabs }
     private var resultsHeight: CGFloat {
-        min(CGFloat(workspace.searchResults.count * 42 + (workspace.searchResults.isEmpty ? 0 : 22)), max(84, available.height - 170))
+        let headings = Set(workspace.searchResults.map(\.source.label)).count
+        return min(CGFloat(workspace.searchResults.count * 42 + headings * 22), max(84, available.height - 170))
     }
     private var tabsHeight: CGFloat {
         min(CGFloat(quickTabs.count * 42), max(0, available.height - 112 - resultsHeight - splitRowHeight))
@@ -203,12 +204,14 @@ struct PageHandle: View {
             }
             if workspace.editing != nil && !workspace.searchResults.isEmpty {
                 ScrollView { VStack(alignment: .leading, spacing: 0) {
-                    Text("Google suggestions")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(palette.textDim)
-                        .padding(.horizontal, 14)
-                        .frame(height: 22)
                     ForEach(Array(workspace.searchResults.enumerated()), id: \.element.id) { index, result in
+                        if index == 0 || workspace.searchResults[index - 1].source.label != result.source.label {
+                            Text(result.source.label)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(palette.textDim)
+                                .padding(.horizontal, 14)
+                                .frame(height: 22)
+                        }
                         Button { workspace.openSearchResult(result) } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(result.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
@@ -286,7 +289,6 @@ struct PageHandle: View {
                                radius: morphed ? 20 : 14))
         .foregroundStyle(palette.text)
         .onHover { workspace.quickSwitchOpen = $0 }
-        .onChange(of: workspace.searchResults.map(\.id)) { _, _ in workspace.selectedSearchResult = nil }
         .onAppear { workspace.beginEmptyPageEditingIfNeeded() }
         .onChange(of: workspace.activePane) { _, _ in workspace.beginEmptyPageEditingIfNeeded() }
         .onChange(of: workspace.isEmptyActivePage) { _, isEmpty in
