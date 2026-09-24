@@ -36,6 +36,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>InterlinkedBlockerResourcesURL</key>
+	<string>$(INTERLINKED_BLOCKER_RESOURCES_URL)</string>
 	<key>InterlinkedJevRelayURL</key>
 	<string>$(INTERLINKED_JEV_RELAY_URL)</string>
 	<key>LSApplicationCategoryType</key>

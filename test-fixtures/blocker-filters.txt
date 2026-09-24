@@ -1,0 +1,25 @@
+! Content blocker fixtures. The UI tests load this list instead of the standard
+! lists, and blocker/tests/fixtures.rs checks what the engine makes of it.
+
+! /blocker/procedural: elements only a procedural rule can find.
+127.0.0.1##.card:has-text(Sponsored)
+127.0.0.1##.label:has-text(/^Advertisement$/):upward(.wrap)
+127.0.0.1##.label:has-text(Promoted):upward(2)
+127.0.0.1##.slot:matches-css(width: 300px)
+127.0.0.1##.note:min-text-length(60)
+127.0.0.1##.box:matches-attr(/^data-ad-/)
+127.0.0.1##:xpath(//div[@data-xpath="ad"])
+127.0.0.1##.path-ad:matches-path(/blocker/procedural)
+127.0.0.1##.path-other:matches-path(/elsewhere)
+127.0.0.1##.promo:has-text(Promoted offer):remove()
+127.0.0.1##.sticky:style(position: static !important)
+127.0.0.1##.banner:remove-class(pinned)
+127.0.0.1##.card:has-text(Excepted)
+127.0.0.1#@#.card:has-text(Excepted)
+
+! /blocker/redirect on 127.0.0.1 redirects to localhost, a different site.
+localhost##.redirect-ad
+localhost##+js(set-constant, interlinkedFixtureScriptlet, true)
+
+! A tracking parameter uBlock filters – Privacy strips on every site.
+$removeparam=gclid

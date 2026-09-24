@@ -1,0 +1,14 @@
+[
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".banner\"}],\"action\":{\"type\":\"remove-class\",\"arg\":\"pinned\"}}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".box\"},{\"type\":\"matches-attr\",\"arg\":\"/^data-ad-/\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".card\"},{\"type\":\"has-text\",\"arg\":\"Sponsored\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".label\"},{\"type\":\"has-text\",\"arg\":\"/^Advertisement$/\"},{\"type\":\"upward\",\"arg\":\".wrap\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".label\"},{\"type\":\"has-text\",\"arg\":\"Promoted\"},{\"type\":\"upward\",\"arg\":\"2\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".note\"},{\"type\":\"min-text-length\",\"arg\":\"60\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".path-ad\"},{\"type\":\"matches-path\",\"arg\":\"/blocker/procedural\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".path-other\"},{\"type\":\"matches-path\",\"arg\":\"/elsewhere\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".promo\"},{\"type\":\"has-text\",\"arg\":\"Promoted offer\"}],\"action\":{\"type\":\"remove\"}}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".slot\"},{\"type\":\"matches-css\",\"arg\":\"width: 300px\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".sticky\"}],\"action\":{\"type\":\"style\",\"arg\":\"position: static !important\"}}",
+  "{\"selector\":[{\"type\":\"xpath\",\"arg\":\"//div[@data-xpath=\\\"ad\\\"]\"}]}"
+]

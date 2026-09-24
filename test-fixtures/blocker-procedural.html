@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Procedural filters: checking</title>
+<style>
+  body { font: 15px/1.4 -apple-system, system-ui, sans-serif; margin: 32px; max-width: 720px; }
+  .card, .wrap, .slot, .note, .box, .path-ad, .path-other, .promo, .sticky, .banner, [data-xpath] {
+    border: 1px solid #bbb; border-radius: 8px; margin: 8px 0; padding: 8px 12px;
+  }
+  .sticky { position: sticky; top: 0; background: #fff; }
+  .slot { height: 40px; }
+  #result { font-weight: 600; }
+</style>
+<h1>Procedural filters</h1>
+<p>With <code>test-fixtures/blocker-filters.txt</code> loaded, every block marked “ad” is hidden, removed, or
+  restyled by a procedural rule, and its plain sibling stays. Plain CSS cannot select any of them.</p>
+<p id="result">Checking…</p>
+
+<div class="card" id="has-text-ad">Sponsored: a watch you did not ask for</div>
+<div class="card" id="has-text-plain">A story about rivers</div>
+
+<div class="wrap" id="upward-selector-ad"><div><span class="label">Advertisement</span></div></div>
+<div class="wrap" id="upward-selector-plain"><div><span class="label">Advertisement feature, by our editors</span></div></div>
+
+<div class="wrap" id="upward-count-ad"><div><span class="label">Promoted</span></div></div>
+<div class="wrap" id="upward-count-plain"><div><span class="label">Weather</span></div></div>
+
+<div class="slot" id="matches-css-ad" style="width: 300px">A 300 pixel slot</div>
+<div class="slot" id="matches-css-plain" style="width: 200px">A 200 pixel slot</div>
+
+<div class="note" id="min-text-length-ad">A long note that goes on and on well past the sixty character limit.</div>
+<div class="note" id="min-text-length-plain">A short note.</div>
+
+<div class="box" id="matches-attr-ad" data-ad-slot="top">A box with an ad attribute</div>
+<div class="box" id="matches-attr-plain" data-section="top">A box without one</div>
+
+<div data-xpath="ad" id="xpath-ad">Found by XPath</div>
+<div data-xpath="story" id="xpath-plain">Not found by XPath</div>
+
+<div class="path-ad" id="matches-path-ad">Hidden on this path</div>
+<div class="path-other" id="matches-path-plain">Hidden only on another path</div>
+
+<div class="promo" id="remove-ad">Promoted offer</div>
+<div class="promo" id="remove-plain">Reader offer</div>
+
+<div class="sticky" id="style-ad">Sticky bar, made static</div>
+
+<div class="banner pinned" id="remove-class-ad">Pinned banner, unpinned</div>
+
+<div class="card" id="exception-plain">Excepted: a rule hides this, and an exception keeps it</div>
+
+<img src="/blocker/hold" alt="" width="1" height="1">
+
+<script>
+  // A late ad proves the rules run again as the page changes.
+  setTimeout(() => {
+    const late = document.createElement('div');
+    late.className = 'card';
+    late.id = 'late-ad';
+    late.textContent = 'Sponsored, added after load';
+    document.getElementById('has-text-plain').after(late);
+  }, 150);
+
+  const shown = id => {
+    const element = document.getElementById(id);
+    return !!element && getComputedStyle(element).display !== 'none';
+  };
+  const checks = {
+    'has-text': () => !shown('has-text-ad') && shown('has-text-plain'),
+    'has-text after load': () => !shown('late-ad'),
+    'upward selector': () => !shown('upward-selector-ad') && shown('upward-selector-plain'),
+    'upward count': () => !shown('upward-count-ad') && shown('upward-count-plain'),
+    'matches-css': () => !shown('matches-css-ad') && shown('matches-css-plain'),
+    'min-text-length': () => !shown('min-text-length-ad') && shown('min-text-length-plain'),
+    'matches-attr': () => !shown('matches-attr-ad') && shown('matches-attr-plain'),
+    'xpath': () => !shown('xpath-ad') && shown('xpath-plain'),
+    'matches-path': () => !shown('matches-path-ad') && shown('matches-path-plain'),
+    'remove': () => !document.getElementById('remove-ad') && shown('remove-plain'),
+    'style': () => getComputedStyle(document.getElementById('style-ad')).position === 'static',
+    'remove-class': () => !document.getElementById('remove-class-ad').classList.contains('pinned'),
+    'exception': () => shown('exception-plain'),
+  };
+  // Rules run at most every quarter second, so the late ad is gone by then.
+  // The app reads a page's title when loading finishes, and the held image
+  // keeps loading open until this report is in.
+  addEventListener('DOMContentLoaded', () => setTimeout(() => {
+    const failed = Object.keys(checks).filter(name => !checks[name]());
+    const result = failed.length ? 'fail: ' + failed.join(', ') : 'pass';
+    document.title = document.getElementById('result').textContent = 'Procedural filters: ' + result;
+  }, 1000));
+</script>

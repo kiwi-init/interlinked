@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Redirected: checking</title>
+<style>
+  body { font: 15px/1.4 -apple-system, system-ui, sans-serif; margin: 32px; max-width: 720px; }
+  .redirect-ad { border: 1px solid #bbb; border-radius: 8px; padding: 8px 12px; }
+  #result { font-weight: 600; }
+</style>
+<h1>Redirected</h1>
+<p><code>/blocker/redirect</code> on 127.0.0.1 answered with a redirect to this page on localhost. With
+  <code>test-fixtures/blocker-filters.txt</code> loaded, localhost's rules apply to this first document: a
+  scriptlet sets <code>interlinkedFixtureScriptlet</code> and a hiding rule hides the block below.</p>
+<p id="result">Checking…</p>
+<div class="redirect-ad" id="redirect-ad">Hidden by a localhost rule</div>
+<img src="/blocker/hold" alt="" width="1" height="1">
+<script>
+  // Scriptlets run before any page script, so this reads the value now.
+  const scriptlet = window.interlinkedFixtureScriptlet === true;
+  // The app reads a page's title when loading finishes, and the held image
+  // keeps loading open until this report is in.
+  addEventListener('DOMContentLoaded', () => setTimeout(() => {
+    const failed = [];
+    if (!scriptlet) failed.push('scriptlet');
+    if (getComputedStyle(document.getElementById('redirect-ad')).display !== 'none') failed.push('hiding');
+    const result = failed.length ? 'fail: ' + failed.join(', ') : 'pass';
+    document.title = document.getElementById('result').textContent = 'Redirected: ' + result;
+  }, 300));
+</script>

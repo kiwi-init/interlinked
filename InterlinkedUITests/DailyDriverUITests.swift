@@ -46,10 +46,35 @@ final class DailyDriverUITests: XCTestCase {
         XCTAssertTrue(origin.label.contains("127.0.0.1") || origin.label.contains("Not Secure"))
     }
 
-    private func launch(opening url: String) -> XCUIApplication {
+    // The content blocker tests load test-fixtures/blocker-filters.txt in place
+    // of the standard lists. Each fixture page checks itself and reports in its
+    // title and body.
+
+    func testProceduralFiltersHideOnlyMatchingElements() throws {
+        let app = launch(opening: "\(base)/blocker/procedural", filters: true)
+        expectReport("Procedural filters: pass", in: app)
+    }
+
+    func testRedirectedDocumentGetsTheDestinationSiteRules() throws {
+        // 127.0.0.1 answers with a redirect to localhost, a different site.
+        let app = launch(opening: "\(base)/blocker/redirect", filters: true)
+        expectReport("Redirected: pass", in: app)
+    }
+
+    func testTrackingParameterIsRemovedBeforeTheRequest() throws {
+        let app = launch(opening: "\(base)/blocker/removeparam?gclid=fixture&keep=1", filters: true)
+        expectReport("Removeparam: keep=1", in: app)
+    }
+
+    private func launch(opening url: String, filters: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-interlinked-ui-testing", "-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["INTERLINKED_UI_TEST_URL"] = url
+        if filters {
+            app.launchEnvironment["INTERLINKED_UI_TEST_FILTERS"] = repository("test-fixtures/blocker-filters.txt").path
+            // Argument defaults override the saved settings without changing them.
+            app.launchArguments += ["-builtins.blocking", "YES", "-builtins.unblockedSites", "()"]
+        }
         app.launch()
         // The pointer stays where the last test left it. Over the page handle it
         // expands the handle, so start each test with the pointer on the page.
@@ -58,6 +83,23 @@ final class DailyDriverUITests: XCTestCase {
             window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).hover()
         }
         return app
+    }
+
+    /// Waits for |expected| in the page's title or text, and otherwise reports
+    /// what the page said instead.
+    private func expectReport(_ expected: String, in app: XCUIApplication, line: UInt = #line) {
+        let found = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", expected, expected)
+        if app.descendants(matching: .any).matching(found).firstMatch.waitForExistence(timeout: 30) { return }
+        let prefix = String(expected.prefix { $0 != ":" })
+        let reported = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", prefix, prefix))
+            .allElementsBoundByIndex.map { [$0.label, $0.value as? String ?? ""].joined(separator: " ") }
+        XCTFail("Expected “\(expected)”; the page reported \(reported)", line: line)
+    }
+
+    private func repository(_ path: String) -> URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(path)
     }
 
     /// The runner is sandboxed and cannot start test-fixtures/server.py, so

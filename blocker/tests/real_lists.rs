@@ -31,10 +31,18 @@ fn real_lists() {
         ("https://www.youtube.com/pagead/adview?x=1", "https://www.youtube.com/watch?v=1", "xmlhttprequest"),
         ("https://www.youtube.com/youtubei/v1/player/ad_break?x", "https://www.youtube.com/watch?v=1", "xmlhttprequest"),
         ("https://example.org/style.css", "https://news.example/", "stylesheet"),
-        ("https://shop.example/item?utm_source=x&id=5", "https://news.example/", "document"),
     ] {
         let r = engine.check_network_request(&Request::new(url, source, kind, "GET").unwrap());
         println!("{:<62} block={} redirect={} rewritten={:?}", url, r.should_block(), r.redirect.as_ref().map(|d| d.len()).unwrap_or(0), r.rewritten_url);
+    }
+    // uBlock filters – Privacy strips click identifiers such as gclid and
+    // fbclid on every site. It leaves utm_* alone, so those URLs stay unchanged.
+    for (url, expected) in [
+        ("https://shop.example/item?gclid=x&id=5&fbclid=y", Some("https://shop.example/item?id=5")),
+        ("https://shop.example/item?utm_source=x&id=5", None),
+    ] {
+        let r = engine.check_network_request(&Request::new(url, url, "document", "GET").unwrap());
+        assert_eq!(r.rewritten_url.as_deref(), expected, "{url}");
     }
     let yt = engine.url_cosmetic_resources("https://www.youtube.com/watch?v=abc");
     println!("youtube: hide={} procedural={} script_len={} generichide={}", yt.hide_selectors.len(), yt.procedural_actions.len(), yt.injected_script.len(), yt.generichide);

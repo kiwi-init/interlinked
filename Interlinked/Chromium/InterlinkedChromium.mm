@@ -508,57 +508,14 @@ class InterlinkedClient final : public CefClient,
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
 };
 
-// Runs in an isolated world at document start. |cfg| is prepended by the caller.
+// Runs in an isolated world at document start; blocker-cosmetics.js explains
+// the |cfg| the caller defines first.
 NSString *ILCosmeticsScript() {
-  return @R"JS(
-const sheet = new CSSStyleSheet();
-const hide = selectors => {
-  for (const selector of selectors) {
-    // One rule per selector: an invalid selector must not void the others.
-    try { sheet.insertRule(selector + '{display:none!important}', sheet.cssRules.length); } catch {}
-  }
-};
-hide(cfg.hide);
-const adopt = () => {
-  if (!document.adoptedStyleSheets.includes(sheet)) {
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  }
-};
-adopt();
-document.addEventListener('DOMContentLoaded', adopt);
-globalThis.__interlinkedHide = selectors => { hide(selectors); adopt(); };
-
-const report = globalThis[cfg.binding];
-if (!cfg.generic || typeof report !== 'function') return;
-const seenClasses = new Set(), seenIds = new Set();
-let classes = [], ids = [], scheduled = false;
-const flush = () => {
-  scheduled = false;
-  if (!classes.length && !ids.length) return;
-  report(JSON.stringify({ classes, ids }));
-  classes = []; ids = [];
-};
-const note = element => {
-  const id = element.id;
-  if (id && typeof id === 'string' && !seenIds.has(id)) { seenIds.add(id); ids.push(id); }
-  for (const name of element.classList ?? []) {
-    if (!seenClasses.has(name)) { seenClasses.add(name); classes.push(name); }
-  }
-};
-const scan = root => {
-  if (root.nodeType !== 1) return;
-  note(root);
-  for (const element of root.querySelectorAll('[id],[class]')) note(element);
-  if (!scheduled && (classes.length || ids.length)) { scheduled = true; setTimeout(flush, 80); }
-};
-new MutationObserver(records => {
-  for (const record of records) {
-    if (record.type === 'attributes') scan(record.target);
-    else for (const node of record.addedNodes) scan(node);
-  }
-}).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id'] });
-if (document.documentElement) scan(document.documentElement);
-)JS";
+  static NSString *source = [NSString
+      stringWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"blocker-cosmetics" withExtension:@"js"]
+                     encoding:NSUTF8StringEncoding
+                        error:nil] ?: @"";
+  return source;
 }
 
 std::unique_ptr<CefScopedLibraryLoader> g_library_loader;
@@ -1248,7 +1205,9 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
 
   NSString *scriptlets = cosmetics[@"script"];
   if ([scriptlets isKindOfClass:NSString.class] && scriptlets.length > 0) {
-    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@\n%@\n})();", guard, scriptlets]
+    // uBlock Origin's injector gives its scriptlets a shared |scriptletGlobals|
+    // object; without it they throw a ReferenceError on first use.
+    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@const scriptletGlobals={};\n%@\n})();", guard, scriptlets]
                       world:nil
              runImmediately:runImmediately];
   }
@@ -1258,6 +1217,7 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   _blockingExceptionsJSON = [[NSString alloc] initWithData:exceptionsJSON encoding:NSUTF8StringEncoding] ?: @"[]";
   NSDictionary *configuration = @{
     @"hide": cosmetics[@"hide"] ?: @[],
+    @"procedural": cosmetics[@"procedural"] ?: @[],
     @"generic": @(![cosmetics[@"generichide"] boolValue]),
     @"binding": ILCosmeticsBinding,
   };

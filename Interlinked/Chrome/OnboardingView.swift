@@ -163,6 +163,7 @@ private struct FeatureCard: View {
                 Toggle(feature.title, isOn: workspace.binding(for: feature))
                     .toggleStyle(.switch)
                     .labelsHidden()
+                    .disabled(workspace.disables(feature))
                     .pointingHandCursor()
                     .accessibilityIdentifier("onboarding-feature-\(feature.rawValue)")
             }

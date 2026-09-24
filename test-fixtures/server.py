@@ -3,6 +3,7 @@
 
 from base64 import b64decode, b64encode
 from hashlib import sha1
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import struct
@@ -66,6 +67,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if path == "/blocker/procedural":
+            return self.send_bytes((ROOT / "blocker-procedural.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/blocker/redirect":
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{PORT}/blocker/redirected")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/blocker/redirected":
+            return self.send_bytes((ROOT / "blocker-redirected.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/blocker/hold":
+            # Holds the page's load event open; see blocker-procedural.html.
+            time.sleep(2)
+            return self.send_bytes(b64decode("R0lGODlhAQABAAAAACH5BAEAAAAALAAAAAABAAEAAAIBAAA="), "image/gif")
+        if path == "/blocker/removeparam":
+            # The query the server received, after the blocker removed tracking parameters.
+            query = escape(self.path.partition("?")[2] or "no query")
+            page = f"<!doctype html><meta charset=\"utf-8\"><title>Removeparam: {query}</title><h1>Server received: {query}</h1>"
+            return self.send_bytes(page.encode(), "text/html; charset=utf-8")
         if path in {"/download/known", "/download/duplicate"}:
             return self.download(PAYLOAD, "fixture.txt", include_length=True)
         if path == "/download/unknown":

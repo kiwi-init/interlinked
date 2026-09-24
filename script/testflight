@@ -5,6 +5,8 @@ cd "$(dirname "$0")/.."
 
 build_number=${INTERLINKED_BUILD_NUMBER:-1}
 relay_url=${INTERLINKED_JEV_RELAY_URL:-https://interlinked-jev.187-77-224-188.sslip.io/v1/jev}
+# Optional: where the blocker downloads scriptlet resources between releases.
+resources_url=${INTERLINKED_BLOCKER_RESOURCES_URL:-}
 app_store_id=${INTERLINKED_ASC_APP_ID:-6814002217}
 external_group_id=${INTERLINKED_TESTFLIGHT_GROUP_ID:-e1987dcb-534c-4918-b460-eaeb3d8277d4}
 archive="$PWD/.build/testflight/Interlinked.xcarchive"
@@ -13,6 +15,11 @@ export_path="$PWD/.build/testflight/export"
 case "$relay_url" in
   https://*) ;;
   *) echo "Set INTERLINKED_JEV_RELAY_URL to the HTTPS /v1/jev relay before making a TestFlight build." >&2; exit 64 ;;
+esac
+
+case "$resources_url" in
+  ""|https://*) ;;
+  *) echo "INTERLINKED_BLOCKER_RESOURCES_URL must be an HTTPS URL or empty." >&2; exit 64 ;;
 esac
 
 xcodegen generate
@@ -26,6 +33,7 @@ xcodebuild \
   -allowProvisioningUpdates \
   CURRENT_PROJECT_VERSION="$build_number" \
   INTERLINKED_JEV_RELAY_URL="$relay_url" \
+  INTERLINKED_BLOCKER_RESOURCES_URL="$resources_url" \
   archive
 
 app="$archive/Products/Applications/Interlinked.app"
