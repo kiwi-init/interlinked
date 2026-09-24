@@ -140,6 +140,11 @@ const char *BlockerRequestType(cef_resource_type_t type) {
   }
 }
 
+bool IsDocumentRequest(CefRefPtr<CefRequest> request) {
+  const cef_resource_type_t type = request->GetResourceType();
+  return type == RT_MAIN_FRAME || type == RT_SUB_FRAME;
+}
+
 std::string TakeBlockerString(char *value) {
   std::string result = value ? value : "";
   il_string_free(value);
@@ -376,6 +381,11 @@ class InterlinkedClient final : public CefClient,
                                    CefRefPtr<CefFrame> frame,
                                    CefRefPtr<CefRequest> request,
                                    CefRefPtr<CefCallback> callback) override;
+  void OnResourceRedirect(CefRefPtr<CefBrowser> browser,
+                          CefRefPtr<CefFrame> frame,
+                          CefRefPtr<CefRequest> request,
+                          CefRefPtr<CefResponse> response,
+                          CefString& new_url) override;
   CefRefPtr<CefResourceHandler> GetResourceHandler(CefRefPtr<CefBrowser> browser,
                                                    CefRefPtr<CefFrame> frame,
                                                    CefRefPtr<CefRequest> request) override;
@@ -1609,6 +1619,13 @@ CefResourceRequestHandler::ReturnValue InterlinkedClient::OnBeforeResourceLoad(
     CefRefPtr<CefCallback> callback) {
   // Called on the network thread.
   const bool navigation = request->GetResourceType() == RT_MAIN_FRAME;
+  if (IsDocumentRequest(request)) {
+    // Tracking parameters never reach a page, whether or not blocking is on.
+    const std::string clean = TakeBlockerString(il_strip_tracking(request->GetURL().ToString().c_str()));
+    if (!clean.empty()) {
+      request->SetURL(clean);
+    }
+  }
   CefString page_url = navigation ? request->GetURL() : request->GetFirstPartyForCookies();
   if (page_url.empty() && browser && browser->GetMainFrame()) {
     page_url = browser->GetMainFrame()->GetURL();
@@ -1639,6 +1656,22 @@ CefResourceRequestHandler::ReturnValue InterlinkedClient::OnBeforeResourceLoad(
     return RV_CONTINUE;
   }
   return RV_CANCEL;
+}
+
+// A server redirect to a tagged address is followed to the clean address.
+void InterlinkedClient::OnResourceRedirect(CefRefPtr<CefBrowser> browser,
+                                           CefRefPtr<CefFrame> frame,
+                                           CefRefPtr<CefRequest> request,
+                                           CefRefPtr<CefResponse> response,
+                                           CefString& new_url) {
+  // Called on the network thread.
+  if (!IsDocumentRequest(request)) {
+    return;
+  }
+  const std::string clean = TakeBlockerString(il_strip_tracking(new_url.ToString().c_str()));
+  if (!clean.empty()) {
+    new_url = clean;
+  }
 }
 
 CefRefPtr<CefResourceHandler> InterlinkedClient::GetResourceHandler(CefRefPtr<CefBrowser> browser,

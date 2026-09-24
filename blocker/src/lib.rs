@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 
+mod tracking;
+
 pub struct Blocker {
     engine: Engine,
 }
@@ -151,6 +153,15 @@ pub unsafe extern "C" fn il_blocker_check(
         return IL_REWRITE;
     }
     IL_ALLOW
+}
+
+/// The page address without tracking parameters, or null when it has none.
+/// Independent of any engine. Release the result with `il_string_free`.
+/// # Safety
+/// `url` is NUL-terminated UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn il_strip_tracking(url: *const c_char) -> *mut c_char {
+    tracking::strip(text(url)).map(give).unwrap_or(ptr::null_mut())
 }
 
 /// Returns JSON: hide, exceptions, procedural, script, generichide.

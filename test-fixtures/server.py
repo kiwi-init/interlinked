@@ -81,6 +81,12 @@ class Handler(BaseHTTPRequestHandler):
             # Holds the page's load event open; see blocker-procedural.html.
             time.sleep(2)
             return self.send_bytes(b64decode("R0lGODlhAQABAAAAACH5BAEAAAAALAAAAAABAAEAAAIBAAA="), "image/gif")
+        if path == "/tracking/redirect":
+            self.send_response(302)
+            self.send_header("Location", "/blocker/removeparam?utm_source=redirect&keep=1&fbclid=fixture")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/blocker/removeparam":
             # The query the server received, after the blocker removed tracking parameters.
             query = escape(self.path.partition("?")[2] or "no query")

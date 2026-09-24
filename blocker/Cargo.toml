@@ -10,6 +10,7 @@ crate-type = ["staticlib"]
 [dependencies]
 adblock = { version = "0.13", default-features = false, features = ["css-validation", "embedded-domain-resolver", "full-regex-handling"] }
 serde_json = "1"
+url = "2"
 
 [profile.release]
 opt-level = 3

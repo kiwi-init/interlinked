@@ -29,6 +29,9 @@ void il_string_free(char *value);
 /// is the URL to load instead. Release it with il_string_free.
 int32_t il_blocker_check(const ILBlocker *blocker, const char *url, const char *source_url,
                          const char *request_type, const char *method, char **detail);
+/// |url| without tracking parameters, or NULL when it has none. Release it
+/// with il_string_free.
+char *il_strip_tracking(const char *url);
 /// JSON object: hide, exceptions, procedural, script, generichide.
 char *il_blocker_cosmetics(const ILBlocker *blocker, const char *url);
 /// |query_json| holds classes, ids, exceptions. Returns a JSON array.

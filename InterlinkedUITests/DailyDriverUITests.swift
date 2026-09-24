@@ -66,7 +66,20 @@ final class DailyDriverUITests: XCTestCase {
         expectReport("Removeparam: keep=1", in: app)
     }
 
-    private func launch(opening url: String, filters: Bool = false) -> XCUIApplication {
+    // Built in, so these run with content blocking off.
+
+    func testTrackingParametersAreRemovedWithBlockingOff() throws {
+        let app = launch(opening: "\(base)/blocker/removeparam?utm_source=news&keep=1&gclid=x&UTM_Campaign=y&fbclid=z",
+                         blocking: false)
+        expectReport("Removeparam: keep=1", in: app)
+    }
+
+    func testTrackingParametersAreRemovedFromARedirect() throws {
+        let app = launch(opening: "\(base)/tracking/redirect", blocking: false)
+        expectReport("Removeparam: keep=1", in: app)
+    }
+
+    private func launch(opening url: String, filters: Bool = false, blocking: Bool? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-interlinked-ui-testing", "-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["INTERLINKED_UI_TEST_URL"] = url
@@ -74,6 +87,9 @@ final class DailyDriverUITests: XCTestCase {
             app.launchEnvironment["INTERLINKED_UI_TEST_FILTERS"] = repository("test-fixtures/blocker-filters.txt").path
             // Argument defaults override the saved settings without changing them.
             app.launchArguments += ["-builtins.blocking", "YES", "-builtins.unblockedSites", "()"]
+        }
+        if let blocking {
+            app.launchArguments += ["-builtins.blocking", blocking ? "YES" : "NO"]
         }
         app.launch()
         // The pointer stays where the last test left it. Over the page handle it
