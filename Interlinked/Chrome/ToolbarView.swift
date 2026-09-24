@@ -60,7 +60,7 @@ struct PageHandle: View {
         min(CGFloat(quickTabs.count * 42), max(0, available.height - 112 - resultsHeight - splitRowHeight))
     }
     private var splitRowHeight: CGFloat { workspace.isSplit ? 42 : 0 }
-    private var controlsHeight: CGFloat { 76 + tabsHeight + splitRowHeight }
+    private var controlsHeight: CGFloat { 32 + handleBarHeight + tabsHeight + splitRowHeight }
     private var historySize: CGSize {
         let rows = CGFloat(workspace.browserHistory.visits.count) * 44 + 58
         return CGSize(width: min(330, available.width - 36), height: min(max(140, rows) + 44, available.height - 72))
@@ -69,7 +69,7 @@ struct PageHandle: View {
         CGSize(width: min(390, available.width - 36), height: min(404, available.height - 72))
     }
     private var handleBarHeight: CGFloat {
-        if morphed || showsTabs || workspace.editing != nil || voiceCaption != nil {
+        if morphed || workspace.editing != nil || voiceCaption != nil {
             return 44
         }
         return trustedOrigin == nil ? 44 : 52
@@ -197,7 +197,7 @@ struct PageHandle: View {
                             .frame(height: splitRowHeight)
                     }
                 }
-                .padding(.bottom, 44)
+                .padding(.bottom, handleBarHeight)
                 .transition(.opacity)
             }
             if workspace.editing != nil && !workspace.searchResults.isEmpty {
@@ -262,18 +262,7 @@ struct PageHandle: View {
                 .accessibilityLabel(workspace.overviewOpen ? "Return to page" : "Show all tabs, \(identity)")
                 .accessibilityHint("Hover or hold left Command to show open pages")
                 .accessibilityIdentifier("page-handle")
-                if showsTabs && workspace.editing == nil {
-                    LineEditor(palette: palette)
-                        .padding(.trailing, workspace.currentPageURL == nil ? 14 : 8)
-                    if workspace.currentPageURL != nil {
-                        Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .monospacedDigit()
-                            .frame(width: 42, alignment: .trailing)
-                            .padding(.trailing, 14)
-                            .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
-                    }
-                } else if workspace.editing != nil {
+                if workspace.editing != nil {
                     LineEditor(palette: palette)
                         .padding(.trailing, 14)
                 } else if let caption = voiceCaption, !workspace.overviewOpen {
@@ -284,7 +273,7 @@ struct PageHandle: View {
                 } else if workspace.identityOpen || historyOpen || downloadsOpen {
                     Spacer(minLength: 0)
                 } else {
-                    collapsedIdentity
+                    identityRows
                 }
             }
             .frame(height: handleBarHeight)
@@ -306,47 +295,73 @@ struct PageHandle: View {
         .animation(reduceMotion ? nil : Metrics.morph, value: expanded)
     }
 
-    private var collapsedIdentity: some View {
+    /// The address, then the origin. Pointing at the origin opens the handle,
+    /// so the origin keeps its place and identity in both states to stay clickable.
+    private var identityRows: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { workspace.editActiveLine() } label: {
-                Group {
-                    if workspace.showsCopiedPageURL {
-                        Text("Copied")
-                            .font(.system(size: 12, weight: .medium))
-                    } else {
-                        AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
+            if showsTabs {
+                HStack(spacing: 0) {
+                    LineEditor(palette: palette)
+                        .padding(.trailing, workspace.currentPageURL == nil ? 14 : 8)
+                    if workspace.currentPageURL != nil {
+                        Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .frame(width: 42, alignment: .trailing)
+                            .padding(.trailing, 14)
+                            .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
                     }
                 }
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            } else {
+                addressButton
+                    .padding(.trailing, 16)
             }
-            .buttonStyle(.pointing)
-            .accessibilityLabel(trustedOrigin.map { "Edit address, \(identity), \($0.accessibilityLabel)" } ?? "Edit address, \(identity)")
-            .accessibilityIdentifier("page-address")
-            .help(pane.map { workspace.surfaces.line($0) } ?? "")
             if let origin = trustedOrigin {
-                Button { workspace.toggleIdentity() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: origin.transport == .http ? "exclamationmark.triangle.fill" : "lock.fill")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
-                        Text(origin.compactLabel)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.pointing)
-                .accessibilityLabel("Site identity, \(origin.accessibilityLabel)")
-                .accessibilityIdentifier("page-origin")
-                .help(origin.fullURL)
+                originButton(origin)
+                    .padding(.trailing, 16)
             }
         }
-        .padding(.trailing, 16)
         .frame(height: trustedOrigin == nil ? 44 : 52)
+    }
+
+    private var addressButton: some View {
+        Button { workspace.editActiveLine() } label: {
+            Group {
+                if workspace.showsCopiedPageURL {
+                    Text("Copied")
+                        .font(.system(size: 12, weight: .medium))
+                } else {
+                    AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
+                }
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pointing)
+        .accessibilityLabel(trustedOrigin.map { "Edit address, \(identity), \($0.accessibilityLabel)" } ?? "Edit address, \(identity)")
+        .accessibilityIdentifier("page-address")
+        .help(pane.map { workspace.surfaces.line($0) } ?? "")
+    }
+
+    private func originButton(_ origin: TrustedOrigin) -> some View {
+        Button { workspace.toggleIdentity() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: origin.transport == .http ? "exclamationmark.triangle.fill" : "lock.fill")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
+                Text(origin.compactLabel)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pointing)
+        .accessibilityLabel("Site identity, \(origin.accessibilityLabel)")
+        .accessibilityIdentifier("page-origin")
+        .help(origin.fullURL)
     }
 
     @ViewBuilder
@@ -508,6 +523,7 @@ private struct IdentityInspector: View {
         .padding(16)
         .padding(.bottom, 44)
         .onExitCommand { workspace.closeIdentity() }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("identity-inspector")
     }
 

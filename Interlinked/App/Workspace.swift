@@ -196,6 +196,10 @@ final class Workspace {
     }
 
     var isEmptyActivePage: Bool {
+        // Before start() there is no page yet. Calling that empty would
+        // autofocus the first render's address field, which can take focus
+        // after start() has opened a launch URL and leave it in editing.
+        guard started else { return false }
         guard let pane = activePane else { return true }
         if onboarding.contains(pane) { return false }
         return NewTabPage.matches(line: surfaces.line(pane))

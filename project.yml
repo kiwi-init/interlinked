@@ -135,6 +135,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.uitests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: Interlinked
+        # The runner is signed with the app's team, so the bundle it loads must be too.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
+        DEVELOPMENT_TEAM: 57249C654W
     dependencies:
       - target: Interlinked
 schemes:
@@ -152,6 +156,14 @@ schemes:
       targets:
         - InterlinkedTests
         - InterlinkedUITests
+      preActions:
+        - name: Start Fixture Server
+          script: '"$SRCROOT/script/fixture-server" start'
+          settingsTarget: Interlinked
+      postActions:
+        - name: Stop Fixture Server
+          script: '"$SRCROOT/script/fixture-server" stop'
+          settingsTarget: Interlinked
     archive:
       config: TestFlight
   InterlinkedTests:

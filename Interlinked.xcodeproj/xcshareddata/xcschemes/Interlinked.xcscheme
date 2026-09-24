@@ -69,6 +69,42 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Start Fixture Server"
+               scriptText = "&quot;$SRCROOT/script/fixture-server&quot; start">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "729C8F9419A6AAD008144E8C"
+                     BuildableName = "Interlinked.app"
+                     BlueprintName = "Interlinked"
+                     ReferencedContainer = "container:Interlinked.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Stop Fixture Server"
+               scriptText = "&quot;$SRCROOT/script/fixture-server&quot; stop">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "729C8F9419A6AAD008144E8C"
+                     BuildableName = "Interlinked.app"
+                     BlueprintName = "Interlinked"
+                     ReferencedContainer = "container:Interlinked.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
