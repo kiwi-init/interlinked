@@ -64,3 +64,50 @@ test("rejects unsigned and arbitrary model requests before spending", async () =
   assert.equal(arbitrary.status, 400);
   assert.equal(upstreamCalls, 0);
 });
+
+const signedRelay = (callOpenRouter: (body: Uint8Array, signal: AbortSignal) => Promise<{ status: number; body: Uint8Array }>, upstreamTimeoutMs?: number) => {
+  const relay = createRelay({
+    cache: new MemoryCache(),
+    now: () => 1_000,
+    verifyAppTransaction: async () => "tester",
+    callOpenRouter,
+    upstreamTimeoutMs
+  });
+  return (value: unknown) => relay({
+    method: "POST",
+    path: "/v1/jev",
+    headers: { "x-interlinked-app-transaction": "signed" },
+    body: encoder.encode(JSON.stringify(value))
+  });
+};
+
+test("rejects unknown fields at every level before spending", async () => {
+  let upstreamCalls = 0;
+  const send = signedRelay(async () => { upstreamCalls += 1; return { status: 200, body: encoder.encode("{}") }; });
+  const valid = JSON.parse(decoder.decode(body));
+
+  assert.equal((await send({ ...valid, temperature: 2 })).status, 400);
+  assert.equal((await send({ ...valid, stream: true })).status, 400);
+  assert.equal((await send({ ...valid, provider: { data_collection: "deny", order: ["other"] } })).status, 400);
+  assert.equal((await send({ ...valid, questions: { page: { ...valid.questions.page, max_tokens: 9 } } })).status, 400);
+  assert.equal(upstreamCalls, 0);
+
+  const score = { type: "score", instructions: "Rate", criteria: ["low", "high"] };
+  assert.equal((await send({ ...valid, questions: { ...valid.questions, score } })).status, 200);
+  assert.equal(upstreamCalls, 1);
+});
+
+test("answers a hanging upstream with 503 once the deadline passes", async () => {
+  let aborted = false;
+  const send = signedRelay((_, signal) => {
+    signal.addEventListener("abort", () => { aborted = true; });
+    return new Promise(() => {});
+  }, 50);
+  const started = Date.now();
+  const response = await send(JSON.parse(decoder.decode(body)));
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(JSON.parse(decoder.decode(response.body)), { error: "unavailable" });
+  assert.ok(Date.now() - started < 1_000);
+  assert.ok(aborted);
+});

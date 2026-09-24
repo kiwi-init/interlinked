@@ -6,6 +6,7 @@ from hashlib import sha1
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import struct
+import sys
 import time
 
 ROOT = Path(__file__).resolve().parent
@@ -83,6 +84,23 @@ class Handler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     break
             return
+        if path == "/favicon/endless":
+            return self.stream_forever(PAYLOAD[:65536], pause=0)
+        if path == "/favicon/drip":
+            return self.stream_forever(b"\0", pause=0.2)
+        if path == "/favicon/oversized":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/x-icon")
+            self.send_header("Content-Length", str(10 * 1_048_576))
+            self.end_headers()
+            for _ in range(640):
+                try:
+                    self.wfile.write(PAYLOAD[:16384])
+                    self.wfile.flush()
+                    time.sleep(0.2)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+            return
         if path == "/download/failure":
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
@@ -134,6 +152,21 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
         self.end_headers()
         self.wfile.write(data)
+
+    def stream_forever(self, chunk, pause):
+        self.send_response(200)
+        self.send_header("Content-Type", "image/x-icon")
+        self.send_header("Connection", "close")
+        self.close_connection = True
+        self.end_headers()
+        while True:
+            try:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            if pause:
+                time.sleep(pause)
 
     def send_inbox(self):
         data = (ROOT / "inbox.html").read_bytes()
@@ -198,5 +231,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Interlinked fixtures: http://{HOST}:{PORT}")
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    # An optional port argument; 0 picks a free port, printed below.
+    server = ThreadingHTTPServer((HOST, int(sys.argv[1]) if len(sys.argv) > 1 else PORT), Handler)
+    PORT = server.server_address[1]
+    print(f"Interlinked fixtures: http://{HOST}:{PORT}", flush=True)
+    server.serve_forever()

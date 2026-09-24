@@ -342,7 +342,7 @@ extension Control {
             } else {
                 destination = .general
             }
-            workspace.openNativeSettings(destination)
+            guard workspace.openNativeSettings(destination) else { return error("the browser window has not appeared yet") }
         case "close":
             settingsWindow()?.performClose(nil)
         case "remove-jev-key":

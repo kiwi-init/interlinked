@@ -119,14 +119,13 @@ final class Workspace {
     @ObservationIgnored private var started = false
     @ObservationIgnored weak var browserWindow: NSWindow?
     @ObservationIgnored private var keyMonitor: Any?
+    /// SwiftUI's `openSettings`, handed over by the browser window.
+    @ObservationIgnored var openSettings: (() -> Void)?
     @ObservationIgnored private var mouseMonitor: Any?
     @ObservationIgnored private var flagsMonitor: Any?
     @ObservationIgnored private var commandStateObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var control: ControlServer?
     @ObservationIgnored private var copiedPageURLTask: Task<Void, Never>?
-    /// SwiftUI's way to show the Settings scene, handed over by the window.
-    /// `showSettingsWindow:` no longer opens it.
-    @ObservationIgnored var showSettings: OpenSettingsAction?
 
     var activeTab: Tab? {
         tabs.indices.contains(active) ? tabs[active] : nil
@@ -405,6 +404,7 @@ final class Workspace {
         surfaces.setLine(pane, address)
         navigate(pane, address)
         keep()
+        restoreFocus()
     }
 
     func closeTab(_ id: TabID) {
@@ -551,6 +551,7 @@ final class Workspace {
         copiedPageURLTask?.cancel()
         downloads.prepareForTermination()
         browserHistory.save()
+        intelligenceAudit.flush()
         hosts.stopMemoryPressureMonitoring()
         builtIns.stop()
         keyMonitor.map(NSEvent.removeMonitor)
@@ -721,7 +722,22 @@ final class Workspace {
     func clearPane(_ pane: PaneID) {
         surfaces.erase(pane)
         if editing?.target == .pane(pane) { discardLine() }
+        releasePage(pane)
         keep()
+    }
+
+    /// An erased pane holds no page. Its page stops and is released, so its
+    /// sound ends and its next address change can't refill the line.
+    private func releasePage(_ pane: PaneID) {
+        hosts.forget(keep: holdsPage, downloads: downloads)
+        builtIns.navigated(pane)
+        assistance.committed(pane)
+        usefulInfo.committed(pane)
+        siteMenus.removeValue(forKey: pane)
+    }
+
+    private func holdsPage(_ pane: PaneID) -> Bool {
+        paneAlive(pane) && surfaces.holdsPage(pane)
     }
 
     func nameTab(_ tab: TabID, _ name: String) {
@@ -1253,6 +1269,9 @@ final class Workspace {
     }
 
     func navigate(_ pane: PaneID, _ line: String) {
+        // A closed pane must not get a page no tab can show.
+        guard paneAlive(pane) else { return }
+        guard surfaces.holdsPage(pane) else { return releasePage(pane) }
         let view = hosts.browser(for: pane, workspace: self)
         let url = address(from: line)
         if view.url != url {
@@ -1313,10 +1332,12 @@ final class Workspace {
     }
 
     func dictate(_ said: String) {
-        let pane = voice.target ?? activePane
-        guard let pane else { return }
+        guard let pane = DictationTarget.pane(started: voice.target, active: activePane, in: tabs) else {
+            voice.markHeard(said: said, outcome: .refused("The page closed before dictation finished."))
+            return
+        }
         if said.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "clear" {
-            surfaces.erase(pane)
+            clearPane(pane)
         } else {
             surfaces.setLine(pane, said)
             if surfaces.kind(pane) == .browser {
@@ -1372,7 +1393,7 @@ final class Workspace {
     }
 
     private func forgetClosed() {
-        hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) }, downloads: downloads)
+        hosts.forget(keep: holdsPage, downloads: downloads)
         builtIns.forget(keep: paneAlive)
         usefulInfo.prune(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
@@ -1423,7 +1444,7 @@ final class Workspace {
                 }
                 return event
             }
-            if event.keyCode == 53, self.escapeCloses {
+            if event.keyCode == 53, !self.composingText(in: event.window), self.escapeCloses {
                 self.escape()
                 return nil
             }
@@ -1463,6 +1484,12 @@ final class Workspace {
                 }
             },
         ]
+    }
+
+    /// Escape during input method composition cancels the candidates, not the
+    /// edit or the open panel.
+    private func composingText(in window: NSWindow?) -> Bool {
+        (window?.firstResponder as? NSTextInputClient)?.hasMarkedText() == true
     }
 
     private func closesWindow(_ event: NSEvent) -> Bool {
@@ -1535,21 +1562,26 @@ final class Workspace {
         case ("r", .command):
             reloadActivePage()
         case (",", .command):
-            openNativeSettings(.general)
+            return openNativeSettings(.general)
         default:
             return false
         }
         return true
     }
 
-    func openNativeSettings(_ destination: SettingsDestination) {
+    /// AppKit ignores `showSettingsWindow:` on macOS 14 and later, so ⌘, goes
+    /// through SwiftUI's own action. Without it the Settings menu item takes
+    /// the key, and the window keeps its state.
+    @discardableResult
+    func openNativeSettings(_ destination: SettingsDestination) -> Bool {
+        guard let openSettings else { return false }
         settingsDestination = destination
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
         overviewOpen = false
         identityOpen = false
-        if let showSettings { showSettings() }
-        else { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+        openSettings()
+        return true
     }
 }
 

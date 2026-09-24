@@ -208,14 +208,15 @@ final class IntelligenceAuditStoreTests: XCTestCase {
         return (directory, directory.appendingPathComponent("activity.json"))
     }
 
-    func testAuditPersistsOnlyOperationalMetadata() throws {
+    func testAuditPersistsOnlyOperationalMetadata() async throws {
         let location = try temporaryFile()
         defer { try? FileManager.default.removeItem(at: location.directory) }
         let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let store = IntelligenceAuditStore(file: location.file, now: { date })
+        let store = IntelligenceAuditStore(file: location.file, now: { date }, saveDelay: .milliseconds(10))
 
         let id = store.begin(source: .appleIntelligence, action: "Page label")
         store.finish(id, failed: false)
+        await store.waitForPendingSave()
         let reloaded = IntelligenceAuditStore(file: location.file, now: { date })
 
         XCTAssertEqual(reloaded.events.count, 1)
@@ -256,6 +257,7 @@ final class IntelligenceAuditStoreTests: XCTestCase {
         let started = Date(timeIntervalSince1970: 1_700_000_000)
         let original = IntelligenceAuditStore(file: location.file, now: { started })
         original.begin(source: .jev, action: "Critical reading")
+        original.flush()
 
         let recovered = IntelligenceAuditStore(
             file: location.file,
@@ -270,9 +272,99 @@ final class IntelligenceAuditStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: location.directory) }
         let store = IntelligenceAuditStore(file: location.file)
         store.begin(source: .jev, action: "Meaning search")
+        store.flush()
         store.clear()
 
         XCTAssertTrue(store.events.isEmpty)
+        XCTAssertTrue(IntelligenceAuditStore(file: location.file).events.isEmpty)
+    }
+
+    func testEventsStayCappedAfterMoreInsertsThanTheLimit() throws {
+        let location = try temporaryFile()
+        defer { try? FileManager.default.removeItem(at: location.directory) }
+        let limit = IntelligenceAuditStore.eventLimit
+        let store = IntelligenceAuditStore(file: location.file)
+        for index in 0..<(limit + 25) {
+            store.begin(source: .jev, action: "Action \(index)")
+        }
+
+        XCTAssertEqual(store.events.count, limit)
+        XCTAssertEqual(store.events.first?.action, "Action \(limit + 24)")
+        XCTAssertEqual(store.events.last?.action, "Action 25")
+    }
+
+    func testLoadAppliesTheCapToAnOversizedFile() throws {
+        let location = try temporaryFile()
+        defer { try? FileManager.default.removeItem(at: location.directory) }
+        let limit = IntelligenceAuditStore.eventLimit
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let events = (0..<(limit + 10)).map { index in
+            IntelligenceAuditEvent(
+                id: UUID(), source: .jev, action: "Action \(index)",
+                startedAt: start.addingTimeInterval(Double(index)), finishedAt: nil,
+                outcome: .completed, durationMilliseconds: 0
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(events).write(to: location.file)
+
+        let store = IntelligenceAuditStore(file: location.file)
+        XCTAssertEqual(store.events.count, limit)
+        XCTAssertEqual(store.events.first?.action, "Action \(limit + 9)")
+    }
+
+    func testBurstOfEventsLandsInOneDebouncedWrite() async throws {
+        let location = try temporaryFile()
+        defer { try? FileManager.default.removeItem(at: location.directory) }
+        let store = IntelligenceAuditStore(file: location.file, saveDelay: .milliseconds(50))
+        for index in 0..<40 {
+            let id = store.begin(source: .jev, action: "Action \(index)")
+            store.finish(id, failed: index.isMultiple(of: 2))
+        }
+
+        XCTAssertEqual(store.writeCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: location.file.path))
+
+        await store.waitForPendingSave()
+        XCTAssertEqual(store.writeCount, 1)
+        let attributes = try FileManager.default.attributesOfItem(atPath: location.file.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        XCTAssertEqual(IntelligenceAuditStore(file: location.file).events.count, 40)
+    }
+
+    func testReloadAfterSaveKeepsTheNewestEvents() async throws {
+        let location = try temporaryFile()
+        defer { try? FileManager.default.removeItem(at: location.directory) }
+        let limit = IntelligenceAuditStore.eventLimit
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let store = IntelligenceAuditStore(
+            file: location.file,
+            now: { clock },
+            saveDelay: .milliseconds(10)
+        )
+        for index in 0..<(limit + 5) {
+            clock = clock.addingTimeInterval(1)
+            let id = store.begin(source: .jev, action: "Action \(index)")
+            store.finish(id, failed: false)
+        }
+        await store.waitForPendingSave()
+
+        let reloaded = IntelligenceAuditStore(file: location.file)
+        XCTAssertEqual(reloaded.events, store.events)
+        XCTAssertEqual(reloaded.events.first?.action, "Action \(limit + 4)")
+        XCTAssertEqual(reloaded.events.last?.action, "Action 5")
+    }
+
+    func testClearWinsOverAPendingDebouncedSave() async throws {
+        let location = try temporaryFile()
+        defer { try? FileManager.default.removeItem(at: location.directory) }
+        let store = IntelligenceAuditStore(file: location.file, saveDelay: .milliseconds(10))
+        store.begin(source: .jev, action: "Meaning search")
+        store.clear()
+        await store.waitForPendingSave()
+        try await Task.sleep(for: .milliseconds(50))
+
         XCTAssertTrue(IntelligenceAuditStore(file: location.file).events.isEmpty)
     }
 }

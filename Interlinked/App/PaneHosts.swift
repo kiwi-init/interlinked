@@ -41,9 +41,9 @@ final class PaneHosts {
         return page
     }
 
-    func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind, downloads: DownloadCenter) {
+    func forget(keep: (PaneID) -> Bool, downloads: DownloadCenter) {
         let tracked = Set(browsers.keys).union(lifecycle.panes)
-        for pane in tracked where !keep(pane) || kinds(pane) != .browser {
+        for pane in tracked where !keep(pane) {
             removeBrowser(pane, downloads: downloads)
             lifecycle.close(pane)
             uploadPanes.remove(pane)
@@ -136,6 +136,7 @@ final class PaneHosts {
         guard let pageURL = page.url, let domain = DomainIconCache<NSImage>.domain(pageURL),
               let token = iconCache.begin(domain) else { return }
         iconTasks[domain] = Task { [weak self, weak page, weak workspace] in
+            let deadline = ContinuousClock.now + FaviconDownload.deadline
             let script = "Array.from(document.querySelectorAll('link[rel]')).filter(l => l.rel.split(/\\s+/).some(r => r === 'icon' || r === 'apple-touch-icon')).map(l => l.href).slice(0, 4)"
             let links = (try? await page?.evaluateJavaScript(script)) as? [String] ?? []
             var candidates = DomainIconCache<NSImage>.domain(page?.url) == domain ? links.compactMap(URL.init(string:)) : []
@@ -145,13 +146,14 @@ final class PaneHosts {
             var tried: Set<URL> = []
             for url in candidates where ["https", "http"].contains(url.scheme ?? "") && tried.insert(url).inserted {
                 guard !Task.isCancelled else { return }
+                // Past the deadline the domain completes without an icon.
+                guard ContinuousClock.now < deadline else { break }
                 // Favicons are immutable enough to honor HTTP/URLCache semantics.
                 // Bypassing the cache here duplicated network work on retries
                 // and revisits before the persistent icon store was populated.
                 let request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 8)
-                guard let (data, response) = try? await URLSession.shared.data(for: request),
-                      (response as? HTTPURLResponse)?.statusCode == 200,
-                      data.count < 1_048_576, let image = NSImage(data: data) else { continue }
+                guard let data = await FaviconDownload.data(for: request, until: deadline),
+                      let image = NSImage(data: data) else { continue }
                 icon = image
                 iconData = data
                 break
@@ -255,7 +257,7 @@ final class PaneHosts {
 final class BrowserCoordinator: ChromiumPageDelegate {
     let pane: PaneID
     weak var workspace: Workspace?
-    private var lastURL: URL?
+    private var navigation = PageNavigationTracker()
 
     init(pane: PaneID, workspace: Workspace) {
         self.pane = pane
@@ -263,16 +265,20 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     }
 
     private func update(_ page: ChromiumPage) {
+        apply(navigation.addressChanged(to: page.url), page: page)
+    }
+
+    private func apply(_ effects: PageNavigationEffects, page: ChromiumPage) {
         guard let workspace else { return }
-        let urlChanged = lastURL != page.url
-        if urlChanged {
-            lastURL = page.url
+        if effects.contains(.newDocument) {
+            workspace.builtIns.navigated(pane)
             workspace.assistance.committed(pane)
             workspace.usefulInfo.committed(pane)
-            workspace.builtIns.apply(to: page)
+            workspace.noteSiteMenuDocumentChanged(pane)
         }
+        if effects.contains(.newAddress) { workspace.builtIns.apply(to: page) }
         workspace.hosts.updatePage(page, pane: pane)
-        if urlChanged {
+        if effects.contains(.newAddress) {
             workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces)
             if let url = page.url, url.absoluteString != "about:blank" {
                 workspace.setLineFromHost(pane, url.absoluteString)
@@ -285,11 +291,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     func chromiumPageDidChange(_ page: ChromiumPage) { update(page) }
 
     func chromiumPageDidCommit(_ page: ChromiumPage) {
-        workspace?.builtIns.navigated(pane)
-        workspace?.assistance.committed(pane)
-        workspace?.usefulInfo.committed(pane)
-        workspace?.noteSiteMenuDocumentChanged(pane)
-        update(page)
+        apply(navigation.committed(to: page.url), page: page)
     }
 
     func chromiumPageDidFinish(_ page: ChromiumPage) {

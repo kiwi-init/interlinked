@@ -429,3 +429,13 @@ struct Tab: Codable, Equatable, Identifiable {
         return false
     }
 }
+
+/// Where dictated words are written: the pane dictation started in, else the
+/// active pane. A pane no tab holds any more is never written to, or it would
+/// get a page nobody can see.
+enum DictationTarget {
+    static func pane(started: PaneID?, active: PaneID?, in tabs: [Tab]) -> PaneID? {
+        guard let pane = started ?? active, tabs.contains(where: { $0.contains(pane) }) else { return nil }
+        return pane
+    }
+}

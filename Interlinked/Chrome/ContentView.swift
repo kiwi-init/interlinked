@@ -35,7 +35,7 @@ struct ContentView: View {
         .frame(minWidth: 640, minHeight: 400)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear {
-            workspace.showSettings = openSettings
+            workspace.openSettings = { openSettings() }
             workspace.start()
         }
         .onExitCommand {

@@ -63,7 +63,16 @@ private final class VoiceLevelMeter: @unchecked Sendable {
 @MainActor
 @Observable
 final class Voice {
-    var state: VoiceState = .idle
+    var state: VoiceState = .idle {
+        didSet {
+            // Once a session is over its pane is no longer the target, so a
+            // later dictation can't write to a pane that has since closed.
+            switch state {
+            case .starting, .listening, .finishing: break
+            default: target = nil
+            }
+        }
+    }
     var mode: VoiceMode = .write
     var fnHeld = false
     var target: PaneID?
