@@ -136,6 +136,7 @@ final class PaneHosts {
         guard let pageURL = page.url, let domain = DomainIconCache<NSImage>.domain(pageURL),
               let token = iconCache.begin(domain) else { return }
         iconTasks[domain] = Task { [weak self, weak page, weak workspace] in
+            let deadline = ContinuousClock.now + FaviconDownload.deadline
             let script = "Array.from(document.querySelectorAll('link[rel]')).filter(l => l.rel.split(/\\s+/).some(r => r === 'icon' || r === 'apple-touch-icon')).map(l => l.href).slice(0, 4)"
             let links = (try? await page?.evaluateJavaScript(script)) as? [String] ?? []
             var candidates = DomainIconCache<NSImage>.domain(page?.url) == domain ? links.compactMap(URL.init(string:)) : []
@@ -145,13 +146,14 @@ final class PaneHosts {
             var tried: Set<URL> = []
             for url in candidates where ["https", "http"].contains(url.scheme ?? "") && tried.insert(url).inserted {
                 guard !Task.isCancelled else { return }
+                // Past the deadline the domain completes without an icon.
+                guard ContinuousClock.now < deadline else { break }
                 // Favicons are immutable enough to honor HTTP/URLCache semantics.
                 // Bypassing the cache here duplicated network work on retries
                 // and revisits before the persistent icon store was populated.
                 let request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 8)
-                guard let (data, response) = try? await URLSession.shared.data(for: request),
-                      (response as? HTTPURLResponse)?.statusCode == 200,
-                      data.count < 1_048_576, let image = NSImage(data: data) else { continue }
+                guard let data = await FaviconDownload.data(for: request, until: deadline),
+                      let image = NSImage(data: data) else { continue }
                 icon = image
                 iconData = data
                 break

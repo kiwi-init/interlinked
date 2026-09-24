@@ -15,6 +15,7 @@ Additional local pages:
 - `/public-article` — analytics cookies only.
 - `/contact` — a business address in schema.org data, phone and email links, and sensitive values for Sharing Screen Mode: a valid and an invalid CPF, a test card, an API key, a labeled password, an IBAN, a password field, and an email added after load.
 - `/runtime` — WebSocket echo, service worker registration, fullscreen, and history A/B.
+- `/favicon/endless`, `/favicon/drip`, `/favicon/oversized` — favicon responses that never finish: a fast endless stream, one byte every 0.2 seconds, and a declared 10 MB body sent at 80 KB a second. `FaviconDownloadTests` starts the server on a free port with `python3 test-fixtures/server.py 0`.
 
 Failed login, upload, download, or popup on these local pages is a release blocker. The manual matrix for Gmail, Docs, GitHub, Slack, OAuth, a video meeting, and one checkout flow is `COMPATIBILITY.md`. Do not commit account passwords or payment details.
 

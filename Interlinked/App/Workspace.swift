@@ -541,6 +541,7 @@ final class Workspace {
         copiedPageURLTask?.cancel()
         downloads.prepareForTermination()
         browserHistory.save()
+        intelligenceAudit.flush()
         hosts.stopMemoryPressureMonitoring()
         builtIns.stop()
         keyMonitor.map(NSEvent.removeMonitor)

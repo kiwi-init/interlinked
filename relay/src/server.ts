@@ -36,7 +36,7 @@ const relay = createRelay({
     if (!identifier) throw new Error("App transaction has no identifier");
     return identifier;
   },
-  async callOpenRouter(body) {
+  async callOpenRouter(body, signal) {
     const response = await fetch("https://openrouter.ai/api/alpha/decisions", {
       method: "POST",
       headers: {
@@ -44,7 +44,8 @@ const relay = createRelay({
         "content-type": "application/json",
         "x-title": "Interlinked"
       },
-      body: Buffer.from(body)
+      body: Buffer.from(body),
+      signal
     });
     return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
   }
