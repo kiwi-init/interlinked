@@ -84,6 +84,7 @@ enum ControlSetting: String, CaseIterable {
     case refineLabels = "refine-labels"
     case criticalReading = "critical-reading"
     case sharingScreenMode = "sharing-screen-mode"
+    case browsingHistory = "browsing-history"
     case onboardingAlwaysShow = "onboarding.always-show"
 
     enum Value: Equatable {

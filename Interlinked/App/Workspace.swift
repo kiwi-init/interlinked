@@ -106,7 +106,13 @@ final class Workspace {
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
     var identityOpen = false
-    var pageHistoryOpen = false
+    var pageHistoryOpen = false {
+        didSet { if !pageHistoryOpen { historyClearing = false } }
+    }
+    /// The History panel shows the time ranges it can clear instead of visits.
+    var historyClearing = false
+    /// Oldest first. ⇧⌘T reopens the last.
+    private(set) var recentlyClosed: [ClosedTab] = []
     var quickSwitchOpen = false
     var leftCommandKeyHeld = false
     var rightCommandKeyHeld = false
@@ -126,6 +132,10 @@ final class Workspace {
     @ObservationIgnored private var commandStateObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var control: ControlServer?
     @ObservationIgnored private var copiedPageURLTask: Task<Void, Never>?
+    @ObservationIgnored private var scrollMarks: [PaneID: ScrollMark] = [:]
+    @ObservationIgnored private var scrollPanes: Set<PaneID> = []
+    @ObservationIgnored private var scrollTask: Task<Void, Never>?
+    @ObservationIgnored private var scrollMonitor: Any?
 
     var activeTab: Tab? {
         tabs.indices.contains(active) ? tabs[active] : nil
@@ -418,6 +428,7 @@ final class Workspace {
         }
         if activeTab?.id == id { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        rememberClosed(tabs[index])
         let selected = activeTab?.id
         tabs.remove(at: index)
         active = tabs.firstIndex(where: { $0.id == selected }) ?? min(active, max(0, tabs.count - 1))
@@ -427,6 +438,7 @@ final class Workspace {
 
     func escape() {
         if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
+        else if historyClearing { historyClearing = false }
         else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.panel != nil { assistance.closePanel() }
@@ -467,6 +479,16 @@ final class Workspace {
         let open = !pageHistoryOpen
         if open { preparePagePanel() }
         pageHistoryOpen = open
+    }
+
+    func beginClearingHistory() {
+        guard pageHistoryOpen, !browserHistory.visits.isEmpty else { return }
+        historyClearing = true
+    }
+
+    func clearHistory(_ range: HistoryRange) {
+        browserHistory.remove(range)
+        historyClearing = false
     }
 
     func toggleDownloads() {
@@ -561,6 +583,8 @@ final class Workspace {
         keyMonitor.map(NSEvent.removeMonitor)
         flagsMonitor.map(NSEvent.removeMonitor)
         mouseMonitor.map(NSEvent.removeMonitor)
+        scrollMonitor.map(NSEvent.removeMonitor)
+        scrollTask?.cancel()
         commandStateObservers.forEach(NotificationCenter.default.removeObserver)
         commandStateObservers.removeAll()
         setCommandKeyState(CommandKeyState(left: false, right: false))
@@ -624,6 +648,7 @@ final class Workspace {
             }
         }
         let current = activeTab?.id
+        let savedPanes = Set(saved.flatMap(\.panes))
         return Session(
             version: 0,
             tabs: saved,
@@ -634,7 +659,9 @@ final class Workspace {
             surfaces: surfaces.entries(),
             tint: tint,
             sidebar: Float(sidebar),
-            sidebar_last: Float(sidebarLast)
+            sidebar_last: Float(sidebarLast),
+            closed: recentlyClosed,
+            scroll: scrollMarks.values.filter { savedPanes.contains($0.pane) }.sorted { $0.pane.rawValue < $1.pane.rawValue }
         ).stamped()
     }
 
@@ -653,7 +680,12 @@ final class Workspace {
         } else {
             sidebar = CGFloat(session.sidebar).clamped(to: Metrics.sidebarMin...Metrics.sidebarMax)
         }
-
+        recentlyClosed = session.closed
+        scrollMarks = [:]
+        for mark in session.scroll where paneAlive(mark.pane) {
+            scrollMarks[mark.pane] = mark
+            hosts.expectScroll(mark)
+        }
     }
 
     func keep() {
@@ -786,6 +818,7 @@ final class Workspace {
         if tabs[index].isSplit, let pane = onboarding.pane, tabs[index].contains(pane) {
             onboarding.record(.closedPane)
         }
+        rememberClosed(target, name: tabs[index].isSplit ? nil : tabs[index].name)
         if tabs[index].close(target) {
             finishClosing()
             return true
@@ -800,6 +833,70 @@ final class Workspace {
 
     func closeActive() {
         if let pane = activePane { _ = closePane(pane) }
+    }
+
+    // MARK: - Recently closed
+
+    private func rememberClosed(_ tab: Tab) {
+        for pane in tab.panes {
+            rememberClosed(pane, name: pane == tab.active ? tab.name : nil)
+        }
+    }
+
+    /// Pages only. A new tab page or the Onboarding tab has nothing to reopen.
+    private func rememberClosed(_ pane: PaneID, name: String?) {
+        guard !onboarding.contains(pane), surfaces.holdsPage(pane) else { return }
+        let loaded = hosts.existingBrowser(pane)?.url.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+        let url = loaded?.absoluteString ?? surfaces.line(pane)
+        recentlyClosed = ClosedTab.remember(ClosedTab(url: url, name: name, closed: Date()), in: recentlyClosed)
+    }
+
+    /// ⇧⌘T: the last closed page, in a new tab, with the name you gave it.
+    func reopenClosedTab() {
+        guard let closed = recentlyClosed.popLast() else { return }
+        openAddress(closed.url)
+        if let name = closed.name, let tab = activeTab?.id { nameTab(tab, name) }
+    }
+
+    // MARK: - Scroll position
+
+    /// Scrolling or typing may have moved the visible pages. Once it stops,
+    /// note how far each one is scrolled for the next launch.
+    private func noteScrollSoon() {
+        guard let tab = activeTab else { return }
+        scrollPanes.formUnion(tab.panes)
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            let panes = self.scrollPanes
+            self.scrollPanes = []
+            await self.sampleScroll(panes)
+        }
+    }
+
+    private func sampleScroll(_ panes: Set<PaneID>) async {
+        var changed = false
+        for pane in panes.sorted(by: { $0.rawValue < $1.rawValue }) {
+            guard !onboarding.contains(pane), let page = hosts.existingBrowser(pane), let url = page.url,
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
+            let value = try? await page.evaluateJavaScript("window.scrollY")
+            guard paneAlive(pane), hosts.existingBrowser(pane) === page, page.url == url,
+                  let y = (value as? NSNumber)?.doubleValue else { continue }
+            let mark = y > 0 ? ScrollMark(pane: pane, url: url.absoluteString, title: page.title ?? "", y: y) : nil
+            if scrollMarks[pane] != mark {
+                scrollMarks[pane] = mark
+                changed = true
+            }
+        }
+        if changed { keep() }
+    }
+
+    /// A new document makes the old position meaningless.
+    func noteDocumentChanged(_ pane: PaneID, url: URL?) {
+        if let mark = scrollMarks[pane], mark.url != url?.absoluteString {
+            scrollMarks[pane] = nil
+        }
     }
 
     // MARK: - Onboarding
@@ -1019,7 +1116,7 @@ final class Workspace {
         assistance.configure()
     }
 
-    /// ⌘⇧T: a new page beside this one, or a new tab when already split.
+    /// ⌥⌘T: a new page beside this one, or a new tab when already split.
     func newPageBeside() {
         if activeTab?.canSplit == true { splitActive() } else { newPage() }
     }
@@ -1410,6 +1507,7 @@ final class Workspace {
         surfaces.forget(keep: paneAlive)
         siteMenus = siteMenus.filter { paneAlive($0.key) }
         declinedSiteMenu = declinedSiteMenu.filter(paneAlive)
+        scrollMarks = scrollMarks.filter { paneAlive($0.key) }
         if let editing {
             let gone: Bool
             switch editing.target {
@@ -1460,6 +1558,11 @@ final class Workspace {
                 return nil
             }
             if self.performApplicationShortcut(event) { return nil }
+            self.noteScrollSoon()
+            return event
+        }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            if let self, event.window === self.browserWindow { self.noteScrollSoon() }
             return event
         }
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
@@ -1545,6 +1648,8 @@ final class Workspace {
         case ("t", .command):
             newPage()
         case ("t", [.command, .shift]):
+            reopenClosedTab()
+        case ("t", [.command, .option]):
             newPageBeside()
         case ("s", [.command, .control]):
             toggleOverview()

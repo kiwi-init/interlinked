@@ -129,21 +129,33 @@ extension Control {
         case "open": if !workspace.pageHistoryOpen { workspace.togglePageHistory() }
         case "close": workspace.pageHistoryOpen = false
         case "toggle": workspace.togglePageHistory()
-        case "visit", "remove":
+        case "visit", "remove", "remove-site":
             guard let index = words.dropFirst().first.flatMap(Int.init), visits.indices.contains(index) else {
                 return error("history \(words[0]) takes a visit index from history state")
             }
-            if words[0] == "visit" {
-                workspace.openHistoryVisit(visits[index])
-            } else {
-                workspace.browserHistory.remove(visits[index].id)
+            switch words[0] {
+            case "visit": workspace.openHistoryVisit(visits[index])
+            case "remove": workspace.browserHistory.remove(visits[index].id)
+            default: workspace.browserHistory.removeSite(visits[index].host)
             }
+        case "clear":
+            guard let name = words.dropFirst().first else {
+                guard workspace.pageHistoryOpen, !visits.isEmpty else { return error("history clear needs the panel open with visits in it") }
+                workspace.beginClearingHistory()
+                break
+            }
+            guard let range = HistoryRange(rawValue: name) else {
+                return error("history clear takes \(HistoryRange.allCases.map(\.rawValue).joined(separator: ", "))")
+            }
+            workspace.clearHistory(range)
         default:
-            return error("history takes state, open, close, toggle, visit N, or remove N")
+            return error("history takes state, open, close, toggle, visit N, remove N, remove-site N, or clear [hour|today|all]")
         }
         let shown = workspace.browserHistory.visits
         return json([
             "open": workspace.pageHistoryOpen,
+            "clearing": workspace.historyClearing,
+            "enabled": workspace.browserHistory.enabled,
             "count": shown.count,
             "visits": shown.prefix(50).enumerated().map { index, visit in
                 ["index": index, "title": visit.title, "host": visit.host, "url": visit.url,
@@ -399,6 +411,7 @@ extension Control {
         case .refineLabels: return assistant.automaticLabels
         case .criticalReading: return assistant.criticalReadingMode.rawValue
         case .sharingScreenMode: return workspace.sharingScreenMode
+        case .browsingHistory: return workspace.browserHistory.enabled
         case .onboardingAlwaysShow: return workspace.onboarding.alwaysShow
         }
     }
@@ -438,6 +451,7 @@ extension Control {
                 assistant.configure()
             }
         case (.sharingScreenMode, .bool(let on)): workspace.sharingScreenMode = on
+        case (.browsingHistory, .bool(let on)): workspace.browserHistory.enabled = on
         case (.onboardingAlwaysShow, .bool(let on)): workspace.onboarding.alwaysShow = on
         default: return "\(setting.rawValue) takes \(setting.choices.joined(separator: " or "))"
         }

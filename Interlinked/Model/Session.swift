@@ -1,16 +1,23 @@
 import Foundation
 
-private final class SessionWriter: @unchecked Sendable {
+/// Writes the session off the main thread, at most 150 ms after a change,
+/// so a crash loses no more than that. Each write also refreshes the backup.
+final class SessionWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "computer.kiwi.session-writer", qos: .utility)
+    private let delay: DispatchTimeInterval
     private var pending: (data: Data, path: URL)?
     private var scheduled = false
+
+    init(delay: DispatchTimeInterval = .milliseconds(150)) {
+        self.delay = delay
+    }
 
     func write(_ data: Data, to path: URL) {
         queue.async { [self] in
             pending = (data, path)
             guard !scheduled else { return }
             scheduled = true
-            queue.asyncAfter(deadline: .now() + .milliseconds(150)) { [self] in
+            queue.asyncAfter(deadline: .now() + delay) { [self] in
                 drain()
             }
         }
@@ -34,16 +41,48 @@ private final class SessionWriter: @unchecked Sendable {
         do {
             try FileManager.default.createDirectory(at: pending.path.deletingLastPathComponent(), withIntermediateDirectories: true)
             try pending.data.write(to: pending.path, options: .atomic)
+            try pending.data.write(to: Session.backupPath(for: pending.path), options: .atomic)
         } catch {
             // A missed write is not worth interrupting anyone over.
         }
     }
 }
 
+/// A tab that was closed, kept so ⇧⌘T can bring it back.
+struct ClosedTab: Codable, Equatable {
+    static let limit = 25
+
+    var url: String
+    /// The name you gave the tab. Nil when it went by the page's title.
+    var name: String?
+    var closed: Date
+
+    /// Oldest first. The last one is what ⇧⌘T reopens.
+    static func remember(_ tab: ClosedTab, in list: [ClosedTab]) -> [ClosedTab] {
+        Array((list + [tab]).suffix(limit))
+    }
+}
+
+/// How far a page was scrolled, and which document that was. A position
+/// is only put back on the same address with the same title.
+struct ScrollMark: Codable, Equatable {
+    var pane: PaneID
+    var url: String
+    var title: String
+    var y: Double
+
+    func fits(url: URL?, title: String?) -> Bool {
+        y > 0 && url?.absoluteString == self.url && (title ?? "") == self.title
+    }
+}
+
+/// What reopens at launch. Form values, passwords, and back and forward
+/// history are never part of it.
 struct Session: Codable {
     private static let writer = SessionWriter()
 
-    static let version: UInt32 = 1
+    /// 2 added recently closed tabs and scroll positions.
+    static let version: UInt32 = 2
 
     var version: UInt32
     var tabs: [Tab]
@@ -55,8 +94,11 @@ struct Session: Codable {
     var tint: Tint
     var sidebar: Float
     var sidebar_last: Float
+    var closed: [ClosedTab] = []
+    var scroll: [ScrollMark] = []
 
-    var isKnown: Bool { version == Session.version }
+    /// Every version this build can read. Older ones gain empty new fields.
+    var isKnown: Bool { (1...Session.version).contains(version) }
 
     func stamped() -> Session {
         var copy = self
@@ -100,13 +142,31 @@ struct Session: Codable {
             .appendingPathComponent("session.json")
     }
 
+    static func backupPath(for path: URL) -> URL {
+        path.deletingLastPathComponent().appendingPathComponent(path.lastPathComponent + ".backup")
+    }
+
     static func read() -> Session? {
-        guard let path = path(),
-              let data = try? Data(contentsOf: path),
+        path().flatMap { read(at: $0) }
+    }
+
+    /// An unreadable session is kept aside as `session.json.corrupt-<time>`
+    /// and the backup from the last good save opens instead.
+    static func read(at path: URL, now: Date = Date()) -> Session? {
+        guard FileManager.default.fileExists(atPath: path.path) else { return nil }
+        if let session = decode(path) { return session }
+        let stamp = Int((now.timeIntervalSince1970 * 1_000).rounded())
+        let aside = path.deletingLastPathComponent().appendingPathComponent("\(path.lastPathComponent).corrupt-\(stamp)")
+        try? FileManager.default.moveItem(at: path, to: aside)
+        return decode(backupPath(for: path))
+    }
+
+    private static func decode(_ path: URL) -> Session? {
+        guard let data = try? Data(contentsOf: path),
               let session = try? JSONDecoder().decode(Session.self, from: data),
               session.isKnown
         else { return nil }
-        return session
+        return session.stamped()
     }
 
     static func data(_ session: Session) -> Data? {
@@ -128,7 +188,7 @@ struct Session: Codable {
 
 extension Session {
     enum CodingKeys: String, CodingKey {
-        case version, tabs, active, next_tab, next_pane, next_split, surfaces, tint, sidebar, sidebar_last
+        case version, tabs, active, next_tab, next_pane, next_split, surfaces, tint, sidebar, sidebar_last, closed, scroll
     }
 
     init(from decoder: Decoder) throws {
@@ -143,5 +203,7 @@ extension Session {
         tint = try container.decodeIfPresent(Tint.self, forKey: .tint) ?? .ink
         sidebar = try container.decodeIfPresent(Float.self, forKey: .sidebar) ?? Float(Metrics.sidebarWidth)
         sidebar_last = try container.decodeIfPresent(Float.self, forKey: .sidebar_last) ?? Float(Metrics.sidebarWidth)
+        closed = Array((try container.decodeIfPresent([ClosedTab].self, forKey: .closed) ?? []).suffix(ClosedTab.limit))
+        scroll = try container.decodeIfPresent([ScrollMark].self, forKey: .scroll) ?? []
     }
 }

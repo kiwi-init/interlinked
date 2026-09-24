@@ -39,7 +39,7 @@ private extension SettingsDestination {
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
         case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "critical reading", "always on", "labels", "meaning search"]
         case .sites: ["permissions", "camera", "microphone", "location", "grants", "exceptions", "revoke", "blocking off", "kept light", "navigation"]
-        case .privacy: ["sharing screen mode", "screen sharing", "presenting", "blur", "cache", "activity", "audit", "export", "clear", "data", "signed in", "passwords"]
+        case .privacy: ["history", "browsing history", "sharing screen mode", "screen sharing", "presenting", "blur", "cache", "activity", "audit", "export", "clear", "data", "signed in", "passwords"]
         }
     }
 
@@ -556,6 +556,7 @@ private struct PrivacySettingsPane: View {
     @Environment(\.openWindow) private var openWindow
     @State private var message = ""
     @State private var confirmClear = false
+    @State private var confirmHistoryOff = false
 
     var body: some View {
         let assistant = workspace.assistance
@@ -576,6 +577,26 @@ private struct PrivacySettingsPane: View {
                 }
             } header: {
                 SettingsHero(section: .privacy, firstSection: "What leaves this Mac")
+            }
+
+            Section {
+                Toggle(isOn: Binding(
+                    get: { workspace.browserHistory.enabled },
+                    set: { on in
+                        if !on && !workspace.browserHistory.visits.isEmpty {
+                            confirmHistoryOff = true
+                        } else {
+                            workspace.browserHistory.enabled = on
+                        }
+                    }
+                )) {
+                    Text("Keep browsing history")
+                    Text("Pages you visit stay on this Mac for \(HistoryRetention.standard.days) days. Turning this off deletes your history.")
+                }
+                .toggleStyle(PointingSwitch())
+                .accessibilityIdentifier("settings-browsing-history")
+            } header: {
+                Text("History")
             }
 
             Section {
@@ -636,6 +657,14 @@ private struct PrivacySettingsPane: View {
             }
         }
         .settingsPane()
+        .confirmationDialog("Turn off browsing history?", isPresented: $confirmHistoryOff, titleVisibility: .visible) {
+            Button("Turn Off and Delete History", role: .destructive) {
+                workspace.browserHistory.enabled = false
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes every visit saved on this Mac and stops recording new ones.")
+        }
         .confirmationDialog("Clear the activity log?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear Activity Log", role: .destructive) {
                 workspace.intelligenceAudit.clear()

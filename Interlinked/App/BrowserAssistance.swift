@@ -466,16 +466,7 @@ final class BrowserAssistance {
 
     func related() {
         guard let workspace else { return }
-        let pages = workspace.tabs.prefix(8).compactMap { tab -> ResearchPage? in
-            guard let page = metadata[tab.active] else { return nil }
-            return ResearchPage(
-                id: String(tab.id.rawValue),
-                title: page.title.isEmpty ? page.host : page.title,
-                detail: page.summary,
-                host: page.host,
-                about: portraits[tab.active]?.about ?? ""
-            )
-        }
+        let pages = ResearchRelations.pages(tabs: workspace.tabs, metadata: metadata, portraits: portraits)
         groups = ResearchRelations.groups(pages)
         guard pages.count >= 2, enabled, hasJevAccess else { return }
         let key = "groups", revision = token(key)
