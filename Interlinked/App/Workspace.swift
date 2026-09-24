@@ -60,7 +60,8 @@ final class Workspace {
     }
     private(set) var searchResults: [SearchResult] = []
     var selectedSearchResult: Int?
-    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    let search = SearchSettings()
+    @ObservationIgnored private lazy var remoteSuggestions = RemoteSuggestions(settings: search)
     var sidebar: CGFloat = Metrics.sidebarWidth
     var sidebarLast: CGFloat = Metrics.sidebarWidth
     var voice = Voice()
@@ -1182,21 +1183,28 @@ final class Workspace {
     }
 
     private func refreshSearch() {
-        searchTask?.cancel()
+        remoteSuggestions.cancel()
         searchResults = []
         selectedSearchResult = nil
-        guard let editing, editing.pane != nil else { return }
+        guard let editing, let pane = editing.pane else { return }
         let query = editing.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard query.count >= 2, navigationURL(from: query) == nil,
-              editing.original.map({ $0 != query }) ?? true else { return }
-        searchTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(350))
-                let results = try await SearchResult.fetch(query)
-                try Task.checkCancellation()
-                guard let self, self.editing?.text == editing.text, self.editing?.target == editing.target else { return }
-                self.searchResults = results
-            } catch { /* Return still searches when previews are unavailable. */ }
+        guard query.count >= 2, editing.original.map({ $0 != query }) ?? true else { return }
+        searchResults = LocalSuggestions.rank(query, tabs: localCandidates(excluding: pane), history: browserHistory.visits)
+        remoteSuggestions.request(query) { [weak self] remote in
+            guard let self, self.editing?.text == editing.text, self.editing?.target == editing.target else { return }
+            let local = Set(self.searchResults.map(\.url))
+            self.searchResults += remote.filter { !local.contains($0.url) }
+        }
+    }
+
+    /// The pages open in other tabs, for local suggestions.
+    private func localCandidates(excluding pane: PaneID) -> [LocalCandidate] {
+        tabs.compactMap { tab in
+            let page = tab.active
+            guard !tab.contains(pane), !onboarding.contains(page), surfaces.kind(page) == .browser else { return nil }
+            let line = surfaces.line(page)
+            guard !line.isEmpty else { return nil }
+            return LocalCandidate(title: title(tab), url: address(from: line).absoluteString)
         }
     }
 

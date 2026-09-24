@@ -24,7 +24,7 @@ private extension SettingsDestination {
 
     var summary: String {
         switch self {
-        case .general: "The site menu, useful page information, and downloads."
+        case .general: "The site menu, search, useful page information, and downloads."
         case .pages: "Blocking and dark pages, applied to every site you visit."
         case .intelligence: "Which models Interlinked uses, and when they run."
         case .sites: "Everything you have allowed, denied, or changed for a single site."
@@ -35,7 +35,7 @@ private extension SettingsDestination {
     /// Search matches what a pane contains, not only its name.
     var keywords: [String] {
         switch self {
-        case .general: ["site menu", "header", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
+        case .general: ["site menu", "header", "search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
         case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "critical reading", "always on", "labels", "meaning search"]
         case .sites: ["permissions", "camera", "microphone", "location", "grants", "exceptions", "revoke", "blocking off", "kept light", "navigation"]
@@ -130,6 +130,8 @@ private struct GeneralSettingsPane: View {
                 SettingsHero(section: .general, firstSection: "Site menu")
             }
 
+            SearchSection()
+
             Section {
                 Toggle(isOn: $usefulInfo.showsAddress) {
                     Label {
@@ -178,6 +180,58 @@ private struct GeneralSettingsPane: View {
             #endif
         }
         .settingsPane()
+    }
+}
+
+private struct SearchSection: View {
+    @Environment(Workspace.self) private var workspace
+
+    var body: some View {
+        @Bindable var search = workspace.search
+        Section {
+            LabeledContent {
+                Picker("Search provider", selection: $search.provider) {
+                    ForEach(SearchProvider.allCases) { Text($0.name).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .pointingHandCursor()
+                .accessibilityIdentifier("settings-search-provider")
+            } label: {
+                Text("Search provider")
+            }
+            Toggle(isOn: $search.remoteSuggestions) {
+                Text("Show suggestions from the search provider")
+                Text(search.remoteSuggestions
+                     ? "Typed text is sent to \(search.suggestionProvider.name) after a short pause."
+                     : "Local suggestions only: typed text stays on this Mac until you press Return.")
+            }
+            .toggleStyle(PointingSwitch())
+            .accessibilityIdentifier("settings-remote-suggestions")
+            if search.remoteSuggestions {
+                DisclosureGroup {
+                    LabeledContent {
+                        Picker("Suggestions from", selection: $search.suggestionOverride) {
+                            Text("Same as search provider").tag(SearchProvider?.none)
+                            Divider()
+                            ForEach(SearchProvider.allCases) { Text($0.name).tag(SearchProvider?.some($0)) }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize()
+                        .pointingHandCursor()
+                        .accessibilityIdentifier("settings-suggestion-provider")
+                    } label: {
+                        Text("Suggestions from")
+                    }
+                } label: {
+                    Text("Advanced").pointingHandCursor()
+                }
+            }
+        } header: {
+            Text("Search")
+        }
     }
 }
 

@@ -85,6 +85,12 @@ enum ControlSetting: String, CaseIterable {
     case criticalReading = "critical-reading"
     case sharingScreenMode = "sharing-screen-mode"
     case onboardingAlwaysShow = "onboarding.always-show"
+    case searchProvider = "search-provider"
+    case remoteSuggestions = "remote-suggestions"
+    case suggestionProvider = "suggestion-provider"
+
+    /// The suggestion provider choice that follows the search provider.
+    static let sameAsSearch = "same"
 
     enum Value: Equatable {
         case bool(Bool)
@@ -96,6 +102,8 @@ enum ControlSetting: String, CaseIterable {
         switch self {
         case .darkPages: PageDarkMode.allCases.map(\.rawValue)
         case .criticalReading: CriticalReadingMode.allCases.map(\.rawValue)
+        case .searchProvider: SearchProvider.allCases.map(\.rawValue)
+        case .suggestionProvider: [Self.sameAsSearch] + SearchProvider.allCases.map(\.rawValue)
         default: ["on", "off"]
         }
     }
@@ -103,7 +111,7 @@ enum ControlSetting: String, CaseIterable {
     func parse(_ raw: String) -> Value? {
         let written = Self.folded(raw)
         switch self {
-        case .darkPages, .criticalReading:
+        case .darkPages, .criticalReading, .searchProvider, .suggestionProvider:
             return choices.first { Self.folded($0) == written }.map(Value.choice)
         default:
             switch written {
