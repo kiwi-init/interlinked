@@ -124,6 +124,9 @@ final class Workspace {
     @ObservationIgnored private var commandStateObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var control: ControlServer?
     @ObservationIgnored private var copiedPageURLTask: Task<Void, Never>?
+    /// SwiftUI's way to show the Settings scene, handed over by the window.
+    /// `showSettingsWindow:` no longer opens it.
+    @ObservationIgnored var showSettings: OpenSettingsAction?
 
     var activeTab: Tab? {
         tabs.indices.contains(active) ? tabs[active] : nil
@@ -431,6 +434,13 @@ final class Workspace {
         }
         else if overviewOpen { setOverviewOpen(false) }
         else { cancelListening() }
+    }
+
+    /// Something Escape puts back. The page itself may hold focus, so the
+    /// key monitor takes Escape for these rather than leaving it to SwiftUI.
+    var escapeCloses: Bool {
+        usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.panel != nil || identityOpen
+            || siteMenuSearching || siteMenuExpanded != nil || editing != nil || overviewOpen
     }
 
     func toggleIdentity() {
@@ -1413,9 +1423,7 @@ final class Workspace {
                 }
                 return event
             }
-            if event.keyCode == 53,
-               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.panel != nil || self.usefulInfo.contactOpen ||
-               self.editing != nil || self.overviewOpen {
+            if event.keyCode == 53, self.escapeCloses {
                 self.escape()
                 return nil
             }
@@ -1527,20 +1535,21 @@ final class Workspace {
         case ("r", .command):
             reloadActivePage()
         case (",", .command):
-            openNativeSettings()
+            openNativeSettings(.general)
         default:
             return false
         }
         return true
     }
 
-    private func openNativeSettings() {
-        settingsDestination = .general
+    func openNativeSettings(_ destination: SettingsDestination) {
+        settingsDestination = destination
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
         overviewOpen = false
         identityOpen = false
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if let showSettings { showSettings() }
+        else { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
     }
 }
 

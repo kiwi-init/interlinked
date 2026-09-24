@@ -32,8 +32,57 @@ enum Control {
         "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
-        "site-menu [state|search|close|home|enable|disable|page]",
+        "site-menu [state|search|close|home|enable|disable|page|more|item ID|submit QUERY|restore]",
+        "new-page",
+        "new-page-beside",
+        "navigate ADDRESS",
+        "open-address ADDRESS",
+        "back [pane]",
+        "forward [pane]",
+        "reload",
+        "recover [pane]",
+        "copy-url",
+        "click pane",
+        "escape",
+        "key KEY [MODS] [to browser|key|settings]",
+        "edit-tab [index]",
+        "close-whole-tab [index]",
+        "overview search QUERY|submit QUERY",
+        "suggestions [state|next|prev|submit|open N]",
+        "find [state|open [text]|query text|next|prev|meaning on|off|close]",
+        "reading [state|open|toggle|close]",
+        "share-page [state|request|allow|remember|cancel|stop]",
+        "history [state|open|close|toggle|visit N|remove N]",
+        "downloads [state|open|close|toggle|clear|cancel N|reveal N|allow-notifications]",
+        "quick-switch [state|show|hide|toggle|select N]",
+        "useful-info [state|copy address|copy contact [N]|contact open|close]",
+        "onboarding step STEP|feature FEATURE on|off|accept-reading|decline-reading",
+        "settings [state|get NAME|set NAME VALUE|open [pane]|close|remove-jev-key|clear-ai-cache|update-lists]",
+        "sites [state|remove GROUP SITE [KIND]|remove-all GROUP]",
+        "activity [state|export PATH|clear]",
         "quit",
+    ]
+
+    static let readCommands = [
+        "state",
+        "commands",
+        "engine-state",
+        "assistance-state",
+        "identity",
+        "measure-frames [pane]",
+        "site-menu",
+        "useful-info",
+        "find",
+        "reading",
+        "share-page",
+        "history",
+        "downloads",
+        "quick-switch",
+        "suggestions",
+        "settings",
+        "sites",
+        "activity",
+        "windows",
     ]
 
     static let maxRequestBytes = 64 * 1024
@@ -60,12 +109,90 @@ enum Control {
         switch command {
         case "commands":
             return json([
-                "reads": ["state", "commands", "identity", "measure-frames [pane]", "site-menu", "useful-info"],
+                "reads": readCommands,
                 "writes": writeCommands,
             ])
 
         case "state":
             return json(snapshot(workspace))
+
+        case "windows":
+            return json(windows(workspace))
+
+        case "key":
+            return key(words, workspace)
+
+        case "escape":
+            workspace.escape()
+            return ok()
+
+        case "find": return find(words, workspace)
+        case "reading": return reading(words, workspace)
+        case "share-page": return sharePage(words, workspace)
+        case "history": return history(words, workspace)
+        case "downloads": return downloads(words, workspace)
+        case "quick-switch": return quickSwitch(words, workspace)
+        case "useful-info": return usefulInfo(words, workspace)
+        case "suggestions": return suggestions(words, workspace)
+        case "settings": return settings(words, workspace)
+        case "sites": return sites(words, workspace)
+        case "activity": return activity(words, workspace)
+
+        case "new-page":
+            workspace.newPage()
+            return ok()
+
+        case "new-page-beside":
+            workspace.newPageBeside()
+            return ok()
+
+        case "navigate", "open-address":
+            let address = words.joined(separator: " ")
+            guard !address.isEmpty else { return error("\(command) needs an address") }
+            command == "navigate" ? workspace.navigateActive(address) : workspace.openAddress(address)
+            return ok()
+
+        case "back", "forward":
+            return withPane(workspace, words.first) { pane in
+                guard let page = workspace.hosts.existingBrowser(pane) else { return error("no loaded web page") }
+                let able = command == "back" ? workspace.hosts.canGoBack[pane, default: false] : workspace.hosts.canGoForward[pane, default: false]
+                guard able else { return error("nothing to go \(command) to") }
+                workspace.discardLine()
+                command == "back" ? page.goBack() : page.goForward()
+                return ok()
+            }
+
+        case "reload":
+            workspace.reloadActivePage()
+            return ok()
+
+        case "recover":
+            return withPane(workspace, words.first) { pane in
+                guard workspace.hosts.recovery(for: pane) != nil else { return error("that page is not waiting to recover") }
+                workspace.recoverPane(pane)
+                return ok()
+            }
+
+        case "copy-url":
+            return workspace.copyCurrentPageURL() ? ok() : error("no web page to copy")
+
+        case "click":
+            return withPane(workspace, words.first) { pane in
+                guard workspace.paneAlive(pane) else { return error("no pane with that id") }
+                workspace.clickPane(pane)
+                return ok()
+            }
+
+        case "edit-tab", "close-whole-tab":
+            let index = words.first.flatMap(Int.init)
+            let tab = index.map { workspace.tabs.indices.contains($0) ? workspace.tabs[$0] : nil } ?? workspace.activeTab
+            guard let tab else { return error("no tab \(words.first ?? "")") }
+            if command == "edit-tab" {
+                workspace.editTab(tab.id)
+            } else {
+                workspace.closeTab(tab.id)
+            }
+            return ok()
 
         case "engine-state":
             return json([
@@ -101,8 +228,25 @@ enum Control {
                 return ok()
             case "enable": workspace.usesSiteMenu = true
             case "disable": workspace.usesSiteMenu = false
+            case "more":
+                guard workspace.siteMenu != nil else { return error("this page has no site menu") }
+                workspace.siteMenuExpanded = SiteMenuItem.moreID
+            case "item":
+                // By id, or by label as the bar shows it.
+                let named = words.dropFirst().joined(separator: " ")
+                let items = workspace.siteMenu.map { $0.items + $0.items.flatMap(\.children) } ?? []
+                guard let item = items.first(where: { $0.id == named })
+                        ?? items.first(where: { $0.label.caseInsensitiveCompare(named) == .orderedSame }) else {
+                    return error("no site menu item '\(named)'")
+                }
+                workspace.activateSiteMenuItem(item)
+            case "submit":
+                guard workspace.siteMenu?.search != nil else { return error("this site menu has no search") }
+                workspace.submitSiteSearch(words.dropFirst().joined(separator: " "))
+            case "restore":
+                workspace.restoreSiteHeader()
             case "state", nil: break
-            default: return error("usage: site-menu [state|search|close]")
+            default: return error("site-menu takes state, search, close, home, enable, disable, page, more, item ID, submit QUERY, or restore")
             }
             guard let menu = workspace.siteMenu else {
                 return json(["shown": false, "uses_site_menu": workspace.usesSiteMenu])
@@ -119,7 +263,10 @@ enum Control {
                 "search": menu.search.map {
                     ["action": $0.action, "query_param": $0.queryParam, "placeholder": $0.placeholder]
                 } ?? [:],
-                "items": menu.items.map { ["label": $0.label, "children": $0.children.count] },
+                "items": menu.items.map { item in
+                    ["id": item.id, "label": item.label, "href": item.href, "current": item.current,
+                     "children": item.children.map { ["id": $0.id, "label": $0.label, "href": $0.href] }] as [String: Any]
+                },
             ])
 
         case "assistance-state":
@@ -358,9 +505,21 @@ enum Control {
             if words.isEmpty {
                 return json([
                     "open": workspace.overviewOpen,
+                    "groups": workspace.assistance.groups.map { ["title": $0.title, "members": $0.members] as [String: Any] },
                 ])
             }
             switch words[0] {
+            case "search", "submit":
+                // The overview's search field: matching tabs, and Return opens
+                // the first match or goes to what was typed.
+                let query = words.dropFirst().joined(separator: " ")
+                let matches = workspace.tabs.filter { overviewMatches(query, $0, workspace) }
+                if words[0] == "submit" {
+                    if let tab = matches.first { workspace.selectWork(tab.id) }
+                    else if !query.isEmpty { workspace.openAddress(query) }
+                    return ok()
+                }
+                return json(["matches": matches.map { ["id": Int($0.id.rawValue), "title": workspace.title($0)] as [String: Any] }])
             case "hide", "collapse":
                 workspace.setOverviewOpen(false)
                 return ok()
@@ -453,10 +612,26 @@ enum Control {
             case "open": workspace.openOnboarding()
             case "close": workspace.closeOnboarding()
             case "reset": workspace.onboarding.reset()
+            case "step":
+                guard let step = words.dropFirst().first.flatMap(OnboardingStep.init(rawValue:)) else {
+                    return error("onboarding step takes one of: \(OnboardingStep.allCases.map(\.rawValue).joined(separator: " "))")
+                }
+                workspace.advanceOnboarding(step)
+            case "feature":
+                guard words.count == 3, let feature = OnboardingFeature(rawValue: words[1]), let on = onOff(words[2]) else {
+                    return error("onboarding feature takes a feature from the scene and on or off")
+                }
+                workspace.binding(for: feature).wrappedValue = on
+            case "accept-reading":
+                guard workspace.onboardingAsksReadingConsent else { return error("onboarding is not asking about Always on") }
+                workspace.onboardingAsksReadingConsent = false
+                workspace.assistance.acceptAutomaticReading()
+            case "decline-reading":
+                workspace.onboardingAsksReadingConsent = false
             case "state": break
-            default: return error("onboarding takes open, close, reset, or state")
+            default: return error("onboarding takes open, close, reset, step STEP, feature FEATURE on|off, accept-reading, decline-reading, or state")
             }
-            return json([
+            return json(([
                 "open": workspace.onboarding.pane != nil,
                 "focused": workspace.onboarding.contains(workspace.activePane),
                 "scene": workspace.onboarding.progress.scene.id,
@@ -466,7 +641,7 @@ enum Control {
                 "coach": workspace.showsOnboardingCoach,
                 "shortcut_1": workspace.quickTabs.first.map { workspace.title($0) } ?? "",
                 "tabs": workspace.tabs.count,
-            ])
+            ] as [String: Any]).merging(onboardingDetail(workspace)) { $1 })
 
         case "split-view":
             switch words.first ?? "state" {
@@ -510,17 +685,6 @@ enum Control {
             }
             return json(["enabled": workspace.sharingScreenMode])
 
-        case "useful-info":
-            let info = workspace.usefulInfo
-            let found = workspace.activePane.flatMap { info.contacts[$0] }
-            return json([
-                "address_enabled": info.showsAddress,
-                "contact_enabled": info.showsContact,
-                "address": found?.address ?? "",
-                "phones": found?.phones ?? [],
-                "emails": found?.emails ?? [],
-            ])
-
         case "quit":
             workspace.quit()
             return ok()
@@ -538,6 +702,9 @@ enum Control {
                 "active": index == workspace.active,
                 "focus": Int(tab.active.rawValue),
                 "title": workspace.title(tab),
+                "name": tab.name ?? NSNull(),
+                "split": tab.isSplit,
+                "split_ratio": tab.splitRatio,
                 "tree": tree(tab.root, root: tab.root, workspace: workspace),
             ]
         }
@@ -548,9 +715,45 @@ enum Control {
             "sidebar": Double(workspace.sidebar),
             "overview": workspace.overviewOpen,
             "identity": workspace.identityOpen,
+            "page_history": workspace.pageHistoryOpen,
+            "downloads_panel": workspace.downloads.panelOpen,
+            "quick_switch": workspace.quickSwitchOpen,
+            "page_tool": panelName(workspace.assistance.panel),
+            "reading_panel": workspace.assistance.readingPanelOpen,
+            "contact_open": workspace.usefulInfo.contactOpen,
+            "site_menu": [
+                "shown": workspace.siteMenu != nil,
+                "expanded": workspace.siteMenuExpanded ?? NSNull(),
+                "searching": workspace.siteMenuSearching,
+            ] as [String: Any],
+            "onboarding": workspace.onboarding.pane != nil,
+            "settings_window": settingsWindow()?.isVisible ?? false,
+            "sharing_screen_mode": workspace.sharingScreenMode,
+            "command_keys": ["left": workspace.leftCommandKeyHeld, "right": workspace.rightCommandKeyHeld],
             "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
             "writing": writing(workspace),
+            "active_tab": workspace.active,
+            "active_pane": workspace.activePane.map { Int($0.rawValue) } ?? NSNull(),
             "tabs": tabs,
+        ]
+    }
+
+    @MainActor
+    private static func onboardingDetail(_ workspace: Workspace) -> [String: Any] {
+        let guide = workspace.onboarding
+        var features: [String: Bool] = [:]
+        for feature in guide.progress.scene.features {
+            features[feature.rawValue] = workspace.binding(for: feature).wrappedValue
+        }
+        let pane: Any = guide.pane.map { Int($0.rawValue) } ?? NSNull()
+        let side: Any = guide.sidePane.map { Int($0.rawValue) } ?? NSNull()
+        return [
+            "pane": pane,
+            "side_pane": side,
+            "steps": guide.progress.scene.steps.map(\.rawValue),
+            "features": features,
+            "asks_reading_consent": workspace.onboardingAsksReadingConsent,
+            "always_show": guide.alwaysShow,
         ]
     }
 
@@ -568,11 +771,20 @@ enum Control {
         switch pane {
         case .leaf(let id):
             let (row, column) = root.coordinate(id)
+            let page = workspace.hosts.existingBrowser(id)
             let node: [String: Any] = [
                 "pane": Int(id.rawValue),
                 "coordinate": "\(row)-\(column)",
                 "kind": workspace.surfaces.kind(id).name,
                 "line": workspace.surfaces.line(id),
+                "title": workspace.title(id),
+                "live": page != nil,
+                "url": page?.url?.absoluteString ?? NSNull(),
+                "loading": page?.isLoading ?? false,
+                "can_go_back": workspace.hosts.canGoBack[id, default: false],
+                "can_go_forward": workspace.hosts.canGoForward[id, default: false],
+                "recovery": workspace.hosts.recovery(for: id)?.cause.rawValue ?? NSNull(),
+                "onboarding": workspace.onboarding.contains(id),
             ]
             return node
         case .split(let id, let axis, let first, let second):
@@ -614,7 +826,7 @@ enum Control {
     }
 
     @MainActor
-    private static func withPane(_ workspace: Workspace, _ named: String?, _ body: (PaneID) -> String) -> String {
+    static func withPane(_ workspace: Workspace, _ named: String?, _ body: (PaneID) -> String) -> String {
         let pane: PaneID?
         if let named {
             guard let id = UInt64(named) else { return error("no pane with that id") }
@@ -630,11 +842,11 @@ enum Control {
         [Kind.browser].map(\.name).joined(separator: " ")
     }
 
-    private static func ok() -> String { "ok" }
+    static func ok() -> String { "ok" }
 
-    private static func error(_ why: String) -> String { "error \(why)" }
+    static func error(_ why: String) -> String { "error \(why)" }
 
-    private static func json(_ object: Any) -> String {
+    static func json(_ object: Any) -> String {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8)
