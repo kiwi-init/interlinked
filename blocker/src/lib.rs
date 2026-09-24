@@ -189,3 +189,24 @@ pub unsafe extern "C" fn il_blocker_generic_selectors(blocker: *const Blocker, q
         .hidden_class_id_selectors(strings("classes"), strings("ids"), &exceptions);
     give(serde_json::to_string(&selectors).unwrap_or_else(|_| "[]".into()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_answers_a_tracking_parameter_with_the_cleaned_url() {
+        unsafe {
+            let filters = il_filters_new();
+            il_filters_add(filters, c"$removeparam=gclid".as_ptr(), false);
+            let blocker = il_blocker_new(filters, c"[]".as_ptr());
+            let url = c"https://shop.example/item?gclid=x&id=5";
+            let mut detail = ptr::null_mut();
+            let verdict = il_blocker_check(blocker, url.as_ptr(), url.as_ptr(), c"document".as_ptr(), c"GET".as_ptr(), &mut detail);
+            assert_eq!(verdict, IL_REWRITE);
+            assert_eq!(CStr::from_ptr(detail).to_str(), Ok("https://shop.example/item?id=5"));
+            il_string_free(detail);
+            il_blocker_free(blocker);
+        }
+    }
+}

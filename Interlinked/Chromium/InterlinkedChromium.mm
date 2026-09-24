@@ -376,11 +376,6 @@ class InterlinkedClient final : public CefClient,
                                    CefRefPtr<CefFrame> frame,
                                    CefRefPtr<CefRequest> request,
                                    CefRefPtr<CefCallback> callback) override;
-  void OnResourceRedirect(CefRefPtr<CefBrowser> browser,
-                          CefRefPtr<CefFrame> frame,
-                          CefRefPtr<CefRequest> request,
-                          CefRefPtr<CefResponse> response,
-                          CefString& new_url) override;
   CefRefPtr<CefResourceHandler> GetResourceHandler(CefRefPtr<CefBrowser> browser,
                                                    CefRefPtr<CefFrame> frame,
                                                    CefRefPtr<CefRequest> request) override;
@@ -493,14 +488,24 @@ class InterlinkedClient final : public CefClient,
   CefRefPtr<CefRegistration> devtools_registration_;
   std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> downloads_;
   std::atomic<int> unreported_blocks_{0};
-  std::atomic<uint64_t> blocking_navigation_{0};
   // Stand-in responses chosen in OnBeforeResourceLoad, keyed by request id.
   std::mutex replacements_mutex_;
   std::map<uint64_t, std::string> replacements_;
   uint64_t navigation_review_generation_ = 0;
   std::string approved_navigation_;
+  // The host whose blocking rules are registered, and how many redirects in a
+  // row were restarted to register another host's rules first.
+  std::string blocking_host_;
+  int redirect_restarts_ = 0;
+  // A restarted redirect whose rules are registered already.
+  std::string restarted_navigation_;
   bool certificate_error_reported_ = false;
   void CountBlockedRequest();
+  void PrepareBlocking(ILChromiumView *view, CefRefPtr<CefRequest> request);
+  bool RestartRedirect(uint64_t generation,
+                       CefRefPtr<CefBrowser> browser,
+                       CefRefPtr<CefFrame> frame,
+                       CefRefPtr<CefRequest> request);
   void ContinueNavigation(uint64_t generation,
                           CefRefPtr<CefBrowser> browser,
                           CefRefPtr<CefFrame> frame,
@@ -508,57 +513,14 @@ class InterlinkedClient final : public CefClient,
   IMPLEMENT_REFCOUNTING(InterlinkedClient);
 };
 
-// Runs in an isolated world at document start. |cfg| is prepended by the caller.
+// Runs in an isolated world at document start; blocker-cosmetics.js explains
+// the |cfg| the caller defines first.
 NSString *ILCosmeticsScript() {
-  return @R"JS(
-const sheet = new CSSStyleSheet();
-const hide = selectors => {
-  for (const selector of selectors) {
-    // One rule per selector: an invalid selector must not void the others.
-    try { sheet.insertRule(selector + '{display:none!important}', sheet.cssRules.length); } catch {}
-  }
-};
-hide(cfg.hide);
-const adopt = () => {
-  if (!document.adoptedStyleSheets.includes(sheet)) {
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  }
-};
-adopt();
-document.addEventListener('DOMContentLoaded', adopt);
-globalThis.__interlinkedHide = selectors => { hide(selectors); adopt(); };
-
-const report = globalThis[cfg.binding];
-if (!cfg.generic || typeof report !== 'function') return;
-const seenClasses = new Set(), seenIds = new Set();
-let classes = [], ids = [], scheduled = false;
-const flush = () => {
-  scheduled = false;
-  if (!classes.length && !ids.length) return;
-  report(JSON.stringify({ classes, ids }));
-  classes = []; ids = [];
-};
-const note = element => {
-  const id = element.id;
-  if (id && typeof id === 'string' && !seenIds.has(id)) { seenIds.add(id); ids.push(id); }
-  for (const name of element.classList ?? []) {
-    if (!seenClasses.has(name)) { seenClasses.add(name); classes.push(name); }
-  }
-};
-const scan = root => {
-  if (root.nodeType !== 1) return;
-  note(root);
-  for (const element of root.querySelectorAll('[id],[class]')) note(element);
-  if (!scheduled && (classes.length || ids.length)) { scheduled = true; setTimeout(flush, 80); }
-};
-new MutationObserver(records => {
-  for (const record of records) {
-    if (record.type === 'attributes') scan(record.target);
-    else for (const node of record.addedNodes) scan(node);
-  }
-}).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id'] });
-if (document.documentElement) scan(document.documentElement);
-)JS";
+  static NSString *source = [NSString
+      stringWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"blocker-cosmetics" withExtension:@"js"]
+                     encoding:NSUTF8StringEncoding
+                        error:nil] ?: @"";
+  return source;
 }
 
 std::unique_ptr<CefScopedLibraryLoader> g_library_loader;
@@ -589,6 +551,7 @@ std::atomic_bool g_running(false);
   NSMutableArray<NSString *> *_blockingScriptIdentifiers;
   NSMutableDictionary<NSNumber *, NSNumber *> *_blockingScriptRequests;
   NSInteger _blockingGeneration;
+  void (^_blockingRegistered)(void);
   NSString *_blockingExceptionsJSON;
   BOOL _blockingBindingInstalled;
   NSMutableDictionary<NSNumber *, void (^)(id _Nullable, NSError * _Nullable)> *_evaluations;
@@ -610,6 +573,7 @@ std::atomic_bool g_running(false);
 - (void)didCloseBrowser;
 - (void)didBlockRequests:(NSInteger)count;
 - (void)prepareBlockingForURLString:(NSString *)URLString runImmediately:(BOOL)runImmediately;
+- (void)whenBlockingRegistered:(void (^)(void))block;
 - (void)didReceiveBindingCall:(NSData *)parameters;
 - (void)removeBlockingScript:(NSString *)identifier;
 - (void)applyForcedDarkMode;
@@ -1248,7 +1212,9 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
 
   NSString *scriptlets = cosmetics[@"script"];
   if ([scriptlets isKindOfClass:NSString.class] && scriptlets.length > 0) {
-    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@\n%@\n})();", guard, scriptlets]
+    // uBlock Origin's injector gives its scriptlets a shared |scriptletGlobals|
+    // object; without it they throw a ReferenceError on first use.
+    [self addBlockingScript:[NSString stringWithFormat:@"(()=>{%@const scriptletGlobals={};\n%@\n})();", guard, scriptlets]
                       world:nil
              runImmediately:runImmediately];
   }
@@ -1258,6 +1224,7 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   _blockingExceptionsJSON = [[NSString alloc] initWithData:exceptionsJSON encoding:NSUTF8StringEncoding] ?: @"[]";
   NSDictionary *configuration = @{
     @"hide": cosmetics[@"hide"] ?: @[],
+    @"procedural": cosmetics[@"procedural"] ?: @[],
     @"generic": @(![cosmetics[@"generichide"] boolValue]),
     @"binding": ILCosmeticsBinding,
   };
@@ -1267,6 +1234,22 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
                                                      ILCosmeticsScript()]
                     world:ILCosmeticsWorld
            runImmediately:runImmediately];
+}
+
+/// Runs |block| on a later turn once Chromium has confirmed every script the
+/// latest -prepareBlockingForURLString: registered.
+- (void)whenBlockingRegistered:(void (^)(void))block {
+  _blockingRegistered = [block copy];
+  [self runBlockingRegisteredIfDone];
+}
+
+- (void)runBlockingRegisteredIfDone {
+  if (!_blockingRegistered || [_blockingScriptRequests.allValues containsObject:@(_blockingGeneration)]) {
+    return;
+  }
+  void (^block)(void) = _blockingRegistered;
+  _blockingRegistered = nil;
+  PerformOnMainRunLoop(block);
 }
 
 /// The page reported class names and ids it uses; answer with the generic
@@ -1448,6 +1431,7 @@ static NSString *const ILCosmeticsBinding = @"__interlinkedCosmetics";
   NSNumber *generation = _blockingScriptRequests[@(identifier)];
   if (generation) {
     [_blockingScriptRequests removeObjectForKey:@(identifier)];
+    [self runBlockingRegisteredIfDone];
     NSDictionary *reply = success && length > 0
         ? [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:bytes length:length] options:0 error:nil]
         : nil;
@@ -1695,27 +1679,39 @@ CefRefPtr<CefResourceHandler> InterlinkedClient::GetResourceHandler(CefRefPtr<Ce
       CefStreamReader::CreateForData(bytes.data(), bytes.size()));
 }
 
-void InterlinkedClient::OnResourceRedirect(CefRefPtr<CefBrowser> browser,
-                                            CefRefPtr<CefFrame> frame,
-                                            CefRefPtr<CefRequest> request,
-                                            CefRefPtr<CefResponse> response,
-                                            CefString& new_url) {
-  CEF_REQUIRE_IO_THREAD();
-  if (!frame || !frame->IsMain() || new_url.empty()) {
-    return;
+void InterlinkedClient::PrepareBlocking(ILChromiumView *view, CefRefPtr<CefRequest> request) {
+  blocking_host_ = HostOfURL(request->GetURL());
+  [view prepareBlockingForURLString:NSStringFromCef(request->GetURL()) runImmediately:NO];
+}
+
+// A server redirect to another host needs that host's rules, but Chromium
+// confirms rules registered during a navigation only after a fast redirected
+// document has already started without them. The redirect is restarted at its
+// destination once that host's rules are confirmed.
+bool InterlinkedClient::RestartRedirect(uint64_t generation,
+                                        CefRefPtr<CefBrowser> browser,
+                                        CefRefPtr<CefFrame> frame,
+                                        CefRefPtr<CefRequest> request) {
+  const std::string method = request->GetMethod().ToString();
+  const std::string host = HostOfURL(request->GetURL());
+  // Only GET restarts without replaying a body; the cap stops a server that
+  // bounces between hosts from redirecting forever.
+  if (!(method.empty() || method == "GET") || host == blocking_host_ || redirect_restarts_ >= 5 ||
+      !BlockerForPage(host)) {
+    return false;
   }
+  ILChromiumView *view = view_;
+  if (!view) {
+    return false;
+  }
+  redirect_restarts_ += 1;
+  PrepareBlocking(view, request);
+  restarted_navigation_ = RequestSignature(request);
   CefRefPtr<InterlinkedClient> self(this);
-  const uint64_t navigation = blocking_navigation_.load();
-  NSString *URLString = NSStringFromCef(new_url);
-  PerformOnMainRunLoop(^{
-    if (self->blocking_navigation_.load() != navigation) {
-      return;
-    }
-    // The redirect continues on the IO thread while this crosses to Chromium's
-    // UI thread. Running in existing contexts closes the small race where the
-    // redirected document starts before its rules are registered.
-    [self->view_ prepareBlockingForURLString:URLString runImmediately:YES];
-  });
+  [view whenBlockingRegistered:^{
+    self->ContinueNavigation(generation, browser, frame, request);
+  }];
+  return true;
 }
 
 bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
@@ -1727,20 +1723,25 @@ bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
   if (!frame->IsMain()) {
     return false;
   }
-  blocking_navigation_.fetch_add(1);
   const std::string signature = RequestSignature(request);
   if (!approved_navigation_.empty() && approved_navigation_ == signature) {
     approved_navigation_.clear();
     certificate_error_reported_ = false;
-    [view_ prepareBlockingForURLString:NSStringFromCef(request->GetURL()) runImmediately:NO];
+    if (restarted_navigation_ != signature) {
+      PrepareBlocking(view_, request);
+    }
+    restarted_navigation_.clear();
     return false;
+  }
+  if (!is_redirect) {
+    redirect_restarts_ = 0;
   }
 
   const uint64_t generation = ++navigation_review_generation_;
   ILChromiumView *view = view_;
   id<ILChromiumViewDelegate> delegate = view.delegate;
   if (!view || !delegate) {
-    [view prepareBlockingForURLString:NSStringFromCef(request->GetURL()) runImmediately:NO];
+    PrepareBlocking(view, request);
     return false;
   }
   NSURL *destination = [NSURL URLWithString:NSStringFromCef(request->GetURL())];
@@ -1760,7 +1761,10 @@ bool InterlinkedClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
   }];
   if (!reviewing) {
     certificate_error_reported_ = false;
-    [view prepareBlockingForURLString:NSStringFromCef(request->GetURL()) runImmediately:NO];
+    if (is_redirect && RestartRedirect(generation, browser, frame, request)) {
+      return true;
+    }
+    PrepareBlocking(view, request);
   }
   return reviewing;
 }

@@ -38,10 +38,10 @@ Interlinked does not load browser extensions. The features people install extens
 
 - *Requests.* Chromium asks before every request; the engine decides with full rule syntax (paths, resource types, third-party, exceptions). The page you navigate to always loads.
 - *Stand-ins.* Scripts that pages depend on, such as Google's ad and analytics libraries, are answered locally with harmless replacements instead of failing, so sites keep working.
-- *Tracking parameters.* `$removeparam` rules strip identifiers such as `utm_source` from addresses.
-- *In the page.* Before a document's own scripts run, Interlinked registers that site's scriptlets in the page's world (this is what removes video ads) and its element-hiding rules in an isolated world the page cannot see. The page's class names and ids are matched against generic hiding rules as the DOM changes.
+- *Tracking parameters.* `$removeparam` rules strip click identifiers such as `gclid` and `fbclid` from addresses before the request is sent. uBlock Origin's lists leave `utm_*` parameters alone.
+- *In the page.* Before a document's own scripts run, Interlinked registers that site's scriptlets in the page's world (this is what removes video ads) and its element-hiding rules in an isolated world the page cannot see. Procedural rules (`:has-text()`, `:upward()`, `:matches-css()`, `:min-text-length()`, `:xpath()`, and the `:remove()`, `:style()`, `:remove-attr()`, `:remove-class()` actions) run in that world too, and run again as the page changes, at most every 250 ms. The page's class names and ids are matched against generic hiding rules as the DOM changes.
 
-`script/build-blocker-resources` converts uBlock Origin's scriptlets and redirect resources (GPL-3.0) into `Interlinked/Resources/blocker-resources.json`; rerun it to pick up new scriptlets. Procedural cosmetic filters (`:has-text()`, `:upward()`) are not applied yet.
+`script/build-blocker-resources` converts uBlock Origin's scriptlets and redirect resources (GPL-3.0) into `Interlinked/Resources/blocker-resources.json`; rerun it to pick up new scriptlets. A build can also name an HTTPS copy of that file with `INTERLINKED_BLOCKER_RESOURCES_URL`. It is downloaded with the daily list refresh and used once it is well-formed JSON of the expected shape and under 8 MB; otherwise the bundled copy stays. The setting is empty by default and stays opt-in until the license question for serving uBlock Origin's resources is settled.
 
 **Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`, and Chromium's Auto Dark Mode recolors the rest while leaving images alone. Settings → Built-ins chooses Off, Match macOS appearance, or Always.
 

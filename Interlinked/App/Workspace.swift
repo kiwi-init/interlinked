@@ -984,8 +984,15 @@ final class Workspace {
         switch feature {
         case .appleIntelligence where !LocalIntelligenceRuntime.isAvailable:
             "Off on this Mac. The switch opens System Settings."
+        case .darkPages where builtIns.darkModeWaitsForSystem:
+            "Follows macOS, which is light. Choose Always in Settings to darken pages now."
         default: nil
         }
+    }
+
+    /// A feature whose switch would change nothing visible right now.
+    func disables(_ feature: OnboardingFeature) -> Bool {
+        feature == .darkPages && builtIns.darkModeWaitsForSystem
     }
 
     static func openAppleIntelligenceSettings() {
