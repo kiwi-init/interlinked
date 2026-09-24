@@ -436,6 +436,13 @@ final class Workspace {
         else { cancelListening() }
     }
 
+    /// Something Escape puts back. The page itself may hold focus, so the
+    /// key monitor takes Escape for these rather than leaving it to SwiftUI.
+    var escapeCloses: Bool {
+        usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.panel != nil || identityOpen
+            || siteMenuSearching || siteMenuExpanded != nil || editing != nil || overviewOpen
+    }
+
     func toggleIdentity() {
         if identityOpen {
             closeIdentity()
@@ -1437,9 +1444,7 @@ final class Workspace {
                 }
                 return event
             }
-            if event.keyCode == 53, !self.composingText(in: event.window),
-               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.panel != nil || self.usefulInfo.contactOpen ||
-               self.editing != nil || self.overviewOpen {
+            if event.keyCode == 53, !self.composingText(in: event.window), self.escapeCloses {
                 self.escape()
                 return nil
             }
@@ -1557,7 +1562,7 @@ final class Workspace {
         case ("r", .command):
             reloadActivePage()
         case (",", .command):
-            return openNativeSettings()
+            return openNativeSettings(.general)
         default:
             return false
         }
@@ -1567,9 +1572,10 @@ final class Workspace {
     /// AppKit ignores `showSettingsWindow:` on macOS 14 and later, so ⌘, goes
     /// through SwiftUI's own action. Without it the Settings menu item takes
     /// the key, and the window keeps its state.
-    private func openNativeSettings() -> Bool {
+    @discardableResult
+    func openNativeSettings(_ destination: SettingsDestination) -> Bool {
         guard let openSettings else { return false }
-        settingsDestination = .general
+        settingsDestination = destination
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
         overviewOpen = false
