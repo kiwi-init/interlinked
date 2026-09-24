@@ -232,6 +232,13 @@ struct Surfaces {
         surfaces[pane] = surface
     }
 
+    /// A pane keeps a live page only while it is a browser with an address
+    /// on its line. An erased pane shows the new tab page and holds no page,
+    /// so nothing can keep playing behind it or refill its line.
+    func holdsPage(_ pane: PaneID) -> Bool {
+        kind(pane) == .browser && !line(pane).isEmpty
+    }
+
     mutating func erase(_ pane: PaneID) {
         surfaces[pane]?.line = ""
     }

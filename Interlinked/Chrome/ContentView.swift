@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let palette = Palette.of(colorScheme, tint: workspace.tint)
@@ -33,7 +34,10 @@ struct ContentView: View {
         .background(WindowChrome())
         .frame(minWidth: 640, minHeight: 400)
         .toolbarBackground(.hidden, for: .windowToolbar)
-        .onAppear { workspace.start() }
+        .onAppear {
+            workspace.openSettings = { openSettings() }
+            workspace.start()
+        }
         .onExitCommand {
             workspace.escape()
         }

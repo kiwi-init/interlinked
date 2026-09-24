@@ -143,3 +143,31 @@ enum TabMemoryPolicy {
             .map(\.pane)
     }
 }
+
+/// What a page's own navigation means for everything learned about it.
+struct PageNavigationEffects: OptionSet, Equatable {
+    let rawValue: UInt8
+
+    /// A new document replaced the old one: metadata, labels, sharing, and
+    /// open page panels belong to a page that is gone.
+    static let newDocument = Self(rawValue: 1 << 0)
+    /// The address moved: the line, favicon, and history follow it.
+    static let newAddress = Self(rawValue: 1 << 1)
+}
+
+/// Chromium reports pushState and #fragment navigations as an address change
+/// with no commit and no finished load. Only a commit replaces the document,
+/// so only a commit may reset the page's state.
+struct PageNavigationTracker {
+    private(set) var url: URL?
+
+    mutating func addressChanged(to url: URL?) -> PageNavigationEffects {
+        guard url != self.url else { return [] }
+        self.url = url
+        return .newAddress
+    }
+
+    mutating func committed(to url: URL?) -> PageNavigationEffects {
+        addressChanged(to: url).union(.newDocument)
+    }
+}
