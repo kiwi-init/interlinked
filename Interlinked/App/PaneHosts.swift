@@ -41,9 +41,9 @@ final class PaneHosts {
         return page
     }
 
-    func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind, downloads: DownloadCenter) {
+    func forget(keep: (PaneID) -> Bool, downloads: DownloadCenter) {
         let tracked = Set(browsers.keys).union(lifecycle.panes)
-        for pane in tracked where !keep(pane) || kinds(pane) != .browser {
+        for pane in tracked where !keep(pane) {
             removeBrowser(pane, downloads: downloads)
             lifecycle.close(pane)
             uploadPanes.remove(pane)
@@ -257,7 +257,7 @@ final class PaneHosts {
 final class BrowserCoordinator: ChromiumPageDelegate {
     let pane: PaneID
     weak var workspace: Workspace?
-    private var lastURL: URL?
+    private var navigation = PageNavigationTracker()
 
     init(pane: PaneID, workspace: Workspace) {
         self.pane = pane
@@ -265,16 +265,20 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     }
 
     private func update(_ page: ChromiumPage) {
+        apply(navigation.addressChanged(to: page.url), page: page)
+    }
+
+    private func apply(_ effects: PageNavigationEffects, page: ChromiumPage) {
         guard let workspace else { return }
-        let urlChanged = lastURL != page.url
-        if urlChanged {
-            lastURL = page.url
+        if effects.contains(.newDocument) {
+            workspace.builtIns.navigated(pane)
             workspace.assistance.committed(pane)
             workspace.usefulInfo.committed(pane)
-            workspace.builtIns.apply(to: page)
+            workspace.noteSiteMenuDocumentChanged(pane)
         }
+        if effects.contains(.newAddress) { workspace.builtIns.apply(to: page) }
         workspace.hosts.updatePage(page, pane: pane)
-        if urlChanged {
+        if effects.contains(.newAddress) {
             workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces)
             if let url = page.url, url.absoluteString != "about:blank" {
                 workspace.setLineFromHost(pane, url.absoluteString)
@@ -287,11 +291,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     func chromiumPageDidChange(_ page: ChromiumPage) { update(page) }
 
     func chromiumPageDidCommit(_ page: ChromiumPage) {
-        workspace?.builtIns.navigated(pane)
-        workspace?.assistance.committed(pane)
-        workspace?.usefulInfo.committed(pane)
-        workspace?.noteSiteMenuDocumentChanged(pane)
-        update(page)
+        apply(navigation.committed(to: page.url), page: page)
     }
 
     func chromiumPageDidFinish(_ page: ChromiumPage) {

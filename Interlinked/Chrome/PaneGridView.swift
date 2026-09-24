@@ -179,7 +179,7 @@ struct BrowserPage: View {
                     .simultaneousGesture(TapGesture().onEnded { workspace.clickPane(pane) })
             } else if let recovery = workspace.hosts.recovery(for: pane) {
                 BrowserRecoveryView(pane: pane, recovery: recovery, palette: palette)
-            } else if workspace.surfaces.line(pane).isEmpty {
+            } else if !workspace.surfaces.holdsPage(pane) {
                 // Chromium reports its own clicks; a new tab page is SwiftUI.
                 EmptyPaneView(palette: palette)
                     .contentShape(Rectangle())

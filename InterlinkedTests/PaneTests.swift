@@ -1032,3 +1032,89 @@ final class DomainIconStoreTests: XCTestCase {
         XCTAssertEqual(store.data(for: "two.example"), Data([2]))
     }
 }
+
+final class PageNavigationTests: XCTestCase {
+    private let page = URL(string: "https://app.example.com/inbox")!
+
+    func testSameDocumentNavigationsKeepThePageState() {
+        var navigation = PageNavigationTracker()
+        XCTAssertEqual(navigation.committed(to: page), [.newDocument, .newAddress])
+
+        // Title and loading changes report the address they already had.
+        XCTAssertEqual(navigation.addressChanged(to: page), [])
+        // An in-page #anchor and a pushState route arrive with no commit.
+        let anchor = URL(string: "https://app.example.com/inbox#message-4")!
+        XCTAssertEqual(navigation.addressChanged(to: anchor), .newAddress)
+        let route = URL(string: "https://app.example.com/inbox/4")!
+        XCTAssertEqual(navigation.addressChanged(to: route), .newAddress)
+        XCTAssertEqual(navigation.url, route)
+    }
+
+    func testACommitResetsThePageStateWhicheverCallbackArrivesFirst() {
+        let next = URL(string: "https://other.example.com/")!
+
+        var addressFirst = PageNavigationTracker()
+        _ = addressFirst.committed(to: page)
+        XCTAssertEqual(addressFirst.addressChanged(to: next), .newAddress)
+        XCTAssertEqual(addressFirst.committed(to: next), .newDocument)
+
+        var commitFirst = PageNavigationTracker()
+        _ = commitFirst.committed(to: page)
+        XCTAssertEqual(commitFirst.committed(to: next), [.newDocument, .newAddress])
+        XCTAssertEqual(commitFirst.addressChanged(to: next), [])
+    }
+
+    func testReloadingTheSameAddressIsANewDocument() {
+        var navigation = PageNavigationTracker()
+        _ = navigation.committed(to: page)
+        XCTAssertEqual(navigation.committed(to: page), .newDocument)
+    }
+}
+
+final class ClearedPaneTests: XCTestCase {
+    func testOnlyABrowserPaneWithAnAddressHoldsAPage() {
+        var surfaces = Surfaces()
+        let pane = PaneID(1)
+        XCTAssertFalse(surfaces.holdsPage(pane), "A new tab page has no page behind it")
+
+        surfaces.setKind(pane, .browser)
+        XCTAssertFalse(surfaces.holdsPage(pane))
+        surfaces.setLine(pane, "https://radio.example.com/live")
+        XCTAssertTrue(surfaces.holdsPage(pane))
+    }
+
+    func testClearingAPaneReleasesItsPage() {
+        var surfaces = Surfaces()
+        let pane = PaneID(1)
+        surfaces.setKind(pane, .browser)
+        surfaces.setLine(pane, "https://radio.example.com/live")
+
+        surfaces.erase(pane)
+        XCTAssertFalse(surfaces.holdsPage(pane))
+        XCTAssertEqual(surfaces.kind(pane), .browser, "A cleared pane is still a browser pane")
+    }
+}
+
+final class DictationTargetTests: XCTestCase {
+    func testDictationWritesToThePaneItStartedIn() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertTrue(tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1)))
+        XCTAssertEqual(DictationTarget.pane(started: PaneID(1), active: PaneID(2), in: [tab]), PaneID(1))
+    }
+
+    func testDictationWithNoSessionWritesToTheActivePane() {
+        let tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertEqual(DictationTarget.pane(started: nil, active: PaneID(1), in: [tab]), PaneID(1))
+        XCTAssertNil(DictationTarget.pane(started: nil, active: nil, in: [tab]))
+    }
+
+    func testDictationNeverWritesToAClosedPane() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertTrue(tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1)))
+        XCTAssertTrue(tab.close(PaneID(2)))
+
+        XCTAssertNil(DictationTarget.pane(started: PaneID(2), active: PaneID(1), in: [tab]))
+        XCTAssertNil(DictationTarget.pane(started: nil, active: PaneID(2), in: [tab]))
+        XCTAssertNil(DictationTarget.pane(started: PaneID(1), active: PaneID(1), in: []))
+    }
+}
