@@ -1,0 +1,40 @@
+#!/bin/sh
+# Start or stop test-fixtures/server.py for the UI tests. The UI test runner
+# is sandboxed, so it cannot start the server itself: xcrun (behind
+# /usr/bin/python3) refuses to run in a sandbox, and the runner may not
+# listen on a port. The Interlinked scheme calls this before and after tests.
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+url="http://127.0.0.1:8765/"
+state="${TMPDIR:-/tmp}/interlinked-fixture-server"
+
+running() {
+  /usr/bin/curl --silent --fail --output /dev/null --max-time 1 "$url"
+}
+
+case "${1:-}" in
+  start)
+    # A server you started yourself keeps running and is left alone.
+    running && exit 0
+    /usr/bin/nohup /usr/bin/python3 "$root/test-fixtures/server.py" \
+      </dev/null >"$state.log" 2>&1 &
+    echo $! >"$state.pid"
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      running && exit 0
+      /bin/sleep 0.25
+    done
+    echo "error: The fixture server did not start. See $state.log." >&2
+    exit 1
+    ;;
+  stop)
+    if [ -f "$state.pid" ]; then
+      /bin/kill "$(/bin/cat "$state.pid")" 2>/dev/null || true
+      /bin/rm -f "$state.pid"
+    fi
+    ;;
+  *)
+    echo "usage: $0 start|stop" >&2
+    exit 2
+    ;;
+esac

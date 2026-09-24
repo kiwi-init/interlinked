@@ -117,12 +117,11 @@ xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests -configuratio
   -derivedDataPath build -destination 'platform=macOS,arch=arm64' test
 ```
 
-UI tests launch the app against the local fixture server. They need Chromium staged the same way as `script/run`:
+UI tests launch the app against the local fixture server. They need Chromium staged the same way as `script/run`. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Quit any other Interlinked instance first: a second app using the same Chromium profile keeps CEF from starting.
 
 ```sh
-python3 test-fixtures/server.py &
 xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
-  -derivedDataPath build -destination 'platform=macOS' \
+  -derivedDataPath build -destination 'platform=macOS,arch=arm64' \
   -only-testing:InterlinkedUITests test
 ```
 
