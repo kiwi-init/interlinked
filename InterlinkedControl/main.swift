@@ -5,11 +5,26 @@ let args = Array(CommandLine.arguments.dropFirst())
 let request = args.isEmpty ? "state" : args.joined(separator: " ")
 
 let path: String
-if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] {
+if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"], !named.isEmpty {
     path = named
+} else if let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+    path = base.appendingPathComponent("Interlinked/control/control.sock").path
 } else {
-    let user = ProcessInfo.processInfo.environment["USER"] ?? "unknown"
-    path = "/tmp/interlinked-\(user).sock"
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    path = (home as NSString).appendingPathComponent("Library/Application Support/Interlinked/control/control.sock")
+}
+
+let probe = sockaddr_un()
+let sunPathCapacity = MemoryLayout.size(ofValue: probe.sun_path)
+let pathByteCount = path.utf8CString.count
+guard pathByteCount <= sunPathCapacity else {
+    fputs("interlinked: control socket path too long\n", stderr)
+    exit(1)
+}
+// The server caps requests at 64 KB; refuse oversize input locally.
+guard request.utf8.count + 1 <= 64 * 1024 else {
+    fputs("interlinked: request too large (64 KB max)\n", stderr)
+    exit(1)
 }
 
 let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
@@ -17,13 +32,29 @@ guard fd >= 0 else {
     fputs("interlinked: could not create a socket\n", stderr)
     exit(1)
 }
+defer { Darwin.close(fd) }
+
+var noSigPipe: Int32 = 1
+_ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+var tv = timeval()
+tv.tv_sec = __darwin_time_t(10)
+tv.tv_usec = __darwin_suseconds_t(0)
+_ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+_ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
 var addr = sockaddr_un()
 addr.sun_family = sa_family_t(AF_UNIX)
-let pathBytes = Array(path.utf8CString)
-withUnsafeMutableBytes(of: &addr.sun_path) { dest in
-    guard let base = dest.baseAddress else { return }
-    memcpy(base, pathBytes, min(pathBytes.count, dest.count))
+memset(&addr.sun_path, 0, sunPathCapacity)
+let filled = path.withCString { cstr in
+    withUnsafeMutableBytes(of: &addr.sun_path) { dest -> Bool in
+        guard let base = dest.baseAddress else { return false }
+        memcpy(base, cstr, pathByteCount)
+        return true
+    }
+}
+guard filled else {
+    fputs("interlinked: control socket path too long\n", stderr)
+    exit(1)
 }
 
 let connected: Int32 = withUnsafePointer(to: &addr) { ptr in
@@ -38,15 +69,61 @@ guard connected == 0 else {
 }
 
 let payload = request + "\n"
-_ = payload.withCString { cstr in Darwin.write(fd, cstr, strlen(cstr)) }
-
-var data = Data()
-var byte: UInt8 = 0
-while Darwin.read(fd, &byte, 1) == 1 {
-    if byte == 10 { break }
-    if byte != 13 { data.append(byte) }
+let writeOK: Bool = payload.withCString { cstr -> Bool in
+    var ptr = UnsafeRawPointer(cstr)
+    var remaining = strlen(cstr)
+    while remaining > 0 {
+        let written = Darwin.write(fd, ptr, remaining)
+        if written < 0 {
+            if errno == EINTR { continue }
+            return false
+        }
+        if written == 0 { return false }
+        remaining -= Int(written)
+        ptr = ptr.advanced(by: Int(written))
+    }
+    return true
 }
-Darwin.close(fd)
+guard writeOK else {
+    fputs("interlinked: failed to send request\n", stderr)
+    exit(1)
+}
+
+// Replies (state snapshots) can exceed the 64 KB request cap; allow a few MB.
+let maxReplyBytes = 4 * 1024 * 1024
+var data = Data()
+data.reserveCapacity(4096)
+var chunk = [UInt8](repeating: 0, count: 4096)
+var sawNewline = false
+var tooLarge = false
+while !sawNewline && !tooLarge {
+    let n = chunk.withUnsafeMutableBytes { buf -> Int in
+        guard let base = buf.baseAddress else { return -1 }
+        return Darwin.read(fd, base, buf.count)
+    }
+    if n == 0 { break }
+    if n < 0 {
+        if errno == EINTR { continue }
+        break
+    }
+    for i in 0..<n {
+        let byte = chunk[i]
+        if byte == 10 {
+            sawNewline = true
+            break
+        }
+        if byte == 13 { continue }
+        if data.count >= maxReplyBytes {
+            tooLarge = true
+            break
+        }
+        data.append(byte)
+    }
+}
+guard !tooLarge else {
+    fputs("interlinked: reply too large\n", stderr)
+    exit(1)
+}
 
 let reply = String(data: data, encoding: .utf8) ?? ""
 if let json = try? JSONSerialization.jsonObject(with: data),

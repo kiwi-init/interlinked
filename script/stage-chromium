@@ -2,8 +2,6 @@
 # Stage the pinned CEF runtime and helper apps inside Interlinked.app.
 set -eu
 
-cef_version=152.0.8+g1ce985c+chromium-152.0.7977.134
-cef_root="$SRCROOT/build/cef/cef_binary_${cef_version}_macosarm64_minimal"
 sample="$SRCROOT/build/cef/cef-project-out/Release/minimal.app/Contents/Frameworks"
 destination="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
 

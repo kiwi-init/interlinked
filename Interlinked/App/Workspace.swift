@@ -18,11 +18,10 @@ enum LineTarget: Hashable {
 
 enum SettingsDestination: String, CaseIterable, Identifiable {
     case general = "General"
+    case pages = "Pages"
     case intelligence = "Intelligence"
-    case builtIns = "Built-ins"
-    case data = "Data"
     case sites = "Sites"
-    case about = "About"
+    case privacy = "Privacy"
 
     var id: Self { self }
 }
@@ -72,8 +71,41 @@ final class Workspace {
     let navigationExceptions = NavigationExceptionStore()
     let browserHistory = BrowserHistoryStore()
     let builtIns = PageBuiltIns()
+    let usefulInfo = UsefulInfo()
+    let onboarding = OnboardingGuide()
+    /// Blurs emails, phone numbers, card and document numbers, keys, and
+    /// passwords on every page, for presenting or sharing the screen.
+    var sharingScreenMode = SharingScreenModePreference.enabled() {
+        didSet {
+            guard sharingScreenMode != oldValue else { return }
+            SharingScreenModePreference.set(sharingScreenMode)
+            hosts.forEachBrowser { $0.sharingScreenShield = sharingScreenMode }
+        }
+    }
+    var usesSiteMenu = SiteMenuPreference.enabled() {
+        didSet {
+            SiteMenuPreference.set(usesSiteMenu)
+            noteOnboarding()
+            if usesSiteMenu, let pane = activePane {
+                declinedSiteMenu.remove(pane)
+                captureSiteMenu(pane)
+            } else {
+                restoreAllSiteHeaders()
+            }
+        }
+    }
+    private(set) var siteMenus: [PaneID: SiteMenu] = [:]
+    @ObservationIgnored private var resizeTasks: [PaneID: Task<Void, Never>] = [:]
+    /// Set when a page's menu has been read and is about to be shown, so the
+    /// bar arrives with the same spectrum glow as an AI-refined page label.
+    private(set) var siteMenuEffect: AILabelEffect?
+    @ObservationIgnored private var siteMenuEffectTask: Task<Void, Never>?
+    var siteMenuExpanded: String?
+    var siteMenuSearching = false
+    private var declinedSiteMenu: Set<PaneID> = []
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
+    var identityOpen = false
     var pageHistoryOpen = false
     var quickSwitchOpen = false
     var leftCommandKeyHeld = false
@@ -99,24 +131,39 @@ final class Workspace {
 
     var activePane: PaneID? { activeTab?.active }
 
-    var quickTabs: [Tab] {
-        OpenWork.switcherTabs(tabs, current: activeTab?.id)
+    var siteMenu: SiteMenu? {
+        guard let pane = activePane else { return nil }
+        return siteMenus[pane]
     }
 
+    var quickTabs: [Tab] {
+        OpenWork.switcherTabs(tabs, current: activeTab?.id, pinned: onboardingTab?.id)
+    }
+
+    /// The name a tab goes by everywhere: your name for it, else the label
+    /// the page handle shows, else the page's own title.
     func title(_ tab: Tab) -> String {
-        OpenWork.title(customName: tab.name, pageTitle: hosts.titles[tab.active], fallback: surfaces.tabTitle(tab))
+        if tab.panes == [onboarding.pane] { return Self.onboardingTitle }
+        return OpenWork.title(customName: tab.name, pageTitle: assistance.labels[tab.active] ?? hosts.titles[tab.active],
+                       fallback: surfaces.tabTitle(tab))
     }
 
     func setOverviewOpen(_ open: Bool) {
         guard open != overviewOpen else { return }
         if open {
             discardLine()
+            closeIdentity()
+            pageHistoryOpen = false
+            downloads.closePanel()
             hosts.capturePreviews()
             assistance.closePanel()
             assistance.related()
         }
         overviewOpen = open
-        if !open { restoreFocus() }
+        if !open {
+            restoreFocus()
+            beginEmptyPageEditingIfNeeded()
+        }
     }
 
     func toggleOverview() { setOverviewOpen(!overviewOpen) }
@@ -137,11 +184,6 @@ final class Workspace {
         shortcut.label
     }
 
-    func togglePersonalFilters() {
-        downloads.closePanel()
-        assistance.filterPanelOpen ? assistance.closeFilters() : assistance.openFilters()
-    }
-
     var currentPageURL: URL? {
         guard let pane = activePane else { return nil }
         if let url = hosts.existingBrowser(pane)?.url,
@@ -153,8 +195,20 @@ final class Workspace {
         return url
     }
 
+    var isEmptyActivePage: Bool {
+        guard let pane = activePane else { return true }
+        if onboarding.contains(pane) { return false }
+        return NewTabPage.matches(line: surfaces.line(pane))
+    }
+
     var showsCopiedPageURL: Bool {
-        copiedPageURL == currentPageURL?.absoluteString
+        CopiedPageURLFeedback.isShowing(copied: copiedPageURL, current: currentPageURL?.absoluteString)
+    }
+
+    func beginEmptyPageEditingIfNeeded() {
+        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil else { return }
+        guard case .idle = voice.state else { return }
+        editActiveLine()
     }
 
     @discardableResult
@@ -177,6 +231,171 @@ final class Workspace {
         editActiveLine()
     }
 
+    func navigateActive(_ address: String) {
+        guard let pane = activePane, !onboarding.contains(pane) else {
+            openAddress(address)
+            return
+        }
+        discardLine()
+        surfaces.setKind(pane, .browser)
+        surfaces.setLine(pane, address)
+        navigate(pane, address)
+        keep()
+    }
+
+    func noteSiteMenuDocumentChanged(_ pane: PaneID) {
+        siteMenus[pane] = nil
+        declinedSiteMenu.remove(pane)
+        if siteMenuEffect?.pane == pane { siteMenuEffect = nil }
+        if activePane == pane { collapseSiteMenuChrome() }
+    }
+
+    func collapseSiteMenuChrome() {
+        siteMenuExpanded = nil
+        siteMenuSearching = false
+    }
+
+    /// Light the bar with the spectrum glow, then retire the effect so that
+    /// redisplaying the same menu later does not replay it.
+    private func revealSiteMenu(_ pane: PaneID) {
+        siteMenuEffect = AILabelEffect(pane: pane)
+        siteMenuEffectTask?.cancel()
+        siteMenuEffectTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let self, self.siteMenuEffect?.pane == pane else { return }
+            self.siteMenuEffect = nil
+        }
+    }
+
+    /// The search icon morphs the pill into a field, so the destination list
+    /// and any open submenu step aside while it is up.
+    func beginSiteMenuSearch() {
+        guard siteMenu?.search != nil else { return }
+        if editing != nil { discardLine() }
+        siteMenuExpanded = nil
+        siteMenuSearching = true
+    }
+
+    func activateSiteMenuItem(_ item: SiteMenuItem) {
+        if !item.children.isEmpty {
+            siteMenuSearching = false
+            siteMenuExpanded = item.id
+            return
+        }
+        if !item.href.isEmpty {
+            navigateActive(item.href)
+            return
+        }
+        guard let pane = activePane, let view = hosts.existingBrowser(pane) else { return }
+        Task { _ = await PageTextBridge.activateSiteMenuItem(view, id: item.id) }
+    }
+
+    func goSiteHome() {
+        guard !onboarding.contains(activePane) else { return }
+        guard let menu = siteMenu, let home = SiteMenuHome.url(menu.home, current: currentPageURL) else { return }
+        collapseSiteMenuChrome()
+        navigateActive(home.absoluteString)
+    }
+
+    func submitSiteSearch(_ query: String) {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let search = siteMenu?.search, !text.isEmpty,
+              var parts = URLComponents(string: search.action) else { return }
+        var items = parts.queryItems ?? []
+        items.removeAll { $0.name == search.queryParam }
+        items.append(URLQueryItem(name: search.queryParam, value: text))
+        parts.queryItems = items
+        guard let url = parts.url else { return }
+        collapseSiteMenuChrome()
+        navigateActive(url.absoluteString)
+    }
+
+    func captureSiteMenu(_ pane: PaneID) {
+        guard usesSiteMenu, !declinedSiteMenu.contains(pane), paneAlive(pane), let view = hosts.existingBrowser(pane) else { return }
+        if NewTabPage.matches(line: surfaces.line(pane)) {
+            siteMenus[pane] = nil
+            return
+        }
+        // The bar is the browser's, so it is up before the page answers.
+        if siteMenus[pane] == nil, let baseline = SiteMenuPolicy.baseline(line: surfaces.line(pane)) {
+            siteMenus[pane] = baseline
+        }
+        let pageURL = view.url
+        Task { @MainActor [weak self] in
+            guard let self, self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
+                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
+            let extracted = await PageTextBridge.siteMenu(view)
+            guard self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
+                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
+            let accepted = extracted.flatMap { SiteMenuPolicy.accept($0) }
+                ?? SiteMenuPolicy.baseline(line: self.surfaces.line(pane))
+            guard let accepted else {
+                self.siteMenus[pane] = nil
+                return
+            }
+            if accepted.replacesChrome {
+                guard await PageTextBridge.hideSiteMenu(view), self.paneAlive(pane),
+                      self.hosts.existingBrowser(pane) === view, view.url == pageURL,
+                      self.usesSiteMenu, !self.declinedSiteMenu.contains(pane) else { return }
+            }
+            let arrived = self.siteMenus[pane] != accepted
+            self.siteMenus[pane] = accepted
+            // The read menu is the browser reading the page for you. Announce
+            // it the way a refined page label is announced.
+            if arrived, pane == self.activePane { self.revealSiteMenu(pane) }
+        }
+    }
+
+    /// Responsive sites redraw their header when their page changes size,
+    /// which can bring it back beside the Interlinked menu. Once the size
+    /// settles, read and hide the header again, or restore it if the new
+    /// layout has no menu worth replacing.
+    func paneResized(_ pane: PaneID) {
+        guard usesSiteMenu, !declinedSiteMenu.contains(pane) else { return }
+        resizeTasks[pane]?.cancel()
+        resizeTasks[pane] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled, let self, self.usesSiteMenu, self.paneAlive(pane) else { return }
+            self.resizeTasks[pane] = nil
+            guard self.siteMenus[pane] != nil else {
+                self.captureSiteMenu(pane)
+                return
+            }
+            guard let view = self.hosts.existingBrowser(pane) else { return }
+            let pageURL = view.url
+            let refreshed = await PageTextBridge.refreshSiteMenu(view)
+            guard self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
+                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
+            let accepted = refreshed.flatMap { SiteMenuPolicy.accept($0) }
+                ?? SiteMenuPolicy.baseline(line: self.surfaces.line(pane))
+            if accepted?.replacesChrome != true {
+                await PageTextBridge.showSiteMenu(view)
+            }
+            self.siteMenus[pane] = accepted
+        }
+    }
+
+    func restoreSiteHeader(_ pane: PaneID? = nil) {
+        let target = pane ?? activePane
+        guard let target else { return }
+        declinedSiteMenu.insert(target)
+        siteMenus[target] = nil
+        collapseSiteMenuChrome()
+        Task { @MainActor [weak self] in
+            await PageTextBridge.showSiteMenu(self?.hosts.existingBrowser(target))
+        }
+    }
+
+    func restoreAllSiteHeaders() {
+        let panes = Array(siteMenus.keys)
+        siteMenus.removeAll()
+        Task { @MainActor [weak self] in
+            for pane in panes {
+                await PageTextBridge.showSiteMenu(self?.hosts.existingBrowser(pane))
+            }
+        }
+    }
+
     func openAddress(_ address: String) {
         openTab(kind: .browser)
         guard let pane = activePane else { return }
@@ -186,6 +405,10 @@ final class Workspace {
     }
 
     func closeTab(_ id: TabID) {
+        if let pane = onboarding.pane, tabs.first(where: { $0.id == id })?.contains(pane) == true {
+            onboarding.protect()
+            return
+        }
         if activeTab?.id == id { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let selected = activeTab?.id
@@ -196,26 +419,74 @@ final class Workspace {
     }
 
     func escape() {
-        if pageHistoryOpen { pageHistoryOpen = false }
+        if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
+        else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
-        else if assistance.filterPanelOpen { assistance.closeFilters() }
         else if assistance.panel != nil { assistance.closePanel() }
-        else if editing != nil { discardLine() }
+        else if identityOpen { closeIdentity() }
+        else if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
+        else if editing != nil {
+            discardLine()
+            beginEmptyPageEditingIfNeeded()
+        }
         else if overviewOpen { setOverviewOpen(false) }
         else { cancelListening() }
+    }
+
+    func toggleIdentity() {
+        if identityOpen {
+            closeIdentity()
+            return
+        }
+        guard currentPageURL != nil else { return }
+        discardLine()
+        setOverviewOpen(false)
+        assistance.closePanel()
+        pageHistoryOpen = false
+        downloads.closePanel()
+        identityOpen = true
+    }
+
+    /// History and downloads morph the page handle, so they take its place
+    /// from whatever else it was showing.
+    func togglePageHistory() {
+        let open = !pageHistoryOpen
+        if open { preparePagePanel() }
+        pageHistoryOpen = open
+    }
+
+    func toggleDownloads() {
+        let open = !downloads.panelOpen
+        if open { preparePagePanel() }
+        downloads.togglePanel()
+    }
+
+    private func preparePagePanel() {
+        discardLine()
+        setOverviewOpen(false)
+        closeIdentity()
+        assistance.closePanel()
+        pageHistoryOpen = false
+        downloads.closePanel()
+    }
+
+    func closeIdentity() {
+        guard identityOpen else { return }
+        identityOpen = false
+        restoreFocus()
     }
 
     private func restoreFocus() {
         let expectedPane = activePane
         DispatchQueue.main.async { [weak self] in
             guard let self, let pane = expectedPane,
-                  self.activePane == pane, !self.overviewOpen, self.editing == nil else { return }
+                  self.activePane == pane, !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
             if self.hosts.focus(pane) { return }
             // SwiftUI may attach the retained Chromium view one run-loop turn
             // after the selected tab changes.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.activePane == pane,
-                      !self.overviewOpen, self.editing == nil else { return }
+                      !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
                 self.hosts.focus(pane)
             }
         }
@@ -225,19 +496,37 @@ final class Workspace {
         guard !started else { return }
         started = true
         Workspace.shared = self
+        ChromeCursor.install()
+        // Vault, favorites, and bookmarks were removed. Nothing reads their files.
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        for file in ["Interlinked/vault.json", "Interlinked/saved-sites.json"] {
+            try? FileManager.default.removeItem(at: support.appendingPathComponent(file))
+        }
+        UserDefaults.standard.removeObject(forKey: "newTab.savedSites")
         builtIns.start(workspace: self)
+        usefulInfo.workspace = self
         assistance.workspace = self
         downloads.refreshNotificationStatus()
-        if let session = Session.read() {
-            restore(session)
-            if tabs.isEmpty { openTab() }
-        } else {
+        if ProcessInfo.processInfo.arguments.contains("-interlinked-ui-testing") {
             openTab()
+        } else {
+            if let session = Session.read() { restore(session) }
+            #if DEBUG
+            // Developer option: the whole flow, from the start, every launch.
+            if onboarding.alwaysShow { onboarding.reset() }
+            #endif
+            if onboarding.showsAtLaunch { openOnboarding() }
+            if tabs.isEmpty { openTab() }
         }
         hosts.startMemoryPressureMonitoring(workspace: self)
         if let appDelegate = NSApp.delegate as? AppDelegate {
             openExternalURLs(appDelegate.takePendingWebURLs())
         }
+        if let raw = ProcessInfo.processInfo.environment["INTERLINKED_UI_TEST_URL"],
+           let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            openExternalURLs([url])
+        }
+        beginEmptyPageEditingIfNeeded()
         #if !TESTFLIGHT
             control = ControlServer()
             control?.start { [weak self] request in
@@ -251,7 +540,6 @@ final class Workspace {
     func stop() {
         copiedPageURLTask?.cancel()
         downloads.prepareForTermination()
-        assistance.history.save()
         browserHistory.save()
         hosts.stopMemoryPressureMonitoring()
         builtIns.stop()
@@ -309,10 +597,22 @@ final class Workspace {
     // MARK: - Session
 
     func session() -> Session {
-        Session(
+        // Onboarding is rebuilt at launch from its own saved progress.
+        var saved = tabs
+        if let pane = onboarding.pane {
+            saved = tabs.compactMap { tab in
+                guard tab.contains(pane) else { return tab }
+                guard tab.isSplit else { return nil }
+                var rest = tab
+                rest.close(pane)
+                return rest
+            }
+        }
+        let current = activeTab?.id
+        return Session(
             version: 0,
-            tabs: tabs,
-            active: active,
+            tabs: saved,
+            active: saved.firstIndex { $0.id == current } ?? min(active, max(0, saved.count - 1)),
             next_tab: nextTab,
             next_pane: nextPane,
             next_split: nextSplit,
@@ -342,6 +642,7 @@ final class Workspace {
     }
 
     func keep() {
+        noteOnboarding()
         hosts.syncFavicons(tabs: tabs, surfaces: surfaces)
         assistance.prune()
         let session = session()
@@ -363,6 +664,7 @@ final class Workspace {
         tabs.append(tab)
         active = tabs.count - 1
         if let pane = activePane { _ = setKind(pane, .browser) }
+        onboarding.record(.openedTab)
         keep()
     }
 
@@ -378,6 +680,7 @@ final class Workspace {
         }
         restoreFocus()
         keep()
+        beginEmptyPageEditingIfNeeded()
     }
 
     func cycleTabs(_ step: Int) {
@@ -393,6 +696,7 @@ final class Workspace {
         }
         restoreFocus()
         keep()
+        beginEmptyPageEditingIfNeeded()
     }
 
     @discardableResult
@@ -429,17 +733,29 @@ final class Workspace {
 
     func clickPane(_ pane: PaneID) {
         if editing != nil { editing = nil }
+        if identityOpen { closeIdentity() }
         if overviewOpen { overviewOpen = false }
         if quickSwitchOpen { quickSwitchOpen = false }
         if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
         hosts.touch(pane)
-        if activePane != pane { activatePane(pane) }
+        if activePane != pane {
+            activatePane(pane)
+            beginEmptyPageEditingIfNeeded()
+        }
     }
 
     @discardableResult
     func closePane(_ target: PaneID) -> Bool {
+        // ⌘W and close buttons never close onboarding by accident.
+        if onboarding.contains(target) {
+            onboarding.protect()
+            return false
+        }
         if activePane == target { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.contains(target) }) else { return false }
+        if tabs[index].isSplit, let pane = onboarding.pane, tabs[index].contains(pane) {
+            onboarding.record(.closedPane)
+        }
         if tabs[index].close(target) {
             finishClosing()
             return true
@@ -454,6 +770,313 @@ final class Workspace {
 
     func closeActive() {
         if let pane = activePane { _ = closePane(pane) }
+    }
+
+    // MARK: - Onboarding
+
+    static let onboardingTitle = "Welcome to Interlinked"
+
+    var onboardingTab: Tab? {
+        guard let pane = onboarding.pane else { return nil }
+        return tabs.first { $0.contains(pane) }
+    }
+
+    /// Away from the Onboarding tab with something still to do: the coach
+    /// carries the rest of the instruction onto whatever page is showing.
+    var showsOnboardingCoach: Bool {
+        guard let tab = onboardingTab else { return false }
+        return activeTab?.id != tab.id && onboarding.progress.next != nil && !overviewOpen
+    }
+
+    /// Opens the Onboarding tab first in line, or goes back to it.
+    func openOnboarding() {
+        if editing != nil { discardLine() }
+        overviewOpen = false
+        if let pane = onboarding.pane, tabs.contains(where: { $0.contains(pane) }) {
+            activatePane(pane)
+            return
+        }
+        if onboarding.progress.done.isEmpty { switchOffOnboardingFeatures() }
+        let pane = takePane()
+        tabs.insert(Tab(id: TabID(nextTab), pane: pane), at: 0)
+        nextTab += 1
+        active = 0
+        onboarding.opened(in: pane)
+        assistance.changedTab()
+        keep()
+        prepareOnboardingScene()
+    }
+
+    /// Records a step taken on the Onboarding page, like Next, and sets up
+    /// whatever the scene it leads to needs.
+    func advanceOnboarding(_ step: OnboardingStep) {
+        onboarding.record(step)
+        if step == .finished {
+            closeOnboarding()
+            return
+        }
+        prepareOnboardingScene()
+    }
+
+    /// A scene with a real page opens it beside Onboarding, focused, so its
+    /// features act there. One side pane is reused from scene to scene, and
+    /// a scene without a page closes it.
+    private func prepareOnboardingScene() {
+        guard onboarding.progress.next != nil, let pane = onboarding.pane,
+              let index = tabs.firstIndex(where: { $0.contains(pane) }) else { return }
+        let side = onboarding.sidePane.flatMap { tabs[index].contains($0) ? $0 : nil }
+        guard let page = onboarding.progress.scene.page else {
+            if let side {
+                onboarding.sidePane = nil
+                closePane(side)
+            }
+            return
+        }
+        if activeTab?.id != tabs[index].id { activateTab(index) }
+        let target: PaneID
+        if let existing = side ?? tabs[index].otherPane {
+            target = existing
+        } else {
+            target = takePane()
+            guard tabs[index].split(pane, axis: .columns, new: target, id: SplitID(nextSplit)) else { return }
+            nextSplit += 1
+        }
+        onboarding.sidePane = target
+        // The page gets the room; the instructions need little.
+        tabs[index].ratio = page.onboardingShare
+        let address = page.url.absoluteString
+        if surfaces.line(target) != address {
+            surfaces.setKind(target, .browser)
+            surfaces.setLine(target, address)
+            navigate(target, address)
+        }
+        activatePane(target)
+        assistance.changedTab()
+        keep()
+        restoreFocus()
+    }
+
+    /// Find for me or Critical Reading came back with something to show.
+    func noteOnboardingResult(meaning: Bool, reading: Bool) {
+        guard onboardingTab != nil else { return }
+        if meaning { onboarding.record(.foundWithMeaning) }
+        if reading { onboarding.record(.readCritically) }
+    }
+
+    /// The deliberate way out. It will not open at launch again.
+    func closeOnboarding() {
+        guard let pane = onboarding.pane, let index = tabs.firstIndex(where: { $0.contains(pane) }) else {
+            onboarding.dismissed()
+            return
+        }
+        onboarding.dismissed()
+        if tabs[index].isSplit {
+            tabs[index].close(pane)
+        } else {
+            let selected = activeTab?.id
+            tabs.remove(at: index)
+            active = tabs.firstIndex { $0.id == selected } ?? min(active, max(0, tabs.count - 1))
+        }
+        finishClosing()
+    }
+
+    /// Steps that are states rather than actions: being back on the
+    /// Onboarding tab, and seeing it split.
+    func noteOnboarding() {
+        guard let tab = onboardingTab else { return }
+        if activeTab?.id == tab.id { onboarding.record(.cameBack) }
+        if tab.isSplit { onboarding.record(.split) }
+    }
+
+
+    func binding(for feature: OnboardingFeature) -> Binding<Bool> {
+        switch feature {
+        case .siteMenu:
+            Binding(get: { self.usesSiteMenu }, set: { on in
+                self.usesSiteMenu = on
+                // The menu shows on the focused page: hand focus back to the
+                // real page beside onboarding, where the change happens.
+                if on, let side = self.onboarding.sidePane, self.paneAlive(side) {
+                    self.clickPane(side)
+                    self.captureSiteMenu(side)
+                }
+            })
+        case .appleIntelligence:
+            Binding(
+                get: { self.assistance.appleEnabled && LocalIntelligenceRuntime.isAvailable },
+                set: { on in
+                    // Not set up on this Mac yet: take them to where it is.
+                    if on && !LocalIntelligenceRuntime.isAvailable {
+                        Self.openAppleIntelligenceSettings()
+                        return
+                    }
+                    self.assistance.appleEnabled = on
+                    self.assistance.configure()
+                }
+            )
+        case .jev:
+            Binding(get: { self.assistance.enabled }, set: { on in
+                self.assistance.enabled = on
+                self.assistance.configure()
+            })
+        case .sharingScreen:
+            Binding(get: { self.sharingScreenMode }, set: { self.sharingScreenMode = $0 })
+        case .usefulInfo:
+            Binding(get: { self.usefulInfo.showsAddress && self.usefulInfo.showsContact }, set: { on in
+                self.usefulInfo.showsAddress = on
+                self.usefulInfo.showsContact = on
+            })
+        case .criticalReadingAlwaysOn:
+            Binding(get: { self.assistance.automaticReadingEnabled }, set: { on in
+                if on {
+                    // The same informed consent Settings asks for, before anything is sent.
+                    if self.assistance.automaticReadingConsented {
+                        self.assistance.criticalReadingMode = .automatic
+                        self.assistance.configure()
+                    } else {
+                        self.onboardingAsksReadingConsent = true
+                    }
+                } else {
+                    self.assistance.automaticReadingConsented = false
+                    self.assistance.criticalReadingMode = .onRequest
+                    self.assistance.configure()
+                }
+            })
+        case .adBlocking:
+            Binding(get: { self.builtIns.blockingEnabled }, set: { self.builtIns.blockingEnabled = $0 })
+        case .darkPages:
+            Binding(get: { self.builtIns.darkMode != .off }, set: { self.builtIns.darkMode = $0 ? .system : .off })
+        }
+    }
+
+    /// A line under a feature's description when it cannot simply switch on.
+    func note(for feature: OnboardingFeature) -> String? {
+        switch feature {
+        case .appleIntelligence where !LocalIntelligenceRuntime.isAvailable:
+            "Off on this Mac. The switch opens System Settings."
+        default: nil
+        }
+    }
+
+    static func openAppleIntelligenceSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Siri-Settings.extension") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Set while the Onboarding page shows the Always-on privacy warning.
+    var onboardingAsksReadingConsent = false
+
+    /// Features a fresh onboarding introduces start off, so switching them
+    /// on is part of learning them.
+    private func switchOffOnboardingFeatures() {
+        usesSiteMenu = false
+        builtIns.blockingEnabled = false
+        builtIns.darkMode = .off
+        assistance.automaticReadingConsented = false
+        assistance.criticalReadingMode = .onRequest
+        sharingScreenMode = false
+        usefulInfo.showsAddress = false
+        usefulInfo.showsContact = false
+        assistance.appleEnabled = false
+        assistance.enabled = false
+        assistance.configure()
+    }
+
+    /// ⌘⇧T: a new page beside this one, or a new tab when already split.
+    func newPageBeside() {
+        if activeTab?.canSplit == true { splitActive() } else { newPage() }
+    }
+
+    // MARK: - Split view
+
+    /// Sets the first page's share of the width for the active tab's split.
+    func setSplitRatio(_ ratio: Double) {
+        guard activeTab?.isSplit == true else { return }
+        tabs[active].ratio = ratio.clamped(to: Tab.ratioRange)
+        keep()
+    }
+
+    var isSplit: Bool { activeTab?.isSplit ?? false }
+
+    /// Opens a new page beside the focused one. It takes focus.
+    func splitActive() {
+        guard let pane = activePane, activeTab?.canSplit == true else { return }
+        if editing != nil { discardLine() }
+        overviewOpen = false
+        let new = takePane()
+        guard tabs[active].split(pane, axis: .columns, new: new, id: SplitID(nextSplit)) else { return }
+        nextSplit += 1
+        surfaces.setKind(new, .browser)
+        assistance.changedTab()
+        keep()
+        editActiveLine()
+    }
+
+    /// Leaves split view without losing a page: the pane beside the focused
+    /// one moves to its own tab, right after this one.
+    func unsplit() {
+        guard let tab = activeTab, let other = tab.otherPane, let pane = activePane else { return }
+        if editing != nil { discardLine() }
+        tabs[active].close(other)
+        tabs[active].active = pane
+        tabs.insert(Tab(id: TabID(nextTab), pane: other), at: active + 1)
+        nextTab += 1
+        keep()
+        restoreFocus()
+    }
+
+    /// A page dragged from another tab lands on one side of this one. In a
+    /// split it replaces the page on that side, which takes the dragged tab's
+    /// place, so nothing closes.
+    func dropTab(_ dragged: TabID, leading: Bool) {
+        guard let current = activeTab, dragged != current.id,
+              let source = tabs.firstIndex(where: { $0.id == dragged }) else { return }
+        if editing != nil { discardLine() }
+        overviewOpen = false
+        let incoming = tabs[source].active
+        var tab = current
+        var emptiedSource = false
+        if tab.isSplit {
+            let replaced = leading ? tab.panes[0] : tab.panes[tab.panes.count - 1]
+            tab.root.replace(replaced, with: incoming)
+            tabs[source].root.replace(incoming, with: replaced)
+            tabs[source].active = replaced
+        } else {
+            let pane = tab.active
+            guard tab.split(pane, axis: .columns, new: incoming, id: SplitID(nextSplit)) else { return }
+            nextSplit += 1
+            if leading { tab.root.swap(pane, incoming) }
+            if tabs[source].isSplit { tabs[source].close(incoming) } else { emptiedSource = true }
+        }
+        tab.active = incoming
+        let currentID = current.id
+        if let index = tabs.firstIndex(where: { $0.id == currentID }) { tabs[index] = tab }
+        if emptiedSource { tabs.removeAll { $0.id == dragged } }
+        active = tabs.firstIndex(where: { $0.id == currentID }) ?? active
+        assistance.changedTab()
+        hosts.touch(incoming)
+        assistance.activated(incoming)
+        keep()
+        restoreFocus()
+    }
+
+    /// Best title for one page: what it calls itself, else where it is.
+    func title(_ pane: PaneID) -> String {
+        if onboarding.contains(pane) { return Self.onboardingTitle }
+        let line = surfaces.line(pane)
+        let fallback = line.isEmpty ? "New page" : surfaces.kind(pane).compactLabel(for: line)
+        return OpenWork.title(customName: nil, pageTitle: assistance.labels[pane] ?? hosts.titles[pane],
+                              fallback: fallback.isEmpty ? line : fallback)
+    }
+
+    func toggleSplitView() {
+        isSplit ? unsplit() : splitActive()
+    }
+
+    func focusOtherPane() {
+        guard let other = activeTab?.otherPane else { return }
+        clickPane(other)
+        restoreFocus()
     }
 
     func dropTab(_ dragged: TabID, slot: Int) {
@@ -516,12 +1139,12 @@ final class Workspace {
         if editing?.target == target { return }
         commitLine()
         overviewOpen = false
+        identityOpen = false
         editing = LineEdit(target: target, text: text,
                            original: target.pane == nil ? nil : text)
     }
 
     private func refreshSearch() {
-        assistance.searchHistory(editing?.text ?? "", editing: editing?.pane != nil)
         searchTask?.cancel()
         searchResults = []
         selectedSearchResult = nil
@@ -540,12 +1163,7 @@ final class Workspace {
         }
     }
 
-    var addressResults: [SearchResult] {
-        assistance.historyResults.compactMap { visit in URL(string: visit.url).map { SearchResult(title: visit.title, url: $0) } } + searchResults
-    }
-
     func moveSearchSelection(_ step: Int) {
-        let searchResults = addressResults
         guard !searchResults.isEmpty else { return }
         if let selectedSearchResult {
             let next = selectedSearchResult + step
@@ -563,7 +1181,7 @@ final class Workspace {
 
     func openHistoryVisit(_ visit: BrowserHistoryVisit) {
         pageHistoryOpen = false
-        guard let pane = activePane else {
+        guard let pane = activePane, !onboarding.contains(pane) else {
             openAddress(visit.url)
             return
         }
@@ -575,7 +1193,6 @@ final class Workspace {
     }
 
     func submitLine() {
-        let searchResults = addressResults
         if let index = selectedSearchResult, searchResults.indices.contains(index) {
             openSearchResult(searchResults[index])
         } else { commitLine() }
@@ -586,6 +1203,9 @@ final class Workspace {
         let written = editing.value
         self.editing = nil
         switch editing.target {
+        case .pane(let pane) where onboarding.contains(pane):
+            // The Onboarding tab is not a web page: an address opens a new tab.
+            if !written.isEmpty { openAddress(written) }
         case .pane(let pane):
             if surfaces.kind(pane) == .blank && !written.isEmpty {
                 surfaces.setKind(pane, .browser)
@@ -599,6 +1219,7 @@ final class Workspace {
         }
         keep()
         restoreFocus()
+        beginEmptyPageEditingIfNeeded()
     }
 
     func discardLine() {
@@ -727,6 +1348,7 @@ final class Workspace {
     }
 
     private func canReuseForExternalURL(_ pane: PaneID) -> Bool {
+        guard !onboarding.contains(pane) else { return false }
         let line = surfaces.line(pane).trimmingCharacters(in: .whitespacesAndNewlines)
         guard line.isEmpty || line == "about:blank" else { return false }
         guard let url = hosts.existingBrowser(pane)?.url else { return true }
@@ -740,9 +1362,12 @@ final class Workspace {
     }
 
     private func forgetClosed() {
-        hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) })
+        hosts.forget(keep: paneAlive, kinds: { surfaces.kind($0) }, downloads: downloads)
         builtIns.forget(keep: paneAlive)
+        usefulInfo.prune(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
+        siteMenus = siteMenus.filter { paneAlive($0.key) }
+        declinedSiteMenu = declinedSiteMenu.filter(paneAlive)
         if let editing {
             let gone: Bool
             switch editing.target {
@@ -767,10 +1392,13 @@ final class Workspace {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             self?.synchronizeCommandKeyState()
             guard !PageControlRegion.contains(event) else { return event }
-            guard let self, let pane = self.activePane, let browser = self.hosts.existingBrowser(pane),
-                  browser.window === event.window, let root = event.window?.contentView,
+            // In split view either page can be clicked; the one clicked leads.
+            guard let self, let tab = self.activeTab, let root = event.window?.contentView,
                   let hit = root.hitTest(root.convert(event.locationInWindow, from: nil)),
-                  hit === browser.nativeView || hit.isDescendant(of: browser.nativeView) else { return event }
+                  let pane = tab.panes.first(where: { pane in
+                      guard let browser = self.hosts.existingBrowser(pane), browser.window === event.window else { return false }
+                      return hit === browser.nativeView || hit.isDescendant(of: browser.nativeView)
+                  }) else { return event }
             self.clickPane(pane)
             return event // Let links, selection and form controls receive the original click.
         }
@@ -786,7 +1414,7 @@ final class Workspace {
                 return event
             }
             if event.keyCode == 53,
-               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.filterPanelOpen || self.assistance.panel != nil ||
+               self.pageHistoryOpen || self.downloads.panelOpen || self.assistance.panel != nil || self.usefulInfo.contactOpen ||
                self.editing != nil || self.overviewOpen {
                 self.escape()
                 return nil
@@ -870,16 +1498,14 @@ final class Workspace {
         switch (character, modifiers) {
         case ("t", .command):
             newPage()
-        case ("s", .command):
-            assistance.saveToVault()
+        case ("t", [.command, .shift]):
+            newPageBeside()
         case ("s", [.command, .control]):
             toggleOverview()
         case ("]", .command):
             cycleTabs(1)
         case ("[", .command):
             cycleTabs(-1)
-        case ("f", [.command, .shift]):
-            togglePersonalFilters()
         case ("f", .command):
             assistance.openFind()
         case ("g", .command):
@@ -887,9 +1513,13 @@ final class Workspace {
         case ("g", [.command, .shift]):
             assistance.moveMatch(-1)
         case ("j", .command):
-            assistance.closeFilters()
-            if assistance.panel != nil { assistance.closePanel() }
-            downloads.togglePanel()
+            toggleDownloads()
+        case ("\\", .command):
+            toggleSplitView()
+        case ("\\", [.command, .option]):
+            focusOtherPane()
+        case ("s", [.command, .shift]):
+            sharingScreenMode.toggle()
         case ("w", .command):
             closeActive()
         case ("l", .command):
@@ -906,10 +1536,10 @@ final class Workspace {
 
     private func openNativeSettings() {
         settingsDestination = .general
-        assistance.closeFilters()
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
         overviewOpen = false
+        identityOpen = false
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }

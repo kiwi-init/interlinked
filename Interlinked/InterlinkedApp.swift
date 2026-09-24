@@ -18,19 +18,27 @@ struct InterlinkedApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Page") { workspace.newPage() }
                     .keyboardShortcut("t", modifiers: .command)
+                Button("New Page Beside") { workspace.newPageBeside() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
                 Button("Close Tab") { workspace.closeActive() }
                     .keyboardShortcut("w", modifiers: .command)
             }
-            CommandGroup(replacing: .saveItem) {
-                Button("Save to Vault") { workspace.assistance.saveToVault() }
-                    .keyboardShortcut("s", modifiers: .command)
-            }
+            CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .sidebar) {
                 Button("All Tabs") { workspace.toggleOverview() }
                     .keyboardShortcut("s", modifiers: [.command, .control])
             }
+            CommandGroup(replacing: .help) {
+                Button("Show Onboarding") { workspace.openOnboarding() }
+            }
             CommandMenu("Tab") {
+                Button(workspace.isSplit ? "Move Side Page to Its Own Tab" : "Split View") { workspace.toggleSplitView() }
+                    .keyboardShortcut("\\", modifiers: .command)
+                Button("Focus Other Page") { workspace.focusOtherPane() }
+                    .keyboardShortcut("\\", modifiers: [.command, .option])
+                    .disabled(!workspace.isSplit)
+                Divider()
                 Button("Next Tab") { workspace.cycleTabs(1) }
                     .keyboardShortcut("]", modifiers: .command)
                 Button("Previous Tab") { workspace.cycleTabs(-1) }
@@ -41,8 +49,6 @@ struct InterlinkedApp: App {
                     .keyboardShortcut(.tab, modifiers: [.control, .shift])
             }
             CommandMenu("Page") {
-                Button("Personal Filters") { workspace.togglePersonalFilters() }
-                    .keyboardShortcut("f", modifiers: [.command, .shift])
                 Button("Find in Page") { workspace.assistance.openFind() }
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Find Next") { workspace.assistance.moveMatch(1) }
@@ -53,13 +59,16 @@ struct InterlinkedApp: App {
                 Button("Share This Page with Jev…") { workspace.assistance.requestSharing() }
                 Button("Stop Sharing This Page") { workspace.assistance.revokePage() }
                     .disabled(!workspace.assistance.shared)
-                Button("Downloads") {
-                    workspace.assistance.closeFilters()
-                    if workspace.assistance.panel != nil { workspace.assistance.closePanel() }
-                    workspace.downloads.togglePanel()
-                }
+                Button("Downloads") { workspace.toggleDownloads() }
                 .keyboardShortcut("j", modifiers: .command)
+                Toggle("Sharing Screen Mode", isOn: Binding(
+                    get: { workspace.sharingScreenMode },
+                    set: { workspace.sharingScreenMode = $0 }
+                ))
+                .keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
+                Button("Connection Details") { workspace.toggleIdentity() }
+                    .disabled(workspace.currentPageURL == nil)
                 Button("Edit Address") { workspace.editActiveLine() }
                     .keyboardShortcut("l", modifiers: .command)
                 Button("Reload Page") {
@@ -75,7 +84,7 @@ struct InterlinkedApp: App {
             AboutView()
         }
         .windowResizability(.contentSize)
-        Settings { AssistanceSettings().environment(workspace) }
+        Settings { InterlinkedSettings().environment(workspace) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 840, height: 620)
             .windowResizability(.contentMinSize)
@@ -102,6 +111,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// SwiftUI can mount the restored session's pages before
+    /// `applicationDidFinishLaunching`, and a page view cannot make a browser
+    /// until Chromium is up. Start the engine before any scene exists.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        startChromium()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

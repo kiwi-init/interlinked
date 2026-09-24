@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Local-only fixtures for browser dialogs, authentication, and downloads."""
 
-from base64 import b64decode
+from base64 import b64decode, b64encode
+from hashlib import sha1
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import struct
 import time
 
 ROOT = Path(__file__).resolve().parent
@@ -19,6 +21,24 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.partition("?")[0]
         if path == "/":
             return self.send_bytes((ROOT / "web-capabilities.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/identity/lookalike":
+            return self.send_bytes((ROOT / "identity-lookalike.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/inbox":
+            return self.send_inbox()
+        if path == "/public-article":
+            return self.send_bytes((ROOT / "public-article.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/contact":
+            return self.send_bytes((ROOT / "contact.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/runtime":
+            return self.send_bytes((ROOT / "runtime.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/history/a":
+            return self.send_bytes((ROOT / "history-a.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/history/b":
+            return self.send_bytes((ROOT / "history-b.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/sw.js":
+            return self.send_bytes((ROOT / "sw.js").read_bytes(), "text/javascript; charset=utf-8")
+        if path == "/ws":
+            return self.websocket_echo()
         if path == "/auth/basic":
             expected = "fixture:interlinked"
             supplied = self.headers.get("Authorization", "")
@@ -114,6 +134,57 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
         self.end_headers()
         self.wfile.write(data)
+
+    def send_inbox(self):
+        data = (ROOT / "inbox.html").read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Set-Cookie", "SID=fixture-session; Path=/; HttpOnly; SameSite=Lax")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def websocket_echo(self):
+        key = self.headers.get("Sec-WebSocket-Key")
+        if self.headers.get("Upgrade", "").lower() != "websocket" or not key:
+            return self.send_error(426, "Upgrade to WebSocket required")
+        accept = b64encode(sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        payload = self.read_ws_text()
+        self.write_ws_text(payload or "pong")
+
+    def read_ws_text(self):
+        header = self.rfile.read(2)
+        if len(header) < 2:
+            return ""
+        length = header[1] & 127
+        if length == 126:
+            length = struct.unpack(">H", self.rfile.read(2))[0]
+        elif length == 127:
+            length = struct.unpack(">Q", self.rfile.read(8))[0]
+        mask = self.rfile.read(4) if header[1] & 128 else b""
+        data = self.rfile.read(length)
+        if mask:
+            data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+        return data.decode("utf-8", errors="replace")
+
+    def write_ws_text(self, text):
+        payload = text.encode()
+        header = bytearray([0x81])
+        if len(payload) < 126:
+            header.append(len(payload))
+        elif len(payload) < 65536:
+            header.append(126)
+            header.extend(struct.pack(">H", len(payload)))
+        else:
+            header.append(127)
+            header.extend(struct.pack(">Q", len(payload)))
+        self.wfile.write(header + payload)
+        self.wfile.flush()
 
     def send_bytes(self, data, content_type):
         self.send_response(200)

@@ -11,49 +11,53 @@ private actor FixtureJev: JevProvider {
         if delay != .zero { try? await Task.sleep(for: delay) }
         if let failure { throw failure }
         return JevResponse(answers: request.questions.mapValues { question in
-            question.type == .choice
-                ? JevAnswer(type: "choice", choice: question.criteria.keys.sorted().first, confidence: 0.9)
-                : JevAnswer(type: "noul", noul: 0.9)
+            switch question.type {
+            case .choice:
+                JevAnswer(type: "choice", choice: question.criteria.keys.sorted().first, confidence: 0.9)
+            case .noul:
+                JevAnswer(type: "noul", noul: 0.9)
+            case .score:
+                JevAnswer(type: "score", score: 3.5)
+            }
         })
     }
 }
 
 private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
     let label: String?
-    let vaultIDs: [UUID]?
-    let memberGroups: [[String]]?
+    let about: String?
     let advice: String?
     let adviceDelay: Duration
     let adviceUnavailable: Bool
-    private(set) var vaultInputCount = 0
+    private(set) var portraitCalls = 0
+    private(set) var adviceCalls = 0
 
     init(
         label: String? = nil,
-        vaultIDs: [UUID]? = nil,
-        memberGroups: [[String]]? = nil,
+        about: String? = nil,
         advice: String? = nil,
         adviceDelay: Duration = .zero,
         adviceUnavailable: Bool = false
     ) {
         self.label = label
-        self.vaultIDs = vaultIDs
-        self.memberGroups = memberGroups
+        self.about = about
         self.advice = advice
         self.adviceDelay = adviceDelay
         self.adviceUnavailable = adviceUnavailable
     }
 
-    func pageLabel(page: PageMetadata) async throws -> String? { label }
-    func vaultMatches(query: String, visits: [HistoryVisit]) async throws -> [UUID]? {
-        vaultInputCount = visits.count
-        return vaultIDs
+    func pagePortrait(page: PageMetadata) async throws -> PagePortrait? {
+        portraitCalls += 1
+        guard let label, let clean = PageLabels.generated(label) else { return nil }
+        return PagePortrait(label: clean, about: about ?? "About \(clean)")
     }
-    func relatedPageGroups(pages: [ResearchPage]) async throws -> [[String]]? { memberGroups }
     func navigationAdvice(_ review: NavigationReview) async throws -> String? {
+        adviceCalls += 1
         if adviceDelay != .zero { try? await Task.sleep(for: adviceDelay) }
         if adviceUnavailable { throw CancellationError() }
         return advice
     }
+    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { true }
 }
 
 private final class JevURLProtocol: URLProtocol {
@@ -177,18 +181,21 @@ final class JevServiceTests: XCTestCase {
         let response = try await provider.decide(request)
         XCTAssertEqual(response.answers["page"]?.choice, "a")
     }
-    func testCriticalReadingRunsByDefaultAndPersistsOnRequestMode() throws {
+    func testCriticalReadingDefaultsToOnRequestAndPersistsAlwaysOn() throws {
         let name = "CriticalReadingPreferences-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
 
         XCTAssertTrue(JevPreferences.enabled(in: defaults))
-        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .automatic)
+        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
+        XCTAssertFalse(AutomaticReadingConsent.accepted(in: defaults))
 
         defaults.set(false, forKey: JevPreferences.enabledKey)
-        CriticalReadingMode.onRequest.save(to: defaults)
+        CriticalReadingMode.automatic.save(to: defaults)
+        AutomaticReadingConsent.accept(in: defaults)
         XCTAssertFalse(JevPreferences.enabled(in: defaults))
-        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
+        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .automatic)
+        XCTAssertTrue(AutomaticReadingConsent.accepted(in: defaults))
     }
 }
 
@@ -207,13 +214,13 @@ final class IntelligenceAuditStoreTests: XCTestCase {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let store = IntelligenceAuditStore(file: location.file, now: { date })
 
-        let id = store.begin(source: .appleIntelligence, action: "Vault search")
+        let id = store.begin(source: .appleIntelligence, action: "Page label")
         store.finish(id, failed: false)
         let reloaded = IntelligenceAuditStore(file: location.file, now: { date })
 
         XCTAssertEqual(reloaded.events.count, 1)
         XCTAssertEqual(reloaded.events[0].source, .appleIntelligence)
-        XCTAssertEqual(reloaded.events[0].action, "Vault search")
+        XCTAssertEqual(reloaded.events[0].action, "Page label")
         XCTAssertEqual(reloaded.events[0].outcome, .completed)
 
         let json = try String(contentsOf: location.file, encoding: .utf8)
@@ -276,22 +283,18 @@ final class BrowserIntelligenceTests: XCTestCase {
                      heading: "A focused browser", summary: "Browse without losing context", breadcrumbs: ["Products"])
     }
 
-    private func visit(_ index: Int) -> HistoryVisit {
-        HistoryVisit(id: UUID(), url: "https://example.com/\(index)", title: "Saved page \(index)",
-                     summary: "Research note \(index)", visited: Date(timeIntervalSince1970: TimeInterval(index)))
-    }
-
     @MainActor
     func testProviderCallsAppearInTheUserAudit() async throws {
         let page = page(), expected = "Example browser research"
         let audit = IntelligenceAuditStore()
         let intelligence = BrowserIntelligence(
             jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: FixtureLocalIntelligence(label: expected),
-            audit: audit
+            local: FixtureLocalIntelligence(label: expected, about: "A focused browser research page."),
+            audit: audit,
+            portraits: PagePortraitCache(file: nil)
         )
 
-        _ = try await intelligence.refinePageLabel(page: page)
+        _ = try await intelligence.describePage(page: page)
 
         XCTAssertEqual(audit.events.count, 1)
         XCTAssertEqual(audit.events.first?.source, .appleIntelligence)
@@ -299,69 +302,92 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(audit.events.first?.outcome, .completed)
     }
 
-    func testAppleLabelWinsWithoutCallingJev() async throws {
+    func testApplePortraitDoesNotCallJevAndCachesByMetadata() async throws {
         let page = page(), expected = "Focused Browser Research"
-        let local = FixtureLocalIntelligence(label: expected)
+        let local = FixtureLocalIntelligence(label: expected, about: "Researching a focused browser.")
         let jev = FixtureJev()
-        let intelligence = BrowserIntelligence(jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)), local: local)
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)),
+            local: local,
+            portraits: PagePortraitCache(file: nil)
+        )
 
-        let decision = try await intelligence.refinePageLabel(page: page)
+        let decision = try await intelligence.describePage(page: page)
+        _ = try await intelligence.describePage(page: page)
         let calls = await jev.calls
+        let portraits = await local.portraitCalls
 
-        XCTAssertEqual(decision?.value, expected)
+        XCTAssertEqual(decision?.value.label, expected)
+        XCTAssertEqual(decision?.value.about, "Researching a focused browser.")
         XCTAssertEqual(decision?.source, .appleIntelligence)
         XCTAssertEqual(calls, 0)
+        XCTAssertEqual(portraits, 1)
     }
 
     func testBlankAppleLabelDoesNotCallJev() async throws {
         let page = page()
         let local = FixtureLocalIntelligence(label: "  \n ")
         let jev = FixtureJev()
-        let intelligence = BrowserIntelligence(jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)), local: local)
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)),
+            local: local,
+            portraits: PagePortraitCache(file: nil)
+        )
 
-        let decision = try await intelligence.refinePageLabel(page: page)
+        let decision = try await intelligence.describePage(page: page)
         let calls = await jev.calls
 
         XCTAssertNil(decision)
         XCTAssertEqual(calls, 0)
     }
 
-    func testVaultUsesOnlySixLocalCandidatesAndValidatesReturnedIDs() async throws {
-        let visits = (0..<9).map(visit)
-        let local = FixtureLocalIntelligence(vaultIDs: [visits[4].id, UUID(), visits[1].id])
-        let jev = FixtureJev()
-        let intelligence = BrowserIntelligence(jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)), local: local)
-
-        let decision = try await intelligence.vaultMatches(query: "research", visits: visits, allowJev: true)
-        let localCount = await local.vaultInputCount
-        let jevCalls = await jev.calls
-
-        XCTAssertEqual(decision?.source, .appleIntelligence)
-        XCTAssertEqual(decision?.value.map(\.id), [visits[4].id, visits[1].id])
-        XCTAssertEqual(localCount, 6)
-        XCTAssertEqual(jevCalls, 0)
+    func testLongPagesAreCheckedInFullInParallelBatches() async throws {
+        let passages = (0..<200).map { PagePassage(id: "p\($0)", text: "Passage \($0) with enough words to read", role: "passage") }
+        let jev = FixtureJev(delay: .milliseconds(20))
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)),
+            local: FixtureLocalIntelligence(),
+            portraits: PagePortraitCache(file: nil)
+        )
+        let found = try await intelligence.meaningFind(query: "passage", passages: passages)
+        XCTAssertEqual(found.value.scores.count, 200)
+        let reading = try await intelligence.criticalReading(passages)
+        XCTAssertEqual(reading.value.count, 200)
+        let calls = await jev.calls
+        // 4 meaning batches of 60, one first-result pick, 5 reading batches of 40.
+        XCTAssertEqual(calls, 4 + 1 + 5)
     }
 
-    func testRelatedGroupsRejectUnknownAndDuplicateMembers() async throws {
+    func testRelatedGroupsUseJevOnAboutsNotApple() async throws {
         let pages = [
-            ResearchPage(id: "one", title: "First", detail: "", host: "one.test"),
-            ResearchPage(id: "two", title: "Second", detail: "", host: "two.test"),
-            ResearchPage(id: "three", title: "Third", detail: "", host: "three.test")
+            ResearchPage(id: "one", title: "First", detail: "", host: "one.test", about: "Sony A7 review"),
+            ResearchPage(id: "two", title: "Second", detail: "", host: "two.test", about: "Sony A7 shop"),
+            ResearchPage(id: "three", title: "Third", detail: "", host: "three.test", about: "Pasta recipes")
         ]
-        let local = FixtureLocalIntelligence(memberGroups: [["two", "unknown", "one"], ["one", "three"]])
-        let intelligence = BrowserIntelligence(jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)), local: local)
+        let local = FixtureLocalIntelligence(label: "Ignored")
+        let jev = FixtureJev()
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)),
+            local: local,
+            portraits: PagePortraitCache(file: nil)
+        )
 
-        let decision = try await intelligence.relatedPageGroups(pages: pages, jevPages: [], allowJev: false)
+        let decision = try await intelligence.relatedPageGroups(pages: pages)
+        let jevCalls = await jev.calls
+        let portraits = await local.portraitCalls
 
-        XCTAssertEqual(decision?.source, .appleIntelligence)
-        XCTAssertEqual(decision?.value, [ResearchGroup(id: "one", title: "First", members: ["one", "two"])])
+        XCTAssertEqual(decision?.source, .jev)
+        XCTAssertEqual(jevCalls, 1)
+        XCTAssertEqual(portraits, 0)
+        XCTAssertEqual(Set(decision?.value.first?.members ?? []), Set(["one", "two", "three"]))
     }
 
     func testNavigationAdviceRetainsTheWarningWhenAppleIntelligenceIsUnavailable() async throws {
         let local = FixtureLocalIntelligence(adviceUnavailable: true)
         let intelligence = BrowserIntelligence(
             jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: local
+            local: local,
+            portraits: PagePortraitCache(file: nil)
         )
         let review = NavigationSafety.review(
             destination: try XCTUnwrap(URL(string: "https://person:secret@example.test")),
@@ -371,13 +397,35 @@ final class BrowserIntelligenceTests: XCTestCase {
         let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(50))
         XCTAssertNil(advice)
         XCTAssertEqual(review.disposition, .warn)
+        XCTAssertTrue(review.needsAdvisory)
+    }
+
+    func testNavigationAdviceSkipsRoutineWarnings() async throws {
+        let local = FixtureLocalIntelligence(advice: "Should not run")
+        let intelligence = BrowserIntelligence(
+            jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
+            local: local,
+            portraits: PagePortraitCache(file: nil)
+        )
+        let review = NavigationSafety.review(
+            destination: try XCTUnwrap(URL(string: "https://github.com:8443/")),
+            source: try XCTUnwrap(URL(string: "https://example.com/")),
+            kind: .link
+        )
+        let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(50))
+        let calls = await local.adviceCalls
+        XCTAssertTrue(review.reasons.contains(.unusualPort))
+        XCTAssertFalse(review.needsAdvisory)
+        XCTAssertNil(advice)
+        XCTAssertEqual(calls, 0)
     }
 
     func testNavigationAdviceDeadlineDoesNotWaitForTheModel() async throws {
         let local = FixtureLocalIntelligence(advice: "Too late", adviceDelay: .seconds(2))
         let intelligence = BrowserIntelligence(
             jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: local
+            local: local,
+            portraits: PagePortraitCache(file: nil)
         )
         let review = NavigationSafety.review(
             destination: try XCTUnwrap(URL(string: "https://person:secret@example.test")),
@@ -401,10 +449,20 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertTrue(PageTextBridge.install.contains("nodeText(node)!==item.text"))
         XCTAssertFalse(PageTextBridge.install.contains("clean(node.innerText)!==item.text"))
     }
-    func testPageBridgeReportsWhenExtractionReachesItsLimit() {
-        XCTAssertTrue(PageTextBridge.install.contains("passages.length>=limit"))
-        XCTAssertTrue(PageTextBridge.install.contains("passages,truncated"))
-        XCTAssertFalse(PageTextBridge.install.contains("truncated:false"))
+    func testPageBridgeWorksOnPlainHTTPPages() {
+        // randomUUID is missing outside secure contexts; the bridge must not depend on it.
+        XCTAssertTrue(PageTextBridge.install.contains("crypto.randomUUID?.()"))
+        XCTAssertTrue(PageTextBridge.install.contains("crypto.getRandomValues"))
+    }
+    func testPageBridgeExtractsTheWholePage() {
+        XCTAssertFalse(PageTextBridge.install.contains("passages.length>=limit"))
+        XCTAssertTrue(PageTextBridge.install.contains("return {document:documentID,url:location.href,passages};"))
+        XCTAssertTrue(PageTextBridge.install.contains("mostlyControls"))
+    }
+    func testHighlightsFollowThePageAppearance() {
+        XCTAssertTrue(PageTextBridge.install.contains("highlight(items, current, document, scroll = true, dark)"))
+        XCTAssertTrue(PageTextBridge.install.contains("{mark:'#6b5200',current:'#8f6c00',text:'#fff4cc'}"))
+        XCTAssertTrue(PageTextBridge.install.contains("appearance(dark)"))
     }
     func testLabelsUseMetadataWithoutCandidatesOrURLSecrets() {
         XCTAssertEqual(PageLabels.fallback(page()), "Buy iPhone 18 Pro - Apple")
@@ -417,26 +475,34 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(PageLabels.generated("  iPhone   comparison\nresults  "), "iPhone comparison results")
         XCTAssertNil(PageLabels.generated(" \n "))
         XCTAssertEqual(page().origin, "https://www.apple.com")
+        let identity = PageLabels.cacheIdentity(page())
+        XCTAssertTrue(identity.contains("www.apple.com"))
+        XCTAssertTrue(identity.contains("/iphone-18-pro/buy"))
+        XCTAssertFalse(identity.contains("token"))
+        var renamed = page()
+        renamed.title = "Different title"
+        XCTAssertNotEqual(PageLabels.cacheIdentity(renamed), identity)
+        XCTAssertEqual(PageLabels.cacheIdentity(page("https://www.apple.com/iphone-18-pro/buy?q=1")), identity)
     }
     func testMeaningFindReturnsOnlyOriginalPassagesInDocumentOrder() {
         let passages = [PagePassage(id: "p1", text: "Termination policy: cancel within 30 days."), PagePassage(id: "p2", text: "Delivery takes five days.")]
-        let request = PassageDecisions.findRequest(query: "cancellation conditions", passages: passages)
-        XCTAssertEqual(Set(request.questions.keys), ["p1", "p2", "best_match"])
+        let request = PassageDecisions.scoreRequest(query: "cancellation conditions", passages: passages)
+        XCTAssertEqual(Set(request.questions.keys), ["p1", "p2"])
         let response = JevResponse(answers: ["p1": JevAnswer(type: "score", score: 3.9), "p2": JevAnswer(type: "score", score: 0.4), "fabricated": JevAnswer(type: "score", score: 4)])
+        XCTAssertEqual(PassageDecisions.shortlist(response, passages: passages).map(\.id), ["p1"])
         XCTAssertEqual(PassageDecisions.matches(response, passages: passages), [passages[0]])
         XCTAssertTrue(PassageDecisions.matches(JevResponse(answers: [:]), passages: passages).isEmpty)
-        XCTAssertLessThanOrEqual(PassageDecisions.candidates(query: "", passages: (0..<100).map { PagePassage(id: "p\($0)", text: "Text") }).count, 40)
     }
     func testIntentScoresRankSupportBeforeIncidentalWordStems() throws {
         let passages = [PagePassage(id: "body", text: "Recursos que ajudam nas fotos.", role: "passage"),
                         PagePassage(id: "support", text: "Suporte", role: "link"),
                         PagePassage(id: "help", text: "Ajuda", role: "link")]
-        let request = PassageDecisions.findRequest(query: "ajuda", passages: passages)
-        let response = JevResponse(answers: ["best_match": JevAnswer(type: "choice", choice: "help"), "body": JevAnswer(type: "score", score: 1),
+        let request = PassageDecisions.scoreRequest(query: "ajuda", passages: passages)
+        let response = JevResponse(answers: ["body": JevAnswer(type: "score", score: 1),
                                             "support": JevAnswer(type: "score", score: 3.8),
                                             "help": JevAnswer(type: "score", score: 4)])
         XCTAssertNoThrow(try response.validated(for: request))
-        XCTAssertEqual(PassageDecisions.matches(response, passages: passages).map(\.id), ["help", "support"])
+        XCTAssertEqual(PassageDecisions.shortlist(response, passages: passages).map(\.id), ["help", "support"])
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.encoded()) as? [String: Any])
         let questions = try XCTUnwrap(body["questions"] as? [String: [String: Any]])
         XCTAssertEqual(questions["support"]?["type"] as? String, "score")
@@ -446,20 +512,18 @@ final class BrowserIntelligenceTests: XCTestCase {
     func testBestAnswerSelectionOutranksIndependentScoresAndSurvivesCutoff() throws {
         let passages = [PagePassage(id: "time", text: "Delivery tomorrow", role: "passage"),
                         PagePassage(id: "price", text: "Shipping is free", role: "heading")]
-        let request = PassageDecisions.findRequest(query: "delivery price", passages: passages)
-        var response = JevResponse(answers: ["best_match": JevAnswer(type: "choice", choice: "price"),
-                                            "time": JevAnswer(type: "score", score: 2.9), "price": JevAnswer(type: "score", score: 2.7)])
-        XCTAssertNoThrow(try response.validated(for: request))
-        XCTAssertEqual(PassageDecisions.matches(response, passages: passages).map(\.id), ["price", "time"])
+        let scores = JevResponse(answers: ["time": JevAnswer(type: "score", score: 2.9), "price": JevAnswer(type: "score", score: 2.7)])
+        let shortlist = PassageDecisions.shortlist(scores, passages: passages)
+        let request = PassageDecisions.bestMatchRequest(query: "delivery price", passages: shortlist)
+        XCTAssertEqual(request.questions["best_match"]?.criteria["price"], "heading")
+        XCTAssertFalse((request.questions["best_match"]?.criteria["price"] ?? "").contains("Shipping"))
+        XCTAssertNoThrow(try scores.validated(for: PassageDecisions.scoreRequest(query: "delivery price", passages: passages)))
+        XCTAssertNoThrow(try JevResponse(answers: ["best_match": JevAnswer(type: "choice", choice: "price")]).validated(for: request))
+        var response = scores
+        response.answers["best_match"] = JevAnswer(type: "choice", choice: "price")
+        XCTAssertEqual(PassageDecisions.matches(response, passages: shortlist).map(\.id), ["price", "time"])
         response.answers["best_match"] = JevAnswer(type: "choice", choice: "none")
-        XCTAssertTrue(PassageDecisions.matches(response, passages: passages).isEmpty)
-    }
-    func testDifferentLanguageQueryStillIncludesShortHeadingsAndControls() {
-        let pages = (0..<80).map { PagePassage(id: "p\($0)", text: "A long body paragraph \($0)", role: "passage") } +
-            [PagePassage(id: "mars", text: "Mars", role: "heading"), PagePassage(id: "support", text: "Suporte", role: "link")]
-        let selected = PassageDecisions.candidates(query: "marte", passages: pages)
-        XCTAssertTrue(selected.contains { $0.id == "mars" }); XCTAssertTrue(selected.contains { $0.id == "support" })
-        XCTAssertLessThanOrEqual(selected.count, 40)
+        XCTAssertTrue(PassageDecisions.matches(response, passages: shortlist).isEmpty)
     }
 
     func testReadingUsesFixedCategoriesAndPreservesEvidenceWithoutTrainingExamples() {
@@ -495,16 +559,14 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(PassageDecisions.Signal.politicalBias.label, "Possible political bias")
         XCTAssertTrue(PassageDecisions.Signal.politicalBias.explanation.contains("partisan political framing"))
     }
-    func testReadingFiltersFragmentsBoundsEvidenceAndBatchesLongPages() {
+    func testReadingFiltersFragmentsAndSendsWholePassages() {
         let passages = [PagePassage(id: "short", text: "Too good."),
                         PagePassage(id: "heading", text: "A meaningful heading with enough words", role: "heading")] +
             (0..<85).map { PagePassage(id: "p\($0)", text: String(repeating: "substantive ", count: 200), role: "passage") }
         let candidates = PassageDecisions.readingCandidates(passages)
-        let batches = PassageDecisions.readingBatches(candidates)
         XCTAssertEqual(candidates.count, 85)
-        XCTAssertEqual(batches.map(\.count), [40, 40, 5])
         let request = PassageDecisions.readingRequest([candidates[0]])
-        XCTAssertLessThanOrEqual(request.state.count, PassageDecisions.readingTextLimit + 120)
+        XCTAssertTrue(request.state.contains(candidates[0].text))
         XCTAssertEqual(Set(request.questions.keys), ["p0"])
     }
     func testReadingCanFlagLikelyAIGeneratedTextWithoutPresentingLowConfidenceGuesses() {
@@ -517,21 +579,6 @@ final class BrowserIntelligenceTests: XCTestCase {
         let found = PassageDecisions.findings(response, passages: passages)
         XCTAssertEqual(found, [.init(passage: passages[0], signal: .aiGenerated)])
         XCTAssertTrue(PassageDecisions.Signal.aiGenerated.explanation.contains("not proof"))
-    }
-    func testHistoryOnlyRanksRealVisitsAndDeletionPersists() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let history = BrowsingHistory(file: dir.appendingPathComponent("history.json"))
-        history.record(page()); history.record(page())
-        history.record(page("https://www.apple.com/buy?token=secret"))
-        XCTAssertEqual(history.visits.count, 1)
-        let visits = history.candidates("phone I wanted"), id = try XCTUnwrap(visits.first?.id)
-        let request = BrowsingHistory.request("phone I wanted", visits: visits)
-        XCTAssertFalse(request.state.contains("https://"))
-        let response = JevResponse(answers: [id.uuidString: JevAnswer(type: "noul", noul: 0.95), "invented": JevAnswer(type: "noul", noul: 1)])
-        XCTAssertEqual(BrowsingHistory.ranked(response, visits: visits).map(\.id), [id])
-        history.remove(id)
-        XCTAssertTrue(BrowsingHistory(file: dir.appendingPathComponent("history.json")).visits.isEmpty)
     }
     func testBrowserHistoryRecordsVisitsAcrossPagesAndPersists() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -556,8 +603,49 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(ResearchRelations.groups(pages).first?.members, ["3", "1"])
         let groups = ResearchRelations.groups(pages, response: JevResponse(answers: ["3_1": JevAnswer(type: "noul", noul: 0.9)]))
         XCTAssertEqual(groups.first?.title, pages[0].title)
+        XCTAssertEqual(groups.first?.members, ["3", "1"])
         XCTAssertEqual(pages.map(\.id), ["3", "1", "2"])
         XCTAssertTrue(ResearchRelations.groups(pages, response: JevResponse(answers: [:])).isEmpty)
+    }
+    func testRelatedCliquesDoNotUseTransitivity() {
+        let pages = [
+            ResearchPage(id: "a", title: "A", detail: "", host: "a.test", about: "Sony A7 review"),
+            ResearchPage(id: "b", title: "B", detail: "", host: "b.test", about: "Sony A7 shop"),
+            ResearchPage(id: "c", title: "C", detail: "", host: "c.test", about: "Unrelated pasta")
+        ]
+        let chain = ResearchRelations.groups(pages, response: JevResponse(answers: [
+            "a_b": JevAnswer(type: "noul", noul: 0.9),
+            "b_c": JevAnswer(type: "noul", noul: 0.9),
+            "a_c": JevAnswer(type: "noul", noul: 0.1)
+        ]))
+        XCTAssertEqual(chain.map { Set($0.members) }, [Set(["a", "b"])])
+        let clique = ResearchRelations.groups(pages, response: JevResponse(answers: [
+            "a_b": JevAnswer(type: "noul", noul: 0.9),
+            "b_c": JevAnswer(type: "noul", noul: 0.9),
+            "a_c": JevAnswer(type: "noul", noul: 0.9)
+        ]))
+        XCTAssertEqual(clique.map { Set($0.members) }, [Set(["a", "b", "c"])])
+    }
+    func testRelatedMergeKeepsFallbackGroupsThatIncludeUndescribedTabs() {
+        let pages = [
+            ResearchPage(id: "a", title: "Sony A7 camera review", detail: "", host: "a.test", about: "Sony A7 review"),
+            ResearchPage(id: "b", title: "Sony A7 camera shop", detail: "", host: "b.test", about: "Sony A7 shop"),
+            ResearchPage(id: "c", title: "Sony A7 camera listing", detail: "", host: "c.test", about: ""),
+            ResearchPage(id: "d", title: "Cooking dinner recipes", detail: "", host: "d.test", about: "")
+        ]
+        let fallback = ResearchRelations.groups(pages)
+        XCTAssertEqual(Set(fallback.first?.members ?? []), Set(["a", "b", "c"]))
+        let remote = [ResearchGroup(id: "a", title: pages[0].title, members: ["a", "b"])]
+        let merged = ResearchRelations.merge(remote: remote, fallback: fallback, pages: pages)
+        XCTAssertEqual(Set(merged.first { $0.members.contains("a") }?.members ?? []), Set(["a", "b", "c"]))
+        XCTAssertFalse(merged.contains { Set($0.members) == Set(["a", "b", "c", "d"]) })
+        let declined = ResearchRelations.merge(remote: [], fallback: fallback, pages: pages)
+        XCTAssertEqual(Set(declined.first?.members ?? []), Set(["a", "b", "c"]))
+        XCTAssertTrue(ResearchRelations.merge(
+            remote: [],
+            fallback: [ResearchGroup(id: "a", title: "Sony", members: ["a", "b"])],
+            pages: pages
+        ).isEmpty)
     }
     func testSensitiveAndLocalPagesCannotBeShared() {
         XCTAssertFalse(page("http://127.0.0.1:8000/").publicWebPage)
@@ -567,42 +655,11 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertFalse(sensitive.publicWebPage)
         XCTAssertTrue(page().publicWebPage)
     }
-    func testPersonalFiltersMatchVisibleHeadingsLocallyAndPersistPerSite() throws {
-        let passages = [
-            PagePassage(id: "news", text: "Latest from our changelog", role: "heading"),
-            PagePassage(id: "feed", text: "A repository you follow was updated.", role: "passage")
-        ]
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(
-            description: "idgaf about this latest from our changelog bs", passages: passages
-        ).map(\.id), ["news"])
-        let media = [PageFilterCandidate(id: "image", text: "Hero", role: "image", context: ""),
-                     PageFilterCandidate(id: "video", text: "Film", role: "video", context: "")]
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "all images and videos", candidates: media).map(\.id),
-                       ["image", "video"])
-        let words = [PageFilterCandidate(id: "pace", text: "pace", role: "text token", context: "We must pace the frontier")]
-        XCTAssertEqual(PersonalFilterDecisions.localMatches(description: "the word pace", candidates: words).map(\.id), ["pace"])
-
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let file = directory.appendingPathComponent("filters.json")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let filters = PersonalFilters(file: file)
-        let rule = try XCTUnwrap(filters.add("Hide the changelog", host: "www.github.com"))
-        XCTAssertEqual(filters.rules(for: "github.com").map(\.id), [rule.id])
-        filters.toggle(rule.id)
-        XCTAssertEqual(PersonalFilters(file: file).rules(for: "www.github.com").first?.isEnabled, false)
-    }
-    func testPersonalFilterSemanticMatchesRequireHighConfidenceAndOriginalIDs() {
-        let candidates = [PageFilterCandidate(id: "card", text: "Product announcements", role: "heading", context: ""),
-                          PageFilterCandidate(id: "feed", text: "Your activity", role: "heading", context: "")]
-        let response = JevResponse(answers: [
-            "card": JevAnswer(type: "noul", noul: PersonalFilterDecisions.matchThreshold),
-            "feed": JevAnswer(type: "noul", noul: PersonalFilterDecisions.matchThreshold - 0.01),
-            "invented": JevAnswer(type: "noul", noul: 1)
-        ])
-        XCTAssertEqual(PersonalFilterDecisions.matches(response, candidates: candidates), [candidates[0]])
-        let request = PersonalFilterDecisions.request(description: "Hide product news", candidates: candidates)
-        XCTAssertEqual(Set(request.questions.keys), Set(candidates.map(\.id)))
-        XCTAssertTrue(request.state.contains("Hide product news"))
-        XCTAssertTrue(request.state.contains("text"))
+    func testSigningInDoesNotExcludeAPage() {
+        let inbox = page("https://mail.example.com/inbox")
+        XCTAssertTrue(inbox.publicWebPage)
+        XCTAssertFalse(PageTextBridge.install.contains("document.cookie"))
+        let payload = Data(#"{"document":"d","url":"https://mail.example.com/inbox","title":"Inbox","heading":"","summary":"","breadcrumbs":[],"sensitive":true}"#.utf8)
+        XCTAssertEqual((try? JSONDecoder().decode(PageMetadata.self, from: payload))?.publicWebPage, false)
     }
 }

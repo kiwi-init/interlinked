@@ -40,6 +40,18 @@ struct NavigationReview: Equatable, Sendable {
         return NavigationExceptionKey(origin: destinationOrigin, reasons: reasons.map(\.rawValue).sorted())
     }
 
+    /// Apple may paraphrase these; other warnings already speak for themselves.
+    var needsAdvisory: Bool {
+        reasons.contains {
+            switch $0 {
+            case .misleadingLinkText, .mixedScriptHostname, .encodedHostname, .embeddedCredentials:
+                true
+            default:
+                false
+            }
+        }
+    }
+
     var advisoryEvidence: String {
         var lines = ["Destination origin: \(destinationOrigin)"]
         if let sourceOrigin { lines.append("Source origin: \(sourceOrigin)") }
@@ -154,7 +166,7 @@ enum NavigationSafety {
         return pieces.count == 4 && pieces.allSatisfy { Int($0).map { (0...255).contains($0) } == true }
     }
 
-    private static func mixesWritingSystems(_ host: String) -> Bool {
+    static func mixesWritingSystems(_ host: String) -> Bool {
         var latin = false, greek = false, cyrillic = false
         for scalar in host.unicodeScalars {
             switch scalar.value {
@@ -179,8 +191,10 @@ enum NavigationSafety {
         return nil
     }
 
-    private static func registrableDomain(_ host: String) -> String {
-        let labels = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")).split(separator: ".")
+    static func registrableDomain(_ host: String) -> String {
+        let value = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".[]"))
+        if isIPAddress(value) { return value }
+        let labels = value.split(separator: ".")
         guard labels.count > 2 else { return labels.joined(separator: ".") }
         let twoLevelSuffixes: Set<String> = ["co.uk", "org.uk", "com.br", "com.au", "co.jp", "co.nz", "com.mx", "com.sg"]
         let suffix = labels.suffix(2).joined(separator: ".")

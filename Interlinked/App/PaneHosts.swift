@@ -32,6 +32,7 @@ final class PaneHosts {
         let initialURL = address(from: workspace.surfaces.line(pane))
         let page = ChromiumPage(initialURL: initialURL)
         page.forcedDarkMode = workspace.builtIns.darkens(initialURL)
+        page.sharingScreenShield = workspace.sharingScreenMode
         page.delegate = coordinator
         coordinators[pane] = coordinator
         browsers[pane] = page
@@ -40,10 +41,10 @@ final class PaneHosts {
         return page
     }
 
-    func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind) {
+    func forget(keep: (PaneID) -> Bool, kinds: (PaneID) -> Kind, downloads: DownloadCenter) {
         let tracked = Set(browsers.keys).union(lifecycle.panes)
         for pane in tracked where !keep(pane) || kinds(pane) != .browser {
-            removeBrowser(pane)
+            removeBrowser(pane, downloads: downloads)
             lifecycle.close(pane)
             uploadPanes.remove(pane)
             pendingScroll.removeValue(forKey: pane)
@@ -58,6 +59,7 @@ final class PaneHosts {
 
     func existingBrowser(_ pane: PaneID) -> ChromiumPage? { browsers[pane] }
     func forEachBrowser(_ body: (ChromiumPage) -> Void) { browsers.values.forEach(body) }
+    func pane(of page: ChromiumPage) -> PaneID? { browsers.first { $0.value === page }?.key }
     func touch(_ pane: PaneID) { lifecycle.touch(pane) }
     func recovery(for pane: PaneID) -> BrowserRecovery? { lifecycle.recoveries[pane] }
 
@@ -72,9 +74,8 @@ final class PaneHosts {
 
     @discardableResult
     func focus(_ pane: PaneID) -> Bool {
-        guard let page = browsers[pane], let window = page.window else { return false }
+        guard let page = browsers[pane], page.window != nil else { return false }
         page.focus()
-        window.makeFirstResponder(page.nativeView)
         return true
     }
 
@@ -118,10 +119,7 @@ final class PaneHosts {
         for domain in iconCache.retain(owners) { iconTasks.removeValue(forKey: domain)?.cancel() }
         for domain in Set(owners.values) where !iconCache.contains(domain) {
             guard let data = iconStore.data(for: domain) else { continue }
-            guard let image = NSImage(data: data) else {
-                iconStore.remove(domain)
-                continue
-            }
+            guard let image = NSImage(data: data) else { continue }
             _ = iconCache.restore(domain, value: image)
         }
         publishFavicons()
@@ -134,10 +132,10 @@ final class PaneHosts {
         if images != favicons { favicons = images }
     }
 
-    func loadFavicon(_ page: ChromiumPage, pane: PaneID) {
+    func loadFavicon(_ page: ChromiumPage, pane: PaneID, workspace: Workspace? = nil) {
         guard let pageURL = page.url, let domain = DomainIconCache<NSImage>.domain(pageURL),
               let token = iconCache.begin(domain) else { return }
-        iconTasks[domain] = Task { [weak self, weak page] in
+        iconTasks[domain] = Task { [weak self, weak page, weak workspace] in
             let script = "Array.from(document.querySelectorAll('link[rel]')).filter(l => l.rel.split(/\\s+/).some(r => r === 'icon' || r === 'apple-touch-icon')).map(l => l.href).slice(0, 4)"
             let links = (try? await page?.evaluateJavaScript(script)) as? [String] ?? []
             var candidates = DomainIconCache<NSImage>.domain(page?.url) == domain ? links.compactMap(URL.init(string:)) : []
@@ -160,7 +158,9 @@ final class PaneHosts {
             }
             guard !Task.isCancelled, let self,
                   self.iconCache.complete(domain, token: token, value: icon) else { return }
-            if let iconData { try? self.iconStore.write(iconData, for: domain) }
+            if let iconData {
+                try? self.iconStore.write(iconData, for: domain)
+            }
             self.iconTasks.removeValue(forKey: domain)
             self.publishFavicons()
         }
@@ -196,7 +196,7 @@ final class PaneHosts {
             occurredAt: Date()
         ))
         pageURLs[pane] = url
-        removeBrowser(pane)
+        removeBrowser(pane, downloads: workspace.downloads)
     }
 
     func restoreScrollIfNeeded(_ page: ChromiumPage, pane: PaneID) {
@@ -209,7 +209,8 @@ final class PaneHosts {
         guard goal > 0 else { return }
         let candidates = browsers.map { pane, page in
             var protections: TabDiscardProtection = []
-            if pane == workspace.activePane { protections.insert(.active) }
+            // Both pages of a split are on screen.
+            if workspace.activeTab?.contains(pane) == true { protections.insert(.active) }
             if uploadPanes.contains(pane) { protections.insert(.upload) }
             if workspace.downloads.hasActiveDownload(for: page) { protections.insert(.download) }
             return TabMemoryCandidate(pane: pane, lastUsed: lifecycle.lastUsed[pane] ?? .distantPast,
@@ -226,7 +227,7 @@ final class PaneHosts {
             lifecycle.suspend(pane, recovery: BrowserRecovery(cause: .memoryPressure, url: url,
                                                                scrollY: probe.scrollY, occurredAt: Date()))
             pageURLs[pane] = url
-            removeBrowser(pane)
+            removeBrowser(pane, downloads: workspace.downloads)
             discarded += 1
         }
     }
@@ -236,11 +237,14 @@ final class PaneHosts {
         return BrowserDiscardProbe.decode(value)
     }
 
-    private func removeBrowser(_ pane: PaneID) {
+    private func removeBrowser(_ pane: PaneID, downloads: DownloadCenter) {
         guard let page = browsers.removeValue(forKey: pane) else {
             coordinators.removeValue(forKey: pane)
             return
         }
+        // Cancel first while the client is still attached; the completion
+        // callback can no longer reach DownloadCenter once we detach below.
+        downloads.interruptDownloads(for: page)
         page.delegate = nil
         page.close()
         coordinators.removeValue(forKey: pane)
@@ -264,6 +268,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         if urlChanged {
             lastURL = page.url
             workspace.assistance.committed(pane)
+            workspace.usefulInfo.committed(pane)
             workspace.builtIns.apply(to: page)
         }
         workspace.hosts.updatePage(page, pane: pane)
@@ -282,15 +287,19 @@ final class BrowserCoordinator: ChromiumPageDelegate {
     func chromiumPageDidCommit(_ page: ChromiumPage) {
         workspace?.builtIns.navigated(pane)
         workspace?.assistance.committed(pane)
+        workspace?.usefulInfo.committed(pane)
+        workspace?.noteSiteMenuDocumentChanged(pane)
         update(page)
     }
 
     func chromiumPageDidFinish(_ page: ChromiumPage) {
         update(page)
-        workspace?.hosts.loadFavicon(page, pane: pane)
+        workspace?.hosts.loadFavicon(page, pane: pane, workspace: workspace)
         workspace?.hosts.restoreScrollIfNeeded(page, pane: pane)
         workspace?.assistance.loaded(pane, page: page)
+        workspace?.usefulInfo.loaded(pane, page: page)
         workspace?.browserHistory.record(page.url, title: page.title)
+        workspace?.captureSiteMenu(pane)
     }
 
     func chromiumPage(_ page: ChromiumPage, didFail message: String) { update(page) }

@@ -10,7 +10,7 @@ macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a t
 
 ## Browse
 
-The favicon expands on hover. Back, forward, +, and close sit above your tabs and an editable address. Tabs balance across rows of at most five. Addresses stay on one line and widen the control as needed. At the window edge, the field scrolls horizontally.
+The collapsed page handle keeps the page label and a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. The favicon expands on hover. Back, forward, +, and close sit above your tabs and an editable address. Tabs balance across rows of at most five. Addresses stay on one line and widen the control as needed. At the window edge, the field scrolls horizontally.
 
 Type an address or search words. Three Google suggestions appear above the input after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
 
@@ -41,27 +41,25 @@ Interlinked does not load browser extensions. The features people install extens
 - *Tracking parameters.* `$removeparam` rules strip identifiers such as `utm_source` from addresses.
 - *In the page.* Before a document's own scripts run, Interlinked registers that site's scriptlets in the page's world (this is what removes video ads) and its element-hiding rules in an isolated world the page cannot see. The page's class names and ids are matched against generic hiding rules as the DOM changes.
 
-`script/build-blocker-resources` converts uBlock Origin's scriptlets and redirect resources (GPL-3.0) into `Interlinked/Resources/blocker-resources.json`; rerun it to pick up new scriptlets. Procedural cosmetic filters (`:has-text()`, `:upward()`) are not applied yet. **Toolbox → Blocking Ads Here** turns blocking off for one site.
+`script/build-blocker-resources` converts uBlock Origin's scriptlets and redirect resources (GPL-3.0) into `Interlinked/Resources/blocker-resources.json`; rerun it to pick up new scriptlets. Procedural cosmetic filters (`:has-text()`, `:upward()`) are not applied yet.
 
-**Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`, and Chromium's Auto Dark Mode recolors the rest while leaving images alone. Settings → Built-ins chooses Off, Match macOS appearance, or Always. **Toolbox → Dark Page** keeps one site light.
+**Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`, and Chromium's Auto Dark Mode recolors the rest while leaving images alone. Settings → Built-ins chooses Off, Match macOS appearance, or Always.
 
-## Find and save
+## Find
 
 The bottom-right actions stay in fixed icon slots. Hovering an icon reveals only its label above it. **Find for me** expands horizontally into a single-row find field. Match navigation, a count, and close stay in that row. Right-click the search icon to switch between meaning search and exact text. Search status is available on hover without adding another row.
 
-Meaning search uses Jev to select the best answer and rank existing page text by likely intent, including translations and synonyms. Extraction includes navigation links and headings so a useful destination can rank above an incidental word fragment in body text. Results highlight the original text in yellow. Searches evaluate all extracted elements without a local count or text-length cutoff; hover over the count to check coverage or errors. Changed pages invalidate stale results.
+Meaning search uses Jev to score a local shortlist of page elements by likely intent, including translations and synonyms, then pick a first result among the strongest scores. Extraction includes navigation links and headings so a useful destination can rank above an incidental word fragment in body text. Results highlight the original text in yellow. Hover over the count to check coverage or errors. Changed pages invalidate stale results.
 
-**Might need later** explicitly saves the current page's URL, metadata and selected text on this Mac. Ordinary browsing does not save pages to Vault. Address-field searches check saved pages automatically, try Apple Intelligence against up to six local candidates, and can fall back to Jev to rank relevant excerpts when Jev is enabled. Vault stores text, not screenshots, and can be cleared in Settings.
-
-On supported Macs, Apple Intelligence directly generates concise page labels from bounded title, heading, site, host, summary, and breadcrumb metadata. It also handles first-pass Vault matching, related-page grouping, and short explanations for suspicious navigation through Apple's on-device Foundation Models framework. Jev remains responsible for Critical Reading, meaning search, and semantic Personal Filters; it is not used as a page-label fallback. Local development builds can use a personal OpenRouter key saved in macOS Keychain. TestFlight builds instead use Interlinked's relay and the App Store-signed app transaction, so testers never enter or receive an API key. The OpenRouter key remains on the relay. Critical reading runs automatically on public pages by default. Settings can change it to **Run only when asked**. Meaning searches and reading checks send page text to OpenRouter and TypeSafe. Exact Jev requests and their responses are cached on this Mac for five days; the cache stores a request hash rather than page text, queries, or URLs. A page-content, model, or instruction change produces a different key. Exact find and deterministic title/heading/host label fallbacks work without either model.
+On supported Macs, Apple Intelligence generates one tab label and a short page description from bounded title, heading, site, host, summary, and breadcrumb metadata. Those descriptions are cached on this Mac for five days. Jev groups related tabs from the descriptions; it does not read the page for grouping. Apple may paraphrase a few navigation warnings (misleading link text, mixed-script or encoded hostnames, embedded credentials) and cannot override the browser's decision. Jev is responsible for Critical Reading, meaning search, and related-tab grouping. It is not used as a page-label fallback. Local development builds can use a personal OpenRouter key saved in macOS Keychain. TestFlight builds instead use Interlinked's relay and the App Store-signed app transaction, so testers never enter or receive an API key. The OpenRouter key remains on the relay. Critical reading runs only when asked on a fresh install. Turning on **Always on** first shows the privacy risk: page text goes to OpenRouter, whose policy is that requests are anonymized and not used for training. You still have to accept that a third party will see the text. After that, it checks every public page without asking again; Page → Stop Sharing This Page pauses a site until you quit. Interlinked does not try to detect whether you are signed in. The sharing prompt and the Critical Reading panel warn that a signed-in page's text is sent like any other. Asking for Critical Reading is itself the consent, so it runs on any loaded page; form fields and editable text are never extracted. Meaning searches and reading checks send page text to OpenRouter and TypeSafe. Exact Jev requests and their responses are cached on this Mac for five days; the cache stores a request hash rather than page text, queries, or URLs. A page-content, model, or instruction change produces a different key. Exact find and deterministic title/heading/host label fallbacks work without either model.
 
 When AI replaces the deterministic page label with its selected label, the page handle briefly picks up a spectrum glow. Deterministic labels and names you type yourself do not trigger it.
 
-Interlinked includes deterministic navigation checks for active-content URLs, invalid ports, embedded credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, popups, downloads, redirect chains, and misleading link text. Apple Intelligence can explain a warning from sanitized origins and deterministic warning facts, but cannot override the browser's decision.
+Interlinked includes deterministic navigation checks for active-content URLs, invalid ports, embedded credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, popups, downloads, redirect chains, and misleading link text. Apple Intelligence can paraphrase a subset of those facts, but cannot override the browser's decision.
 
 Critical reading checks public pages after they load. It highlights source paragraphs in yellow without moving the page. Hover or click a highlighted paragraph to see its evaluation beside the text; the note has previous/next controls. Click elsewhere to hide the note. In **Run only when asked** mode, use the bottom-right **Critical reading** button or choose **Page → Critical Reading…** in the macOS menu bar. The button stays out of the way in **Always on** mode. Critical reading identifies possible loaded wording, emotional pressure, unsupported certainty, opinion presented as fact, financial interests, political bias, and text that is probably AI-generated. AI authorship, financial-interest, and political-bias classifications are pattern-based guesses. It does not verify factual claims or infer an author's intent.
 
-Choose **Interlinked → About Interlinked** to inspect the exact Critical Reading instruction, every classification definition, the display threshold, and a plain-language account of what the browser sends to AI services and what stays on your Mac.
+Choose **Interlinked → About Interlinked** to inspect the exact Critical Reading instruction, every dictionary-based classification definition, the display threshold, and a plain-language account of what the browser sends to AI services and what stays on your Mac. The definitions cannot be edited.
 
 ## Shortcuts
 
@@ -110,16 +108,25 @@ build/Build/Products/Debug/interlinked type paper.design
 build/Build/Products/Debug/interlinked commit
 ```
 
-The native app is in `Interlinked/`, its control client in `InterlinkedControl/`, and tests in `InterlinkedTests/`. Project, target, tool, storage, and Keychain identifiers use the Interlinked name. Legacy pane types remain for session compatibility.
+The native app is in `Interlinked/`, its control client in `InterlinkedControl/`, unit tests in `InterlinkedTests/`, and UI tests in `InterlinkedUITests/`. Project, target, tool, storage, and Keychain identifiers use the Interlinked name. Legacy pane types remain for session compatibility.
 
 Run the tests with:
 
 ```sh
-xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
-  -derivedDataPath build -destination 'platform=macOS' test
+xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests -configuration Debug \
+  -derivedDataPath build -destination 'platform=macOS,arch=arm64' test
 ```
 
-The local browser-capability fixture covers downloads, popup behavior, forms, passkey capability probing, and navigation cases:
+UI tests launch the app against the local fixture server. They need Chromium staged the same way as `script/run`:
+
+```sh
+python3 test-fixtures/server.py &
+xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
+  -derivedDataPath build -destination 'platform=macOS' \
+  -only-testing:InterlinkedUITests test
+```
+
+The local browser-capability fixture covers downloads, popup behavior, forms, navigation, identity lookalikes, a signed-in inbox, WebSockets, and service workers:
 
 ```sh
 python3 test-fixtures/server.py

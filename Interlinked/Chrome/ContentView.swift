@@ -3,9 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.colorScheme) private var colorScheme
-    #if DEBUG
-    @State private var intelligenceDebug = DebugIntelligenceMonitor.shared
-    #endif
 
     var body: some View {
         let palette = Palette.of(colorScheme, tint: workspace.tint)
@@ -16,19 +13,21 @@ struct ContentView: View {
                     .padding(18)
             }
             .overlay(alignment: .bottomTrailing) {
-                Toolbox(palette: palette)
-                    .padding(18)
+                VStack(alignment: .trailing, spacing: 10) {
+                    UsefulInfoStack(palette: palette)
+                    Toolbox(palette: palette)
+                }
+                .padding(18)
             }
             .overlay(alignment: .topTrailing) {
                 PageActions(palette: palette, available: geometry.size)
                     .padding(18)
             }
-            #if DEBUG
-            .overlay(alignment: .top) {
-                DebugIntelligenceBadge(monitor: intelligenceDebug, palette: palette)
-                    .padding(.top, 18)
+            .overlay {
+                // Where the eye is after ⌘T, just below the new tab page's quote.
+                OnboardingCoach(palette: palette)
+                    .offset(y: 120)
             }
-            #endif
         }
         .background(palette.pane)
         .background(WindowChrome())
@@ -47,7 +46,7 @@ struct ContentView: View {
         // in the window; opacity alone leaves Chromium's child view visible.
         Group {
             if let tab = workspace.activeTab {
-                BrowserPage(pane: tab.active, palette: palette)
+                SplitLayout(tab: tab, palette: palette)
                     .id(tab.id.rawValue)
             } else {
                 palette.pane
@@ -56,44 +55,3 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
-
-#if DEBUG
-private struct DebugIntelligenceBadge: View {
-    @Bindable var monitor: DebugIntelligenceMonitor
-    var palette: Palette
-
-    var body: some View {
-        if let activity = monitor.current {
-            HStack(spacing: 7) {
-                switch activity.phase {
-                case .running:
-                    ProgressView().controlSize(.mini)
-                case .completed:
-                    Image(systemName: "checkmark")
-                case .failed:
-                    Image(systemName: "xmark")
-                }
-                Text(activity.source.rawValue)
-                    .fontWeight(.semibold)
-                Text("·")
-                Text(activity.action)
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(palette.text)
-            .padding(.horizontal, 11)
-            .frame(height: 30)
-            .modifier(PageGlass(radius: 12))
-            .accessibilityLabel("\(activity.source.rawValue), \(activity.action), \(phaseLabel(activity.phase))")
-            .transition(.opacity)
-        }
-    }
-
-    private func phaseLabel(_ phase: DebugIntelligencePhase) -> String {
-        switch phase {
-        case .running: "running"
-        case .completed: "completed"
-        case .failed: "failed"
-        }
-    }
-}
-#endif

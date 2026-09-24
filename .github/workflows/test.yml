@@ -1,0 +1,21 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: InterlinkedTests
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        run: |
+          xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests \
+            -configuration Debug -derivedDataPath build \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM= \
+            test

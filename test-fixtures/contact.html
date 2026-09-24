@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture Bakery</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Bakery","name":"Fixture Bakery",
+ "address":{"@type":"PostalAddress","streetAddress":"1 Infinite Loop","addressLocality":"Cupertino","addressRegion":"CA","postalCode":"95014","addressCountry":"US"},
+ "telephone":"+1 408-555-0100"}
+</script>
+</head>
+<body>
+<h1>Fixture Bakery</h1>
+<p>Fresh bread every morning. Opening hours 7:00 to 19:00, since 1998.</p>
+<p>Order 12 loaves for 2024 events. Price: 1.234,56.</p>
+
+<h2>Account details (Sharing Screen Mode)</h2>
+<ul>
+  <li>Email: jane.doe@example.com</li>
+  <li>CPF: 529.982.247-25</li>
+  <li>Invalid CPF stays visible: 111.111.111-11</li>
+  <li>Card: 4111 1111 1111 1111</li>
+  <li>API key: sk-proj-abcdefghijklmnopqrstuvwx1234</li>
+  <li>Password: hunter2secret</li>
+  <li>IBAN: DE89 3704 0044 0532 0130 00</li>
+</ul>
+<form onsubmit="return false">
+  <input id="password" type="password" value="swordfish">
+  <input id="city" type="text" value="Cupertino">
+</form>
+<p id="later"></p>
+
+<footer class="contact">
+  <a href="tel:+14085550100">Call us</a>
+  <a href="mailto:hello@fixture-bakery.example?subject=Hi">hello@fixture-bakery.example</a>
+  <a href="mailto:orders@fixture-bakery.example">Orders</a>
+</footer>
+<script>
+  setTimeout(() => { document.getElementById('later').textContent = 'Added later: late.person@example.org'; }, 800);
+</script>
+</body>
+</html>

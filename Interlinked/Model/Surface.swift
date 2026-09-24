@@ -22,8 +22,13 @@ enum OpenWork {
         return fallback
     }
 
-    static func switcherTabs(_ tabs: [Tab], current: TabID?) -> [Tab] {
-        tabs.filter { $0.id != current }.sorted { $0.id.rawValue < $1.id.rawValue }
+    /// Every other tab, oldest first. A pinned tab leads so its ⌘1 never moves.
+    static func switcherTabs(_ tabs: [Tab], current: TabID?, pinned: TabID? = nil) -> [Tab] {
+        tabs.filter { $0.id != current }.sorted {
+            if $0.id == pinned { return true }
+            if $1.id == pinned { return false }
+            return $0.id.rawValue < $1.id.rawValue
+        }
     }
 
     static func shortcutIndex(_ characters: String) -> Int? {

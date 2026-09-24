@@ -14,23 +14,25 @@ struct DomainIconCache<Value> {
         return url.host?.lowercased()
     }
 
+    private var live: Set<String> { Set(owners.values) }
+
     mutating func retain(_ owners: [PaneID: String]) -> Set<String> {
         self.owners = owners
-        let live = Set(owners.values)
+        let live = self.live
         let removed = Set(entries.keys).subtracting(live)
         entries = entries.filter { live.contains($0.key) }
         return removed
     }
 
     mutating func begin(_ domain: String) -> UUID? {
-        guard owners.values.contains(domain), entries[domain] == nil else { return nil }
+        guard live.contains(domain), entries[domain] == nil else { return nil }
         let token = UUID()
         entries[domain] = Entry(token: token)
         return token
     }
 
     mutating func restore(_ domain: String, value: Value) -> Bool {
-        guard owners.values.contains(domain), entries[domain] == nil else { return false }
+        guard live.contains(domain), entries[domain] == nil else { return false }
         entries[domain] = Entry(token: UUID(), value: value)
         return true
     }
@@ -48,5 +50,9 @@ struct DomainIconCache<Value> {
 
     func value(for pane: PaneID) -> Value? {
         owners[pane].flatMap { entries[$0]?.value }
+    }
+
+    func value(forDomain domain: String) -> Value? {
+        entries[domain]?.value
     }
 }

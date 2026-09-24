@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct EmptyPaneView: View {
+    @Environment(Workspace.self) private var workspace
     var palette: Palette
 
     var body: some View {
@@ -15,10 +16,12 @@ struct EmptyPaneView: View {
                         .accessibilityHidden(true)
                     Text("Search or enter an address")
                 }
-                .font(.system(size: 13, weight: .regular))
+                .font(.system(size: 13))
                 .foregroundStyle(palette.textDim)
             }
+            .padding(.bottom, 72)
         }
-        .allowsHitTesting(false)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("new-tab-page")
     }
 }

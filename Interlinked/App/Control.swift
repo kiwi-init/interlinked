@@ -6,6 +6,9 @@ enum Control {
     static let writeCommands = [
         "new-tab [kind]",
         "open-url URL",
+        "sharing-mode on|off|state|check",
+        "split-view on|off|other|ratio N|drop TAB left|right|state",
+        "onboarding open|close|reset|state",
         "kind kind [pane]",
         "close-tab [page]",
         "focus pane",
@@ -26,17 +29,25 @@ enum Control {
         "tint [name]",
         "sidebar [width|collapse|expand|toggle]",
         "overview [show|hide|toggle]",
+        "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
+        "site-menu [state|search|close|home|enable|disable|page]",
         "quit",
     ]
 
+    static let maxRequestBytes = 64 * 1024
+    static let receiveTimeoutSeconds = 5
+
     static func socketPath() -> String {
-        if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] {
+        if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"], !named.isEmpty {
             return named
         }
-        let user = ProcessInfo.processInfo.environment["USER"] ?? "unknown"
-        return "/tmp/interlinked-\(user).sock"
+        if let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return base.appendingPathComponent("Interlinked/control/control.sock").path
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent("Library/Application Support/Interlinked/control/control.sock")
     }
 
     @MainActor
@@ -49,7 +60,7 @@ enum Control {
         switch command {
         case "commands":
             return json([
-                "reads": ["state", "commands", "measure-frames [pane]"],
+                "reads": ["state", "commands", "identity", "measure-frames [pane]", "site-menu", "useful-info"],
                 "writes": writeCommands,
             ])
 
@@ -64,13 +75,64 @@ enum Control {
                 "active_pages": workspace.tabs.filter { workspace.hosts.existingBrowser($0.active) != nil }.count,
             ])
 
+        case "site-menu":
+            switch words.first {
+            case "search": workspace.beginSiteMenuSearch()
+            case "close": workspace.collapseSiteMenuChrome()
+            case "home": workspace.goSiteHome()
+            case "page":
+                // Writes what the page shows at the top, to check for a doubled header.
+                guard let view = workspace.activePane.flatMap(workspace.hosts.existingBrowser) else { return error("no loaded web page") }
+                Task { @MainActor in
+                    let report = try? await view.evaluateJavaScript("""
+                    (() => {
+                      const hidden = [...document.querySelectorAll('[data-interlinked-site-menu]')]
+                        .filter(n => n.isConnected && getComputedStyle(n).visibility === 'hidden').length;
+                      const shown = [...document.querySelectorAll('a[href],button')].filter(el => {
+                        const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+                        return r.bottom > 0 && r.top < 120 && r.width > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+                      }).map(el => (el.innerText || '').trim()).filter(Boolean).slice(0, 12);
+                      return {hidden, siteLinksAtTop: shown};
+                    })()
+                    """)
+                    let output = ProcessInfo.processInfo.environment["INTERLINKED_SITE_MENU_REPORT"] ?? "/tmp/interlinked-site-menu-report.json"
+                    try? json(["report": report ?? NSNull()]).write(toFile: output, atomically: true, encoding: .utf8)
+                }
+                return ok()
+            case "enable": workspace.usesSiteMenu = true
+            case "disable": workspace.usesSiteMenu = false
+            case "state", nil: break
+            default: return error("usage: site-menu [state|search|close]")
+            }
+            guard let menu = workspace.siteMenu else {
+                return json(["shown": false, "uses_site_menu": workspace.usesSiteMenu])
+            }
+            return json([
+                "shown": true,
+                "uses_site_menu": workspace.usesSiteMenu,
+                "home": menu.home,
+                "name": menu.name,
+                "replaces_chrome": menu.replacesChrome,
+                "searching": workspace.siteMenuSearching,
+                "expanded": workspace.siteMenuExpanded ?? "",
+                "effect": workspace.siteMenuEffect != nil,
+                "search": menu.search.map {
+                    ["action": $0.action, "query_param": $0.queryParam, "placeholder": $0.placeholder]
+                } ?? [:],
+                "items": menu.items.map { ["label": $0.label, "children": $0.children.count] },
+            ])
+
         case "assistance-state":
             let a = workspace.assistance
             return json(["enabled": a.enabled, "key_saved": a.hasKey, "jev_ready": a.hasJevAccess, "status": a.status,
-                         "vault_status": a.vaultStatus, "vault_count": a.history.visits.count,
                          "matches": a.matches.map { ["id": $0.id, "text": $0.text] },
                          "findings": a.findings.map { ["id": $0.id, "category": $0.signal.rawValue] },
                          "label": workspace.activePane.map { a.label($0, url: workspace.surfaces.line($0)) } ?? "",
+                         "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
+                         "origin_transport": TrustedOrigin.inspect(workspace.currentPageURL)?.transport.rawValue ?? "",
+                         "can_share": a.canShare,
+                         "automatic_reading": a.automaticReadingEnabled,
+                         "granted_origins": a.originGrants.records,
                          "last_decision": a.lastDecisionStatus, "find_scores": a.findScores])
 
         case "find-page":
@@ -81,10 +143,6 @@ enum Control {
 
         case "check-wording":
             workspace.assistance.openReading()
-            return ok()
-
-        case "save-page":
-            workspace.assistance.saveToVault()
             return ok()
 
         case "close-page-tool":
@@ -145,6 +203,7 @@ enum Control {
                 kind = .blank
             }
             workspace.openTab(kind: kind)
+            workspace.beginEmptyPageEditingIfNeeded()
             return ok()
 
         case "open-url":
@@ -267,6 +326,34 @@ enum Control {
             workspace.setTint(tint)
             return ok()
 
+        case "identity":
+            if words.isEmpty {
+                let origin = TrustedOrigin.inspect(workspace.currentPageURL)
+                return json([
+                    "open": workspace.identityOpen,
+                    "host": origin?.displayHost ?? "",
+                    "ascii_host": origin?.asciiHost ?? "",
+                    "transport": origin?.transport.rawValue ?? "",
+                    "url": origin?.fullURL ?? "",
+                    "mixed_script": origin?.mixedScript ?? false,
+                    "label": workspace.activePane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? "",
+                ])
+            }
+            switch words[0] {
+            case "hide":
+                workspace.closeIdentity()
+                return ok()
+            case "show":
+                workspace.identityOpen = false
+                workspace.toggleIdentity()
+                return ok()
+            case "toggle":
+                workspace.toggleIdentity()
+                return ok()
+            default:
+                return error("identity wants show, hide, or toggle")
+            }
+
         case "overview", "sidebar":
             if words.isEmpty {
                 return json([
@@ -361,6 +448,79 @@ enum Control {
                 return error("builtins takes state, blocking on|off, or dark off|system|always")
             }
 
+        case "onboarding":
+            switch words.first ?? "state" {
+            case "open": workspace.openOnboarding()
+            case "close": workspace.closeOnboarding()
+            case "reset": workspace.onboarding.reset()
+            case "state": break
+            default: return error("onboarding takes open, close, reset, or state")
+            }
+            return json([
+                "open": workspace.onboarding.pane != nil,
+                "focused": workspace.onboarding.contains(workspace.activePane),
+                "scene": workspace.onboarding.progress.scene.id,
+                "done": workspace.onboarding.progress.done.map(\.rawValue),
+                "next": workspace.onboarding.progress.next?.rawValue ?? "",
+                "notice": workspace.onboarding.notice ?? "",
+                "coach": workspace.showsOnboardingCoach,
+                "shortcut_1": workspace.quickTabs.first.map { workspace.title($0) } ?? "",
+                "tabs": workspace.tabs.count,
+            ])
+
+        case "split-view":
+            switch words.first ?? "state" {
+            case "on": if !workspace.isSplit { workspace.splitActive() }
+            case "off": workspace.unsplit()
+            case "other": workspace.focusOtherPane()
+            case "ratio":
+                guard words.count == 2, let value = Double(words[1]) else { return error("split-view ratio takes a number") }
+                workspace.setSplitRatio(value)
+            case "drop":
+                guard words.count == 3, let raw = UInt64(words[1]), ["left", "right"].contains(words[2]) else {
+                    return error("split-view drop takes a tab id and left or right")
+                }
+                workspace.dropTab(TabID(raw), leading: words[2] == "left")
+            case "state": break
+            default: return error("split-view takes on, off, other, or state")
+            }
+            return json([
+                "split": workspace.isSplit,
+                "panes": workspace.activeTab?.panes.map { Int($0.rawValue) } ?? [],
+                "active": workspace.activePane.map { Int($0.rawValue) } ?? 0,
+                "tabs": workspace.tabs.count,
+                "tab_ids": workspace.tabs.map { Int($0.id.rawValue) },
+                "ratio": workspace.activeTab?.splitRatio ?? 0.5,
+            ])
+
+        case "sharing-mode":
+            switch words.first ?? "state" {
+            case "on": workspace.sharingScreenMode = true
+            case "off": workspace.sharingScreenMode = false
+            case "state": break
+            case "check":
+                // Writes what the active page covers, for fixtures.
+                guard let view = workspace.activePane.flatMap(workspace.hosts.existingBrowser) else { return error("no loaded web page") }
+                Task { @MainActor in
+                    let covered = try? await view.evaluateJavaScript("globalThis.__interlinkedShield?.covered() ?? null")
+                    let output = ProcessInfo.processInfo.environment["INTERLINKED_SHIELD_REPORT"] ?? "/tmp/interlinked-shield-report.json"
+                    try? json(["enabled": workspace.sharingScreenMode, "covered": covered ?? NSNull()]).write(toFile: output, atomically: true, encoding: .utf8)
+                }
+            default: return error("sharing-mode takes on, off, state, or check")
+            }
+            return json(["enabled": workspace.sharingScreenMode])
+
+        case "useful-info":
+            let info = workspace.usefulInfo
+            let found = workspace.activePane.flatMap { info.contacts[$0] }
+            return json([
+                "address_enabled": info.showsAddress,
+                "contact_enabled": info.showsContact,
+                "address": found?.address ?? "",
+                "phones": found?.phones ?? [],
+                "emails": found?.emails ?? [],
+            ])
+
         case "quit":
             workspace.quit()
             return ok()
@@ -387,6 +547,8 @@ enum Control {
             "tint": workspace.tint.name,
             "sidebar": Double(workspace.sidebar),
             "overview": workspace.overviewOpen,
+            "identity": workspace.identityOpen,
+            "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
             "writing": writing(workspace),
             "tabs": tabs,
         ]
@@ -488,19 +650,48 @@ final class ControlServer {
 
     func start(handler: @escaping (String) -> String) {
         let path = Control.socketPath()
+        let usingOverride = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] != nil
+
+        let probe = sockaddr_un()
+        let sunPathCapacity = MemoryLayout.size(ofValue: probe.sun_path)
+        let pathByteCount = path.utf8CString.count
+        guard pathByteCount <= sunPathCapacity else {
+            fputs("interlinked: control socket path too long (\(pathByteCount) > \(sunPathCapacity))\n", stderr)
+            return
+        }
+
+        if usingOverride {
+            let dir = (path as NSString).deletingLastPathComponent
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: nil)
+        } else {
+            guard Self.ensureControlDirectory(for: path) else {
+                fputs("interlinked: could not secure control directory for \(path)\n", stderr)
+                return
+            }
+        }
+
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {
             fputs("interlinked: could not listen on \(path)\n", stderr)
             return
         }
+        Self.setNoSigPipe(fd)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        let pathBytes = Array(path.utf8CString)
-        withUnsafeMutableBytes(of: &addr.sun_path) { dest in
-            guard let base = dest.baseAddress else { return }
-            let count = min(pathBytes.count, dest.count)
-            memcpy(base, pathBytes, count)
+        memset(&addr.sun_path, 0, sunPathCapacity)
+        let filled = path.withCString { cstr in
+            withUnsafeMutableBytes(of: &addr.sun_path) { dest -> Bool in
+                guard let base = dest.baseAddress else { return false }
+                // pathByteCount includes the NUL terminator and fits.
+                memcpy(base, cstr, pathByteCount)
+                return true
+            }
+        }
+        guard filled else {
+            close(fd)
+            fputs("interlinked: could not listen on \(path)\n", stderr)
+            return
         }
         let len = socklen_t(MemoryLayout<sockaddr_un>.size)
         let bound: Int32 = withUnsafePointer(to: &addr) { ptr in
@@ -513,25 +704,24 @@ final class ControlServer {
             fputs("interlinked: could not listen on \(path)\n", stderr)
             return
         }
+        // The socket lives in a 0700 directory; lock the node itself down too.
+        _ = path.withCString { Darwin.chmod($0, 0o600) }
         listenFD = fd
         running = true
         print("interlinked: control channel on \(path)")
         let thread = Thread { [weak self] in
             while self?.running == true {
                 let client = accept(fd, nil, nil)
-                if client < 0 { break }
-                var data = Data()
-                var byte: UInt8 = 0
-                while read(client, &byte, 1) == 1 {
-                    if byte == 10 { break }
-                    if byte != 13 { data.append(byte) }
+                if client < 0 {
+                    if self?.running == true { continue }
+                    break
                 }
-                let request = String(data: data, encoding: .utf8) ?? ""
-                let reply = DispatchQueue.main.sync { handler(request) } + "\n"
-                reply.withCString { cstr in
-                    _ = Darwin.write(client, cstr, strlen(cstr))
+                // Handle each client off the accept thread so one slow or
+                // wedged peer cannot starve the channel.
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    guard let self else { Darwin.close(client); return }
+                    self.handleClient(client, handler: handler)
                 }
-                close(client)
             }
         }
         thread.start()
@@ -541,9 +731,111 @@ final class ControlServer {
     func stop() {
         running = false
         if listenFD >= 0 {
-            close(listenFD)
+            let fd = listenFD
             listenFD = -1
+            shutdown(fd, SHUT_RDWR)
+            close(fd)
         }
         unlink(Control.socketPath())
+    }
+
+    private static func ensureControlDirectory(for socketPath: String) -> Bool {
+        let dir = (socketPath as NSString).deletingLastPathComponent
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir)
+        } catch {
+            return false
+        }
+        // Confirm we own the directory and nobody else can write to it.
+        var st = stat()
+        guard stat(dir, &st) == 0, st.st_uid == getuid(), (st.st_mode & 0o077) == 0 else {
+            return false
+        }
+        return true
+    }
+
+    private static func setNoSigPipe(_ fd: Int32) {
+        var opt: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    private static func setTimeout(_ fd: Int32, seconds: Int) {
+        var tv = timeval()
+        tv.tv_sec = __darwin_time_t(seconds)
+        tv.tv_usec = __darwin_suseconds_t(0)
+        _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    private func handleClient(_ client: Int32, handler: @escaping (String) -> String) {
+        defer { Darwin.close(client) }
+        Self.setNoSigPipe(client)
+        Self.setTimeout(client, seconds: Control.receiveTimeoutSeconds)
+
+        // Only our own uid may drive the browser (type/dictate carry keystrokes).
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        guard getpeereid(client, &peerUID, &peerGID) == 0, peerUID == getuid() else {
+            return
+        }
+
+        var data = Data()
+        data.reserveCapacity(4096)
+        var sawNewline = false
+        var tooLarge = false
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while !sawNewline && !tooLarge {
+            let n = chunk.withUnsafeMutableBytes { buf -> Int in
+                guard let base = buf.baseAddress else { return -1 }
+                return Darwin.read(client, base, buf.count)
+            }
+            if n == 0 { break } // EOF
+            if n < 0 {
+                if errno == EINTR { continue }
+                break // timeout (EAGAIN/EWOULDBLOCK) or other error
+            }
+            for i in 0..<n {
+                let byte = chunk[i]
+                if byte == 10 {
+                    sawNewline = true
+                    break
+                }
+                if byte == 13 { continue }
+                if data.count >= Control.maxRequestBytes {
+                    tooLarge = true
+                    break
+                }
+                data.append(byte)
+            }
+        }
+
+        if tooLarge {
+            Self.writeAll(client, string: "error request too large\n")
+            return
+        }
+        // A peer that connected and said nothing (or timed out) just goes away.
+        guard sawNewline || !data.isEmpty else { return }
+
+        let request = String(data: data, encoding: .utf8) ?? ""
+        let reply = DispatchQueue.main.sync { handler(request) } + "\n"
+        Self.writeAll(client, string: reply)
+    }
+
+    private static func writeAll(_ fd: Int32, string: String) {
+        string.withCString { cstr in
+            var ptr = UnsafeRawPointer(cstr)
+            var remaining = strlen(cstr)
+            while remaining > 0 {
+                let written = Darwin.write(fd, ptr, remaining)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    break // EPIPE (peer closed) or timeout; SO_NOSIGPIPE keeps this from signalling.
+                }
+                if written == 0 { break }
+                remaining -= Int(written)
+                ptr = ptr.advanced(by: Int(written))
+            }
+        }
     }
 }

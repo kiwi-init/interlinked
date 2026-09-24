@@ -101,6 +101,43 @@ final class CommandKeyStateTests: XCTestCase {
     }
 }
 
+final class CopiedPageURLFeedbackTests: XCTestCase {
+    func testCopiedFeedbackRequiresAnActualCopiedURL() {
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: nil, current: nil))
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: nil, current: "https://example.com"))
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: "https://example.com", current: nil))
+        XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: "https://a.example", current: "https://b.example"))
+        XCTAssertTrue(CopiedPageURLFeedback.isShowing(copied: "https://example.com/", current: "https://example.com/"))
+    }
+}
+
+final class NewTabPageTests: XCTestCase {
+    func testEmptyLinesAreNewTabs() {
+        XCTAssertTrue(NewTabPage.matches(line: ""))
+        XCTAssertTrue(NewTabPage.matches(line: "   \n"))
+        XCTAssertFalse(NewTabPage.matches(line: "about:blank"))
+        XCTAssertFalse(NewTabPage.matches(line: "https://example.com"))
+    }
+
+    func testNewTabHandleStaysExpandedWithoutHover() {
+        XCTAssertTrue(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+        ))
+        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
+            overviewOpen: true, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+        ))
+        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: false, voiceActive: false
+        ))
+        XCTAssertTrue(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, panelOpen: false, hovering: true, editing: false, isNewTab: false, voiceActive: false
+        ))
+        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: true
+        ))
+    }
+}
+
 final class PageURLCopyShortcutTests: XCTestCase {
     func testOnlyExactCommandShiftCMatches() {
         XCTAssertTrue(PageURLCopyShortcut.matches(
@@ -126,9 +163,7 @@ final class PageURLCopyShortcutTests: XCTestCase {
 
 final class ToolboxShortcutTests: XCTestCase {
     func testToolboxUsesConventionalMacShortcuts() {
-        XCTAssertEqual(ToolboxShortcut.filters.label, "⇧⌘F")
         XCTAssertEqual(ToolboxShortcut.find.label, "⌘F")
-        XCTAssertEqual(ToolboxShortcut.vault.label, "⌘S")
         XCTAssertEqual(ToolboxShortcut.settings.label, "⌘,")
         XCTAssertEqual(ToolboxShortcut.reading.label, "")
     }
@@ -233,6 +268,73 @@ final class PaneTests: XCTestCase {
         XCTAssertEqual(root.coordinate(PaneID(1)).1, 0)
         XCTAssertEqual(root.coordinate(PaneID(3)).0, 1)
         XCTAssertEqual(root.coordinate(PaneID(2)).1, 1)
+    }
+}
+
+final class SplitViewTests: XCTestCase {
+    func testATabSplitsIntoTwoPagesAtMost() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertFalse(tab.isSplit)
+        XCTAssertTrue(tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1)))
+        XCTAssertEqual(tab.panes, [PaneID(1), PaneID(2)])
+        XCTAssertEqual(tab.active, PaneID(2))
+        XCTAssertEqual(tab.otherPane, PaneID(1))
+        XCTAssertFalse(tab.canSplit)
+        XCTAssertFalse(tab.split(PaneID(2), axis: .rows, new: PaneID(3), id: SplitID(2)))
+        XCTAssertEqual(tab.panes.count, Tab.maxPanes)
+    }
+
+    func testASplitRemembersItsRatioUntilItEnds() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        XCTAssertEqual(tab.splitRatio, 0.5)
+        _ = tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        tab.ratio = 0.95
+        XCTAssertEqual(tab.splitRatio, Tab.ratioRange.upperBound, "neither page can be squeezed away")
+        tab.ratio = 0.34
+        XCTAssertEqual(tab.splitRatio, 0.34)
+        tab.close(PaneID(2))
+        XCTAssertNil(tab.ratio)
+    }
+
+    func testTabsSavedBeforeRatiosStillLoad() throws {
+        let old = #"{"id":1,"root":{"leaf":1},"active":1}"#
+        let tab = try JSONDecoder().decode(Tab.self, from: Data(old.utf8))
+        XCTAssertNil(tab.ratio)
+        XCTAssertEqual(tab.splitRatio, 0.5)
+    }
+
+    func testReplacingAPageKeepsItsSide() {
+        var root = Pane.leaf(PaneID(1))
+        _ = root.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        XCTAssertTrue(root.replace(PaneID(1), with: PaneID(7)))
+        XCTAssertEqual(root.leaves(), [PaneID(7), PaneID(2)])
+        XCTAssertFalse(root.replace(PaneID(2), with: PaneID(7)), "a page cannot appear twice")
+        XCTAssertFalse(root.replace(PaneID(9), with: PaneID(8)))
+    }
+
+    func testClosingOnePageOfASplitKeepsTheOther() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        _ = tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        XCTAssertTrue(tab.close(PaneID(2)))
+        XCTAssertEqual(tab.panes, [PaneID(1)])
+        XCTAssertEqual(tab.active, PaneID(1))
+        XCTAssertNil(tab.otherPane)
+    }
+}
+
+final class SiteMenuHomeTests: XCTestCase {
+    func testHomeIsTheLogoLinkOrTheOrigin() throws {
+        let page = try XCTUnwrap(URL(string: "https://www.example.com/shop/item?id=4"))
+        XCTAssertEqual(SiteMenuHome.url("https://www.example.com/en/", current: page)?.absoluteString, "https://www.example.com/en/")
+        XCTAssertEqual(SiteMenuHome.url("", current: page)?.absoluteString, "https://www.example.com/")
+        XCTAssertEqual(SiteMenuHome.url("javascript:void(0)", current: page)?.absoluteString, "https://www.example.com/")
+    }
+
+    func testOnlyTheHomePageItselfCountsAsHome() throws {
+        XCTAssertTrue(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com/")), home: "https://example.com/"))
+        XCTAssertTrue(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com")), home: ""))
+        XCTAssertFalse(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com/docs")), home: "https://example.com/"))
+        XCTAssertFalse(SiteMenuHome.matches(try XCTUnwrap(URL(string: "https://example.com/?q=x")), home: "https://example.com/"))
     }
 }
 
@@ -768,6 +870,139 @@ final class DomainIconCacheTests: XCTestCase {
         XCTAssertEqual(DomainIconCache<String>.domain(URL(string: "http://example.com/b")), "example.com")
         XCTAssertEqual(DomainIconCache<String>.domain(URL(string: "https://studio.example.com/")), "studio.example.com")
         XCTAssertNil(DomainIconCache<String>.domain(URL(string: "file:///tmp/page.html")))
+    }
+
+
+}
+
+@MainActor
+final class SiteMenuPolicyTests: XCTestCase {
+    func testPublicPagesWithAShortSameSiteListAreAccepted() {
+        let menu = SiteMenu(
+            home: "https://www.spacex.com/",
+            items: [
+                SiteMenuItem(id: "1", label: "Vehicles", href: "https://www.spacex.com/vehicles", current: false, children: [
+                    SiteMenuItem(id: "1a", label: "Falcon 9", href: "https://www.spacex.com/vehicles/falcon-9", current: false)
+                ]),
+                SiteMenuItem(id: "2", label: "Human Spaceflight", href: "https://www.spacex.com/human-spaceflight", current: true),
+                SiteMenuItem(id: "3", label: "Starlink", href: "https://www.spacex.com/starlink", current: false),
+                SiteMenuItem(id: "4", label: "Starshield", href: "https://www.spacex.com/starshield", current: false)
+            ],
+            search: SiteMenuSearch(action: "https://www.spacex.com/search", placeholder: "Search", queryParam: "q"),
+            height: 64
+        )
+        let accepted = SiteMenuPolicy.accept(menu)
+        XCTAssertEqual(accepted?.items.count, 4)
+        XCTAssertEqual(accepted?.items.first?.children.first?.label, "Falcon 9")
+        XCTAssertEqual(accepted?.search?.queryParam, "q")
+        let noisy = SiteMenu(
+            home: "https://github.com/",
+            items: [SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true)],
+            search: SiteMenuSearch(action: "https://github.com/search", placeholder: "Open quick search dialog, type / to search", queryParam: "q"),
+            height: 56
+        )
+        XCTAssertEqual(SiteMenuPolicy.accept(noisy)?.search?.placeholder, "Search")
+    }
+
+    func testSignedInDashboardsAndIconBarsAreAccepted() {
+        let github = SiteMenu(
+            home: "https://github.com/",
+            items: [
+                SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true),
+                SiteMenuItem(id: "2", label: "Create new", href: "", kind: "button", current: false),
+                SiteMenuItem(id: "3", label: "Issues", href: "https://github.com/issues", current: false)
+            ],
+            search: SiteMenuSearch(action: "https://github.com/search", placeholder: "Type / to search", queryParam: "q"),
+            height: 56
+        )
+        XCTAssertEqual(SiteMenuPolicy.accept(github)?.items.count, 3)
+        let iconOnly = SiteMenuItem(id: "i", label: "", href: "", kind: "button", current: false, title: "Issues", icon: "data:image/svg+xml,test", iconKind: "svg")
+        let withoutIcons = SiteMenuPolicy.accept(SiteMenu(
+            home: "https://github.com/",
+            items: [
+                SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true),
+                iconOnly
+            ],
+            height: 56,
+            replacesChrome: true
+        ))
+        XCTAssertEqual(withoutIcons?.items.map(\.label), ["Dashboard"])
+        XCTAssertEqual(withoutIcons?.replacesChrome, true)
+        let searchOnly = SiteMenu(
+            home: "https://github.com/",
+            items: [SiteMenuItem(id: "1", label: "Dashboard", href: "https://github.com/", current: true)],
+            search: SiteMenuSearch(action: "https://github.com/search", placeholder: "Search", queryParam: "q"),
+            height: 56
+        )
+        XCTAssertNotNil(SiteMenuPolicy.accept(searchOnly))
+    }
+
+    func testEveryWebPageKeepsAMenu() {
+        let few = SiteMenu(home: "https://www.example.com/", name: "Example", items: [
+            SiteMenuItem(id: "1", label: "Home", href: "https://www.example.com/", current: true)
+        ], height: 48, replacesChrome: true)
+        let accepted = SiteMenuPolicy.accept(few)
+        XCTAssertEqual(accepted?.items.map(\.label), ["Home"])
+        XCTAssertEqual(accepted?.name, "Example")
+        XCTAssertEqual(accepted?.replacesChrome, true)
+        let unnamed = SiteMenuPolicy.accept(SiteMenu(
+            home: "https://www.example.com/",
+            items: [
+                SiteMenuItem(id: "a", label: "", href: "", current: false),
+                SiteMenuItem(id: "b", label: "", href: "javascript:void(0)", current: false)
+            ],
+            height: 48,
+            replacesChrome: true
+        ))
+        XCTAssertEqual(unnamed?.items.count, 0)
+        XCTAssertEqual(unnamed?.name, "example.com")
+        XCTAssertEqual(unnamed?.replacesChrome, false)
+        XCTAssertNil(SiteMenuPolicy.accept(SiteMenu(home: "javascript:void(0)", items: [
+            SiteMenuItem(id: "1", label: "Home", href: "https://example.com/", current: true)
+        ], height: 40)))
+        let many = (0..<30).map {
+            SiteMenuItem(id: "\($0)", label: "Item \($0)", href: "https://example.com/\($0)", current: false)
+        }
+        XCTAssertEqual(SiteMenuPolicy.accept(SiteMenu(home: "https://example.com/", items: many, height: 48))?.items.count, 24)
+        let google = SiteMenuPolicy.baseline(line: "https://www.google.com/search?q=google")
+        XCTAssertEqual(google?.home, "https://www.google.com/")
+        XCTAssertEqual(google?.name, "google.com")
+        XCTAssertEqual(google?.items.count, 0)
+        XCTAssertEqual(google?.replacesChrome, false)
+        XCTAssertNil(SiteMenuPolicy.baseline(line: ""))
+        XCTAssertNil(SiteMenuPolicy.baseline(line: "about:blank"))
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [80, 80, 80, 80, 80, 80], budget: 10_000), 5)
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [100, 100, 100], budget: 200, moreWidth: 64), 1)
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [80, 80], budget: 200, moreWidth: 64), 2)
+        XCTAssertEqual(SiteMenuLayout.visibleCount(itemWidths: [500], budget: 100, moreWidth: 64), 0)
+    }
+
+    func testBridgeCanHideAndRestoreADetectedBanner() {
+        XCTAssertTrue(PageTextBridge.install.contains("siteMenu()"))
+        XCTAssertTrue(PageTextBridge.install.contains("hideSiteMenu()"))
+        XCTAssertTrue(PageTextBridge.install.contains("showSiteMenu()"))
+        XCTAssertTrue(PageTextBridge.install.contains("interlinkedSiteMenu"))
+        XCTAssertTrue(PageTextBridge.install.contains("document.body.children"))
+        XCTAssertFalse(PageTextBridge.install.contains("querySelectorAll('body *')"))
+        XCTAssertTrue(PageTextBridge.install.contains("visibility','hidden','important'"))
+        XCTAssertTrue(PageTextBridge.install.contains("interlinked-site-menu-spacer"))
+        XCTAssertTrue(PageTextBridge.install.contains("inBar"))
+        XCTAssertTrue(PageTextBridge.install.contains("next.score"))
+        XCTAssertTrue(PageTextBridge.install.contains("replacesChrome"))
+        XCTAssertTrue(PageTextBridge.install.contains("og:site_name"))
+        XCTAssertFalse(PageTextBridge.install.contains("captureIcon"))
+        XCTAssertFalse(PageTextBridge.install.contains("next.items.length>best.items.length"))
+        XCTAssertTrue(PageTextBridge.install.contains("hideSiteMenu()"))
+    }
+
+    func testSiteMenuDefaultsOnAndCanBeTurnedOff() {
+        let suite = "site-menu-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(SiteMenuPreference.enabled(in: defaults))
+        SiteMenuPreference.set(false, in: defaults)
+        XCTAssertFalse(SiteMenuPreference.enabled(in: defaults))
     }
 }
 

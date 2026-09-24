@@ -6,13 +6,13 @@ configs:
 options:
   bundleIdPrefix: computer.interlinked
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "26.0"
   createIntermediateGroups: true
   defaultConfig: Debug
   xcodeVersion: "16.0"
 settings:
   base:
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: targeted
     ENABLE_HARDENED_RUNTIME: YES
@@ -49,6 +49,11 @@ targets:
         NSLocationWhenInUseUsageDescription: Interlinked lets websites use your location only after you approve their request.
         NSSpeechRecognitionUsageDescription: Interlinked uses on-device speech recognition for voice navigation and browser commands.
         InterlinkedJevRelayURL: "$(INTERLINKED_JEV_RELAY_URL)"
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: computer.interlinked.tab
+            UTTypeDescription: Interlinked tab
+            UTTypeConformsTo:
+              - public.data
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked
@@ -64,7 +69,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
-        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64_minimal $(SRCROOT)/blocker"
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project/third_party/cef/cef_binary_152.0.8+g1ce985c+chromium-152.0.7977.134_macosarm64 $(SRCROOT)/blocker"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/build/cef/cef-project-out/libcef_dll_wrapper $(SRCROOT)/blocker/target/release"
         OTHER_LDFLAGS: "$(inherited) -lcef_dll_wrapper -linterlinked_blocker -framework Cocoa -framework IOSurface"
         CLANG_CXX_LANGUAGE_STANDARD: c++20
@@ -105,8 +110,6 @@ targets:
   InterlinkedTests:
     type: bundle.unit-test
     platform: macOS
-    dependencies:
-      - target: Interlinked
     sources:
       - path: InterlinkedTests
       - path: Interlinked/Model
@@ -116,6 +119,24 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.tests
         GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_NAME: InterlinkedTests
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        TEST_HOST: ""
+        BUNDLE_LOADER: ""
+  InterlinkedUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: InterlinkedUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Interlinked
+    dependencies:
+      - target: Interlinked
 schemes:
   Interlinked:
     build:
@@ -123,11 +144,21 @@ schemes:
         Interlinked: all
         interlinked-ctl: all
         InterlinkedTests: [test]
+        InterlinkedUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - InterlinkedTests
+        - InterlinkedUITests
     archive:
       config: TestFlight
+  InterlinkedTests:
+    build:
+      targets:
+        InterlinkedTests: [test]
+    test:
+      config: Debug
+      targets:
+        - InterlinkedTests

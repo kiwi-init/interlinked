@@ -40,10 +40,10 @@
 	<string>$(INTERLINKED_JEV_RELAY_URL)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Interlinked lets websites use the camera only after you approve their request.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Interlinked lets websites use nearby Bluetooth devices only after you approve their request.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Interlinked lets websites use the camera only after you approve their request.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Jonatas Walker. All rights reserved.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -52,5 +52,18 @@
 	<string>Interlinked uses the microphone for voice navigation and for websites you authorize.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Interlinked uses on-device speech recognition for voice navigation and browser commands.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Interlinked tab</string>
+			<key>UTTypeIdentifier</key>
+			<string>computer.interlinked.tab</string>
+		</dict>
+	</array>
 </dict>
 </plist>
