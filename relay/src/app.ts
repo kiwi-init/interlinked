@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export const cacheLifetimeMs = 5 * 24 * 60 * 60 * 1000;
 const maxBodyBytes = 2_000_000;
 const maxQuestions = 1_000;
+export const upstreamTimeoutMs = 60_000;
 
 export interface CacheStore {
   get(key: string, now: number): Promise<unknown | undefined>;
@@ -13,8 +14,10 @@ export interface CacheStore {
 export interface RelayDependencies {
   verifyAppTransaction(jws: string): Promise<string>;
   cache: CacheStore;
-  callOpenRouter(body: Uint8Array): Promise<{ status: number; body: Uint8Array }>;
+  callOpenRouter(body: Uint8Array, signal: AbortSignal): Promise<{ status: number; body: Uint8Array }>;
   now(): number;
+  /** Deadline for the whole upstream call. Defaults to `upstreamTimeoutMs`. */
+  upstreamTimeoutMs?: number;
 }
 
 export interface RelayRequest {
@@ -37,26 +40,68 @@ const json = (status: number, value: unknown, headers: Record<string, string> = 
   body: encoder.encode(JSON.stringify(value))
 });
 
+// The only request shape the relay forwards. It mirrors `JevRequest` and
+// `JevQuestion` in Interlinked/Model/Jev.swift; change both together.
+//
+//   {
+//     "model": "typesafe/jev-1.13",
+//     "state": string, at most 1,500,000 characters,
+//     "provider": { "data_collection": "deny" },
+//     "questions": {                      // 1 to 1,000 entries
+//       "<id>": {
+//         "type": "choice" | "noul" | "score",
+//         "instructions": string,         // at most 8,000 characters
+//         "criteria": object              // { option: description }, or an array of levels for "score"
+//       }
+//     }
+//   }
+//
+// Any other key, at the top level, in `provider`, or in a question, is
+// rejected so a client cannot pass extra OpenRouter parameters such as
+// `stream` through the relay.
+const decisionKeys = new Set(["model", "state", "provider", "questions"]);
+const providerKeys = new Set(["data_collection"]);
+const questionKeys = new Set(["type", "instructions", "criteria"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: Set<string>): boolean {
+  return Object.keys(value).every(key => allowed.has(key));
+}
+
 function validDecision(body: Uint8Array): boolean {
   if (body.byteLength === 0 || body.byteLength > maxBodyBytes) return false;
-  let value: unknown;
-  try { value = JSON.parse(new TextDecoder().decode(body)); } catch { return false; }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const decision = value as Record<string, unknown>;
+  let decision: unknown;
+  try { decision = JSON.parse(new TextDecoder().decode(body)); } catch { return false; }
+  if (!isRecord(decision) || !hasOnlyKeys(decision, decisionKeys)) return false;
   if (decision.model !== "typesafe/jev-1.13" || typeof decision.state !== "string") return false;
-  if ((decision.state as string).length > 1_500_000) return false;
-  const provider = decision.provider as Record<string, unknown> | undefined;
-  if (!provider || provider.data_collection !== "deny") return false;
+  if (decision.state.length > 1_500_000) return false;
+  const provider = decision.provider;
+  if (!isRecord(provider) || !hasOnlyKeys(provider, providerKeys) || provider.data_collection !== "deny") return false;
   const questions = decision.questions;
-  if (!questions || typeof questions !== "object" || Array.isArray(questions)) return false;
-  const entries = Object.values(questions as Record<string, unknown>);
+  if (!isRecord(questions)) return false;
+  const entries = Object.values(questions);
   if (entries.length === 0 || entries.length > maxQuestions) return false;
   return entries.every(question => {
-    if (!question || typeof question !== "object" || Array.isArray(question)) return false;
-    const q = question as Record<string, unknown>;
-    if (!["choice", "noul", "score"].includes(String(q.type))) return false;
-    if (typeof q.instructions !== "string" || q.instructions.length > 8_000) return false;
-    return q.criteria !== null && typeof q.criteria === "object";
+    if (!isRecord(question) || !hasOnlyKeys(question, questionKeys)) return false;
+    if (!["choice", "noul", "score"].includes(String(question.type))) return false;
+    if (typeof question.instructions !== "string" || question.instructions.length > 8_000) return false;
+    return question.criteria !== null && typeof question.criteria === "object";
+  });
+}
+
+// Settles with `work`, or rejects when `timeoutMs` passes first. The signal
+// lets `work` cancel its own I/O; the race covers work that ignores it.
+function withDeadline<T>(timeoutMs: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work(signal)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
   });
 }
 
@@ -83,7 +128,16 @@ export function createRelay(dependencies: RelayDependencies) {
     const cached = await dependencies.cache.get(key, now);
     if (cached !== undefined) return json(200, cached, { "x-interlinked-cache": "hit" });
 
-    const upstream = await dependencies.callOpenRouter(request.body);
+    let upstream: { status: number; body: Uint8Array };
+    try {
+      upstream = await withDeadline(
+        dependencies.upstreamTimeoutMs ?? upstreamTimeoutMs,
+        signal => dependencies.callOpenRouter(request.body, signal)
+      );
+    } catch {
+      // A timeout or network failure is an unavailable upstream, not a bad request.
+      upstream = { status: 503, body: new Uint8Array() };
+    }
     if (upstream.status !== 200) {
       const status = upstream.status === 413 || upstream.status === 429 ? upstream.status : 503;
       return json(status, { error: status === 429 ? "rate_limited" : status === 413 ? "too_large" : "unavailable" });
