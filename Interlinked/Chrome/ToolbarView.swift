@@ -203,9 +203,10 @@ struct PageHandle: View {
                 .transition(.opacity)
             }
             if workspace.editing != nil && !workspace.searchResults.isEmpty {
+                let results = workspace.searchResults
                 ScrollView { VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(workspace.searchResults.enumerated()), id: \.element.id) { index, result in
-                        if index == 0 || workspace.searchResults[index - 1].source.label != result.source.label {
+                    ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
+                        if index == 0 || results[index - 1].source.label != result.source.label {
                             Text(result.source.label)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(palette.textDim)
