@@ -2,13 +2,19 @@ import Foundation
 
 @MainActor
 protocol PageJavaScriptEvaluating: AnyObject {
-    func interlinkedEvaluate(_ body: String, arguments: [String: Any]) async throws -> Any?
+    /// `userGesture` lets the page treat the script as a click. Only a user
+    /// action in the browser's own chrome may pass it.
+    func interlinkedEvaluate(_ body: String, arguments: [String: Any], userGesture: Bool) async throws -> Any?
     /// Whether Interlinked is darkening this page.
     var rendersDark: Bool { get }
 }
 
 extension PageJavaScriptEvaluating {
     var rendersDark: Bool { false }
+
+    func interlinkedEvaluate(_ body: String, arguments: [String: Any]) async throws -> Any? {
+        try await interlinkedEvaluate(body, arguments: arguments, userGesture: false)
+    }
 }
 
 /// Runs on demand in the page. Reading annotations track only their source nodes.
@@ -38,7 +44,10 @@ extension PageJavaScriptEvaluating {
         ? {mark:'#6b5200',current:'#8f6c00',text:'#fff4cc'}
         : {mark:'#ffe66a',current:'#ffcc32',text:'#151515'};
       const clean = value => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-      const excluded = node => node.closest('form,input,textarea,select,[contenteditable],[hidden],[aria-hidden="true"],script,style');
+      // Typed text never leaves the page: not inside a field, and not in a
+      // cell or paragraph that holds one, whose innerText would include it.
+      const editable = 'textarea,[contenteditable]:not([contenteditable="false"])';
+      const excluded = node => node.closest('form,input,textarea,select,[contenteditable],[hidden],[aria-hidden="true"],script,style') || node.querySelector(editable);
       const nodeText = node => {
         if (node.matches('img')) return clean(node.getAttribute('alt') || node.getAttribute('aria-label') || node.getAttribute('title')) || 'Image';
         if (node.matches('video')) return clean(node.getAttribute('aria-label') || node.getAttribute('title')) || 'Video';
@@ -55,7 +64,7 @@ extension PageJavaScriptEvaluating {
             heading:clean(document.querySelector('main h1,article h1,h1')?.textContent).slice(0,120),
             summary:meta('description') || meta('og:description'),siteName:meta('og:site_name'),
             breadcrumbs:Array.from(document.querySelectorAll('[aria-label*="readcrumb"] a,[itemprop="itemListElement"] [itemprop="name"]')).slice(0,5).map(n=>clean(n.textContent).slice(0,60)),
-            sensitive:!!document.querySelector('input[type="password"],textarea,[contenteditable="true"]')};
+            sensitive:!!document.querySelector('input[type="password"],'+editable)};
         },
         contacts() {
           const out={structuredAddresses:[],addressElements:[],phones:[],emails:[],text:''};
@@ -512,9 +521,11 @@ extension PageJavaScriptEvaluating {
         guard let view else { return }
         _ = try? await execute(view, body: "return globalThis.interlinkedContext?.showSiteMenu() ?? false;")
     }
+    /// The person clicked this item in the browser's menu bar, so the page
+    /// receives it as their click.
     static func activateSiteMenuItem<View: PageJavaScriptEvaluating>(_ view: View, id: String) async -> Bool {
         (try? await execute(view, body: "return globalThis.interlinkedContext?.activateSiteMenuItem(id) ?? false;",
-                            arguments: ["id": id])) as? Bool ?? false
+                            arguments: ["id": id], userGesture: true)) as? Bool ?? false
     }
     static func contacts<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageContactSignals {
         try await value(view, call: "return interlinkedContext.contacts();", type: PageContactSignals.self)
@@ -578,8 +589,9 @@ extension PageJavaScriptEvaluating {
     private static func execute<View: PageJavaScriptEvaluating>(
         _ view: View,
         body: String,
-        arguments: [String: Any] = [:]
+        arguments: [String: Any] = [:],
+        userGesture: Bool = false
     ) async throws -> Any? {
-        try await view.interlinkedEvaluate(body, arguments: arguments)
+        try await view.interlinkedEvaluate(body, arguments: arguments, userGesture: userGesture)
     }
 }

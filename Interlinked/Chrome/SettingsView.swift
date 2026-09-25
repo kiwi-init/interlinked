@@ -574,7 +574,7 @@ private struct SitesSettingsPane: View {
              grants.records.map { origin in
                  Entry(id: "grant-" + origin, site: host(origin),
                        detail: grants.isRemembered(origin) ? "Remembered" : "This visit only",
-                       revoke: { grants.revoke(origin) })
+                       revoke: { workspace.assistance.revokeOrigin(origin) })
              }),
             ("Website permissions",
              "Location prompts need macOS 27 or later. Websites can't send notifications from an embedded browser.",

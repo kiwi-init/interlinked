@@ -87,13 +87,14 @@ struct JevResponse: Codable, Sendable {
 }
 
 enum JevError: Error, Equatable, LocalizedError {
-    case noKey, disabled, busy, rateLimited, unavailable, invalidResponse, tooLarge
+    case noKey, disabled, busy, rateLimited, dailyLimit, unavailable, invalidResponse, tooLarge
     var errorDescription: String? {
         switch self {
         case .noKey: return "Add your OpenRouter key in Settings. Local browsing still works."
         case .disabled: return "Jev is off. Enable it in Settings to use meaning and reading tools."
         case .busy: return "Another request is running. Try again in a moment."
         case .rateLimited: return "OpenRouter is rate limiting requests. Try again in a minute."
+        case .dailyLimit: return "Today's Jev requests are used up. They reset at midnight UTC."
         case .unavailable: return "Jev is unavailable. Local results are still available."
         case .invalidResponse: return "Jev returned an unusable decision. Local results are unchanged."
         case .tooLarge: return "This selection is too large to process."
@@ -172,7 +173,10 @@ struct InterlinkedRelayJev: JevProvider {
         switch response.statusCode {
         case 200: break
         case 413: throw JevError.tooLarge
-        case 429: throw JevError.rateLimited
+        case 429:
+            // The relay caps each tester per UTC day, apart from OpenRouter's own limit.
+            let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw reply?["error"] as? String == "daily_limit" ? JevError.dailyLimit : JevError.rateLimited
         default: throw JevError.unavailable
         }
         guard let result = try? JSONDecoder().decode(JevResponse.self, from: data) else { throw JevError.invalidResponse }
@@ -187,6 +191,7 @@ actor JevService {
     private var pending: [UUID: Task<JevResponse, Error>] = [:]
     private var generation = 0
     private var cooldown = Date.distantPast
+    private var cooldownReason = JevError.rateLimited
 
     init(provider: any JevProvider = JevRuntime.provider(), cache: JevDecisionCache = JevDecisionCache()) {
         self.provider = provider
@@ -204,13 +209,20 @@ actor JevService {
         cache.removeAll()
     }
 
+    private static func nextUTCMidnight(after date: Date = Date()) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        return calendar.nextDate(after: date, matching: DateComponents(hour: 0, minute: 0, second: 0),
+                                 matchingPolicy: .nextTime) ?? date.addingTimeInterval(3600)
+    }
+
     func decide(_ request: JevRequest) async throws -> JevResponse {
         try Task.checkCancellation()
         let data = try request.encoded()
         guard !request.questions.isEmpty else { throw JevError.invalidResponse }
         let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         if let result = cache.value(for: key) { return result }
-        guard cooldown < Date() else { throw JevError.rateLimited }
+        guard cooldown < Date() else { throw cooldownReason }
         // Page checks send a few batches at once; leave room for one more feature.
         guard pending.count < PassageDecisions.parallelRequests + 2 else { throw JevError.busy }
         let revision = generation, id = UUID(), provider = provider
@@ -225,7 +237,10 @@ actor JevService {
             cache.insert(result, for: key)
             return result
         } catch {
-            if revision == generation, error as? JevError == .rateLimited { cooldown = Date().addingTimeInterval(60) }
+            if revision == generation, let limit = error as? JevError, limit == .rateLimited || limit == .dailyLimit {
+                cooldown = limit == .dailyLimit ? Self.nextUTCMidnight() : Date().addingTimeInterval(60)
+                cooldownReason = limit
+            }
             throw error
         }
     }

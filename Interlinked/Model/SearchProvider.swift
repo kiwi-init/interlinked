@@ -142,8 +142,14 @@ enum SuggestionPrivacy {
         if text.contains("@") || navigationURL(from: text) != nil { return true }
         return text.split(whereSeparator: \.isWhitespace).contains { word in
             let word = String(word)
-            return word.contains("://") || isLocalAddress(word) || isPath(word) || isToken(word)
+            return word.contains("://") || isLocalAddress(word) || isPath(word) || isToken(word) || isAddress(word)
         }
+    }
+
+    /// A site with a path or query, like example.com/account?id=5. A bare
+    /// name such as node.js stays a search word.
+    private static func isAddress(_ word: String) -> Bool {
+        (word.contains("/") || word.contains("?")) && navigationURL(from: word) != nil
     }
 
     private static func isLocalAddress(_ word: String) -> Bool {
@@ -191,7 +197,7 @@ enum LocalSuggestions {
         var seen = Set<String>()
         let ranked: [(tier: Int, order: Int, result: SearchResult)] = candidates.enumerated().compactMap { order, candidate in
             let (title, address, source) = candidate
-            guard let url = URL(string: address), seen.insert(url.absoluteString).inserted else { return nil }
+            guard let url = URL(string: address) else { return nil }
             let place = CompactLine.editable(address).lowercased()
             let name = title.lowercased()
             let tier: Int
@@ -202,6 +208,8 @@ enum LocalSuggestions {
                 guard typed.allSatisfy({ word in known.contains { $0.hasPrefix(word) } }) else { return nil }
                 tier = 1
             }
+            // A tab that doesn't match must not hide a history visit of the same page that does.
+            guard seen.insert(url.absoluteString).inserted else { return nil }
             let display = title.trimmingCharacters(in: .whitespacesAndNewlines)
             return (tier, order, SearchResult(title: display.isEmpty ? CompactLine.host(address) : display, url: url, source: source))
         }
@@ -218,9 +226,20 @@ protocol SuggestionClient: Sendable {
 }
 
 struct NetworkSuggestionClient: SuggestionClient {
+    /// No cookies or cache, so a provider cannot tie one person's typing
+    /// together across requests and launches.
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        return URLSession(configuration: configuration)
+    }()
+
     func suggestions(for query: String, from provider: SearchProvider) async throws -> [String] {
         let request = URLRequest(url: provider.suggestionURL(for: query), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200, data.count < 1_000_000 else { return [] }
         return provider.parseSuggestions(data)
     }

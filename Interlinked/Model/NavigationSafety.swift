@@ -77,7 +77,10 @@ enum NavigationSafety {
             disposition = max(disposition, level)
         }
 
-        if ["javascript", "data"].contains(scheme) {
+        if kind == .download, ["data", "blob"].contains(scheme) {
+            // A page saving a file it made itself: the bytes come from the
+            // page, and nothing is opened or navigated to.
+        } else if ["javascript", "data"].contains(scheme) {
             add(.activeContentURL, .block)
         } else if scheme == "about", destination.absoluteString == "about:blank" {
             // The browser uses about:blank as its empty page.
@@ -89,8 +92,11 @@ enum NavigationSafety {
 
         if destination.user != nil || destination.password != nil { add(.embeddedCredentials) }
 
+        // Only the page can downgrade itself. A typed address or a link from
+        // another app loads over whatever page happens to be showing.
         let sourceScheme = source?.scheme?.lowercased()
-        if sourceScheme == "https", scheme == "http" { add(.insecureDowngrade) }
+        let pageInitiated = [.link, .form, .popup, .download, .redirect].contains(kind)
+        if pageInitiated, sourceScheme == "https", scheme == "http" { add(.insecureDowngrade) }
 
         if let host = destination.host?.lowercased(), !host.isEmpty {
             if host.contains("xn--") { add(.encodedHostname) }

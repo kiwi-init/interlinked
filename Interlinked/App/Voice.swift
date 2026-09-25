@@ -71,6 +71,9 @@ final class Voice {
             case .starting, .listening, .finishing: break
             default: target = nil
             }
+            // A failure is shown like a result, then clears; nothing else
+            // takes it off the page handle.
+            if case .failed = state { settleLater() }
         }
     }
     var mode: VoiceMode = .write
@@ -182,13 +185,18 @@ final class Voice {
 
     func settle(_ session: UInt64) {
         guard session == self.session else { return }
-        if case .heard = state {
-            state = .idle
+        switch state {
+        case .heard, .failed: state = .idle
+        default: break
         }
     }
 
     func markHeard(said: String, outcome: VoiceOutcome) {
         state = .heard(said: said, outcome: outcome)
+        settleLater()
+    }
+
+    private func settleLater() {
         shownTimer?.invalidate()
         let this = session
         shownTimer = Timer.scheduledTimer(withTimeInterval: shownFor, repeats: false) { [weak self] _ in

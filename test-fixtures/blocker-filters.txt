@@ -3,6 +3,7 @@
 
 ! /blocker/procedural: elements only a procedural rule can find.
 127.0.0.1##.card:has-text(Sponsored)
+127.0.0.1##.post:has-text(Sponsored):not(.keep)
 127.0.0.1##.label:has-text(/^Advertisement$/):upward(.wrap)
 127.0.0.1##.label:has-text(Promoted):upward(2)
 127.0.0.1##.slot:matches-css(width: 300px)

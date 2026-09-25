@@ -63,6 +63,9 @@ final class BrowserAssistance {
     var automaticReadingEnabled: Bool {
         criticalReadingMode == .automatic && automaticReadingConsented
     }
+    /// Always-on reading holds `.reading` with nothing on screen but the
+    /// page's own highlights, so Escape then belongs to the page.
+    var escapeCloses: Bool { readingPanelOpen || (panel != nil && panel != .reading) }
     var shared: Bool { workspace?.activePane.map { grants[$0] == metadata[$0]?.document && grants[$0] != nil } ?? false }
     var origin: String { current?.origin ?? "" }
     private(set) var hasKey = false
@@ -241,6 +244,18 @@ final class BrowserAssistance {
         }
         cancel("find"); cancel("reading"); cancel("groups"); busy = false; matches = []; findings = []; groups = []
     }
+    /// Removing a site from the shared list stops sharing it the way Stop
+    /// Sharing This Page does, for every open page on that site.
+    func revokeOrigin(_ origin: String) {
+        guard !origin.isEmpty else { return }
+        if current?.origin == origin { revokePage() }
+        originGrants.revoke(origin)
+        declinedOrigins.insert(origin)
+        for (pane, page) in metadata where page.origin == origin {
+            grants.removeValue(forKey: pane)
+            readingInFlight.removeValue(forKey: pane)
+        }
+    }
     private func describePage(_ pane: PaneID, page: PageMetadata) {
         guard appleEnabled else { return }
         let key = "label-\(pane.rawValue)", revision = token("label-\(pane.rawValue)")
@@ -267,6 +282,11 @@ final class BrowserAssistance {
 
     func openFind() {
         readingPanelOpen = false
+        // A reading check still running would write its findings, status and
+        // highlights over Find when it lands.
+        cancel("reading")
+        if let pane = workspace?.activePane { readingInFlight.removeValue(forKey: pane) }
+        findings = []
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
         panel = .find
         findChanged()

@@ -32,6 +32,10 @@ final class OnboardingGuide {
         return !store.dismissed
     }
 
+    /// Never started and never closed on purpose. Someone who closed it and
+    /// opens it again from Help has already chosen their settings.
+    var startsFresh: Bool { progress.done.isEmpty && !store.dismissed }
+
     func contains(_ pane: PaneID?) -> Bool { pane != nil && pane == self.pane }
 
     func opened(in pane: PaneID) {

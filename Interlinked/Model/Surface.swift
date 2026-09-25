@@ -304,12 +304,27 @@ func navigationURL(from line: String) -> URL? {
        text.hasPrefix(scheme + "://") || ["about", "file", "mailto", "data"].contains(scheme.lowercased()) {
         return url
     }
+    // An email address or a login is typed text, not a site to sign in to.
     guard !text.contains(where: \.isWhitespace),
           var parts = URLComponents(string: "https://" + text),
-          let host = parts.host, !host.isEmpty,
-          host.contains(".") || host == "localhost" || host.hasPrefix("[") else { return nil }
+          parts.user == nil, parts.password == nil,
+          let host = parts.host?.lowercased(), !host.isEmpty,
+          host == "localhost" || host.hasPrefix("[") || typedHostHasSuffix(host) else { return nil }
     if host == "localhost" || host.hasSuffix(".localhost") || host == "127.0.0.1" || host == "[::1]" {
         parts.scheme = "http"
+        if !host.hasPrefix("[") { parts.host = host }
     }
     return parts.url
+}
+
+/// A dotted name ends in a top-level domain of two or more characters, so
+/// "3.14", "v1.2.3" and "e.g." search. Four numbers are an IPv4 address.
+private func typedHostHasSuffix(_ host: String) -> Bool {
+    let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+    let named = host.hasSuffix(".") ? labels.dropLast() : labels[...]
+    guard named.count > 1, !named.contains(where: \.isEmpty), let last = named.last else { return false }
+    if last.allSatisfy(\.isNumber) {
+        return named.count == 4 && named.allSatisfy { $0.allSatisfy(\.isNumber) && Int($0).map { $0 <= 255 } == true }
+    }
+    return last.count >= 2
 }

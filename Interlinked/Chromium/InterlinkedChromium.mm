@@ -107,6 +107,30 @@ std::string HostOfURL(const CefString& url) {
   return host;
 }
 
+// The address of the page a subresource belongs to. Chromium's site for
+// cookies is only the registrable domain (news.example.com arrives as
+// https://example.com/), so use the top page's full address whenever it is on
+// that site. Otherwise the top frame is mid-navigation, and the site is kept.
+CefString PageURLForSubresource(CefRefPtr<CefBrowser> browser, CefRefPtr<CefRequest> request) {
+  const CefString site = request->GetFirstPartyForCookies();
+  CefString top;
+  if (browser && browser->GetMainFrame()) {
+    top = browser->GetMainFrame()->GetURL();
+  }
+  if (site.empty()) {
+    return top;
+  }
+  const std::string site_host = HostOfURL(site);
+  const std::string top_host = HostOfURL(top);
+  if (site_host.empty() || top_host.size() < site_host.size()) {
+    return site;
+  }
+  const size_t start = top_host.size() - site_host.size();
+  const bool same_site = top_host.compare(start, site_host.size(), site_host) == 0 &&
+                         (start == 0 || top_host[start - 1] == '.');
+  return same_site ? top : site;
+}
+
 // The engine to use for a page on |page_host|, or null when blocking is off
 // globally or for that site. Sites are stored without a leading "www.".
 std::shared_ptr<const BlockerEngine> BlockerForPage(const std::string& page_host) {
@@ -1029,6 +1053,12 @@ std::atomic_bool g_running(false);
 
 - (void)evaluateJavaScript:(NSString *)script
                 completion:(void (^)(id _Nullable, NSError * _Nullable))completion {
+  [self evaluateJavaScript:script userGesture:NO completion:completion];
+}
+
+- (void)evaluateJavaScript:(NSString *)script
+               userGesture:(BOOL)userGesture
+                completion:(void (^)(id _Nullable, NSError * _Nullable))completion {
   if (!_browser) {
     completion(nil, [NSError errorWithDomain:@"computer.interlinked.chromium"
                                          code:10
@@ -1039,7 +1069,9 @@ std::atomic_bool g_running(false);
   parameters->SetString("expression", CefFromNSString(script));
   parameters->SetBool("awaitPromise", true);
   parameters->SetBool("returnByValue", true);
-  parameters->SetBool("userGesture", true);
+  // A gesture grants the page transient activation, which unlocks popups
+  // for a few seconds. The browser's own reads must never hand that out.
+  parameters->SetBool("userGesture", userGesture);
   const int identifier = _browser->GetHost()->ExecuteDevToolsMethod(
       0, "Runtime.evaluate", parameters);
   if (identifier == 0) {
@@ -1626,10 +1658,7 @@ CefResourceRequestHandler::ReturnValue InterlinkedClient::OnBeforeResourceLoad(
       request->SetURL(clean);
     }
   }
-  CefString page_url = navigation ? request->GetURL() : request->GetFirstPartyForCookies();
-  if (page_url.empty() && browser && browser->GetMainFrame()) {
-    page_url = browser->GetMainFrame()->GetURL();
-  }
+  const CefString page_url = navigation ? request->GetURL() : PageURLForSubresource(browser, request);
   const std::shared_ptr<const BlockerEngine> engine = BlockerForPage(HostOfURL(page_url));
   if (!engine) {
     return RV_CONTINUE;
@@ -1999,14 +2028,17 @@ bool InterlinkedClient::OnBeforeDownload(
   const uint32_t identifier = download_item->GetId();
   NSString *URLString = [destination.absoluteString copy];
   NSString *filename = [NSStringFromCef(suggested_name) copy];
+  __weak ILChromiumView *weakView = view;
   [delegate chromiumView:view
       decideDownloadFromURL:source
                       toURL:destination
                  completion:^(BOOL allow) {
-    if (!allow || !view) {
+    // A closed tab's view is gone by the time the person answers.
+    ILChromiumView *current = weakView;
+    if (!allow || !current || !current.delegate) {
       return;
     }
-    [view didStartDownload:identifier URLString:URLString suggestedFilename:filename];
+    [current didStartDownload:identifier URLString:URLString suggestedFilename:filename];
     callback->Continue(CefString(), true);
   }];
   return true;

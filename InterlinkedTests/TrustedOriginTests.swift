@@ -98,6 +98,9 @@ final class PagePrivacyTests: XCTestCase {
     @MainActor
     func testFormAndPasswordExclusionsRemainIntact() {
         XCTAssertTrue(PageTextBridge.install.contains("form,input,textarea,select,[contenteditable]"))
-        XCTAssertTrue(PageTextBridge.install.contains("input[type=\"password\"],textarea,[contenteditable=\"true\"]"))
+        // Editable text inside an extracted element, and any editable page, count too.
+        XCTAssertTrue(PageTextBridge.install.contains("const editable = 'textarea,[contenteditable]:not([contenteditable=\"false\"])'"))
+        XCTAssertTrue(PageTextBridge.install.contains("|| node.querySelector(editable)"))
+        XCTAssertTrue(PageTextBridge.install.contains("sensitive:!!document.querySelector('input[type=\"password\"],'+editable)"))
     }
 }

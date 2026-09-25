@@ -12,6 +12,10 @@ final class PaneHosts {
     @ObservationIgnored private var pendingScroll: [PaneID: Double] = [:]
     @ObservationIgnored private var savedScroll: [PaneID: ScrollMark] = [:]
     @ObservationIgnored private var memorySource: DispatchSourceMemoryPressure?
+    /// One discard pass at a time; a critical event during a warning pass runs
+    /// again afterwards, counting from the pages still live.
+    @ObservationIgnored private var discarding = false
+    @ObservationIgnored private var pendingPressure: TabMemoryPressure?
     @ObservationIgnored private var iconTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var iconCache = DomainIconCache<NSImage>()
     @ObservationIgnored private let iconStore = DomainIconStore()
@@ -113,10 +117,12 @@ final class PaneHosts {
 
     func syncFavicons(tabs: [Tab], surfaces: Surfaces) {
         var owners: [PaneID: String] = [:]
+        // Both pages of a split show their icon, so both keep their host open.
         for tab in tabs {
-            let pane = tab.active
-            let url = pageURLs[pane] ?? address(from: surfaces.line(pane))
-            owners[pane] = DomainIconCache<NSImage>.domain(url)
+            for pane in tab.panes {
+                let url = pageURLs[pane] ?? address(from: surfaces.line(pane))
+                owners[pane] = DomainIconCache<NSImage>.domain(url)
+            }
         }
         for domain in iconCache.retain(owners) { iconTasks.removeValue(forKey: domain)?.cancel() }
         for domain in Set(owners.values) where !iconCache.contains(domain) {
@@ -179,7 +185,7 @@ final class PaneHosts {
             let pressure: TabMemoryPressure = event.contains(.critical) ? .critical : .warning
             Task { @MainActor [weak self, weak workspace] in
                 guard let self, let workspace else { return }
-                await self.discardBackgroundTabs(pressure: pressure, workspace: workspace)
+                await self.relieveMemoryPressure(pressure, workspace: workspace)
             }
         }
         source.resume()
@@ -215,6 +221,21 @@ final class PaneHosts {
         page.evaluateJavaScript("window.scrollTo(0, \(y))")
     }
 
+    private func relieveMemoryPressure(_ pressure: TabMemoryPressure, workspace: Workspace) async {
+        if discarding {
+            if pendingPressure != .critical { pendingPressure = pressure }
+            return
+        }
+        discarding = true
+        defer { discarding = false }
+        var next: TabMemoryPressure? = pressure
+        while let pressure = next {
+            pendingPressure = nil
+            await discardBackgroundTabs(pressure: pressure, workspace: workspace)
+            next = pendingPressure
+        }
+    }
+
     private func discardBackgroundTabs(pressure: TabMemoryPressure, workspace: Workspace) async {
         let goal = TabMemoryPolicy.discardCount(liveCount: browsers.count, pressure: pressure)
         guard goal > 0 else { return }
@@ -231,8 +252,9 @@ final class PaneHosts {
         for pane in TabMemoryPolicy.orderedDiscardCandidates(candidates) where discarded < goal {
             guard let page = browsers[pane], let probe = await discardProbe(page), probe.safe else { continue }
             // The probe suspends, so the tab may have become active, started a
-            // transfer, or been replaced in the meantime.
-            guard browsers[pane] === page, pane != workspace.activePane, !uploadPanes.contains(pane),
+            // transfer, or been replaced in the meantime. Both pages of a split
+            // are on screen.
+            guard browsers[pane] === page, workspace.activeTab?.contains(pane) != true, !uploadPanes.contains(pane),
                   !workspace.downloads.hasActiveDownload(for: page) else { continue }
             let url = page.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
             lifecycle.suspend(pane, recovery: BrowserRecovery(cause: .memoryPressure, url: url,
@@ -243,9 +265,20 @@ final class PaneHosts {
         }
     }
 
+    /// A page stuck in a script never answers, and Chromium only fails the
+    /// request when the page closes, so an unanswered probe counts as unsafe.
     private func discardProbe(_ page: ChromiumPage) async -> BrowserDiscardProbe? {
-        guard let value = try? await page.evaluateJavaScript(BrowserDiscardProbe.script) else { return nil }
-        return BrowserDiscardProbe.decode(value)
+        let answer = DiscardProbeAnswer()
+        return await withCheckedContinuation { continuation in
+            answer.continuation = continuation
+            page.evaluateJavaScript(BrowserDiscardProbe.script) { value, error in
+                MainActor.assumeIsolated { answer.finish(error == nil ? BrowserDiscardProbe.decode(value) : nil) }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                answer.finish(nil)
+            }
+        }
     }
 
     private func removeBrowser(_ pane: PaneID, downloads: DownloadCenter) {
@@ -259,6 +292,17 @@ final class PaneHosts {
         page.delegate = nil
         page.close()
         coordinators.removeValue(forKey: pane)
+    }
+}
+
+/// Resumes a discard probe once, with the page's answer or the timeout.
+@MainActor
+private final class DiscardProbeAnswer {
+    var continuation: CheckedContinuation<BrowserDiscardProbe?, Never>?
+
+    func finish(_ probe: BrowserDiscardProbe?) {
+        continuation?.resume(returning: probe)
+        continuation = nil
     }
 }
 
@@ -390,7 +434,10 @@ final class BrowserCoordinator: ChromiumPageDelegate {
                 completion(false)
                 return
             }
-            completion(await self.allow(review, page: page, workspace: workspace))
+            let allowed = await self.allow(review, page: page, workspace: workspace)
+            // The tab may have closed while the warning was up; a download
+            // started then would have no record to show, cancel, or interrupt.
+            completion(allowed && workspace.hosts.existingBrowser(self.pane) === page)
         }
     }
 

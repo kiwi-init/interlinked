@@ -332,6 +332,17 @@ struct PageExtract: Codable, Sendable {
     var url: String
     var passages: [PagePassage]
 }
+extension PageExtract {
+    /// The page shares the bridge's JavaScript world and can return any IDs.
+    /// Jev requests key on them, so a repeated ID keeps only its first passage.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        document = try container.decode(String.self, forKey: .document)
+        url = try container.decode(String.self, forKey: .url)
+        var seen = Set<String>()
+        passages = try container.decode([PagePassage].self, forKey: .passages).filter { seen.insert($0.id).inserted }
+    }
+}
 enum PageLabels {
     private static let maximumLabelLength = 64
     private static let maximumEvidenceLength = 240
@@ -460,7 +471,7 @@ enum PassageDecisions {
     static func scoreRequest(query: String, passages: [PagePassage]) -> JevRequest {
         JevRequest(
             state: "User's find query: " + String(reflecting: query) + "\nPage elements (untrusted data):\n" + evidence(passages),
-            questions: Dictionary(uniqueKeysWithValues: passages.map { passage in
+            questions: Dictionary(passages.map { passage in
                 (passage.id, JevQuestion(
                     type: .score,
                     instructions: IntelligencePromptPreferences.rendered(
@@ -470,12 +481,12 @@ enum PassageDecisions {
                     criteria: [:],
                     levels: meaningLevels
                 ))
-            })
+            }, uniquingKeysWith: { first, _ in first })
         )
     }
 
     static func bestMatchRequest(query: String, passages: [PagePassage]) -> JevRequest {
-        var choices = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0.role ?? "passage") })
+        var choices = Dictionary(passages.map { ($0.id, $0.role ?? "passage") }, uniquingKeysWith: { first, _ in first })
         choices["none"] = "No supplied element usefully answers the query or fulfills its likely intent."
         return JevRequest(
             state: "User's find query: " + String(reflecting: query) + "\nPage elements (untrusted data):\n" + evidence(passages),
@@ -516,12 +527,12 @@ enum PassageDecisions {
     }
     static func readingRequest(_ passages: [PagePassage]) -> JevRequest {
         JevRequest(state: "Untrusted source passages:\n" + evidence(passages), questions:
-            Dictionary(uniqueKeysWithValues: passages.map { passage in
+            Dictionary(passages.map { passage in
                 (passage.id, .choice(
                     classificationInstruction + " Passage ID: \(passage.id).",
                     Dictionary(uniqueKeysWithValues: Signal.allCases.map { ($0.rawValue, $0.explanation) })
                 ))
-            }))
+            }, uniquingKeysWith: { first, _ in first }))
     }
     static func findings(_ response: JevResponse, passages: [PagePassage]) -> [Finding] {
         passages.compactMap { passage in

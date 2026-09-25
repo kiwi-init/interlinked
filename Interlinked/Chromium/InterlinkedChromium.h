@@ -135,6 +135,11 @@ typedef NS_ENUM(NSInteger, ILWebsitePermissionKind) {
 - (void)closeBrowser;
 - (void)evaluateJavaScript:(NSString *)script
                 completion:(void (^)(id _Nullable result, NSError * _Nullable error))completion;
+/// With `userGesture`, the page treats the script as a click and may open a
+/// popup or use other activation-gated APIs. Only pass it for a user action.
+- (void)evaluateJavaScript:(NSString *)script
+               userGesture:(BOOL)userGesture
+                completion:(void (^)(id _Nullable result, NSError * _Nullable error))completion;
 - (void)findText:(NSString *)text
        backwards:(BOOL)backwards
         findNext:(BOOL)findNext

@@ -42,6 +42,7 @@ test("authenticates TestFlight, caches exact requests for five days, and hides t
   assert.equal(first.headers?.["x-interlinked-cache"], "miss");
   assert.equal(second.headers?.["x-interlinked-cache"], "hit");
   assert.equal(upstreamCalls, 1);
+  assert.equal(cache.count, 1, "a cached answer does not spend the daily allowance");
 
   now += cacheLifetimeMs + 1;
   await relay(request);
@@ -95,6 +96,23 @@ test("rejects unknown fields at every level before spending", async () => {
   const score = { type: "score", instructions: "Rate", criteria: ["low", "high"] };
   assert.equal((await send({ ...valid, questions: { ...valid.questions, score } })).status, 200);
   assert.equal(upstreamCalls, 1);
+});
+
+test("caches only a reply that answers every question", async () => {
+  const replies = ["{}", '{"answers":{"page":{"type":"noul","noul":1}}}', '{"answers":{"page":{"type":"choice","choice":"none"}}}'];
+  let upstreamCalls = 0;
+  const send = signedRelay(async () => ({ status: 200, body: encoder.encode(replies[upstreamCalls++]) }));
+  const valid = JSON.parse(decoder.decode(body));
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await send(valid);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers?.["x-interlinked-cache"], "miss");
+    assert.equal(upstreamCalls, attempt);
+  }
+  const cached = await send(valid);
+  assert.equal(cached.headers?.["x-interlinked-cache"], "hit");
+  assert.equal(upstreamCalls, 3);
 });
 
 test("answers a hanging upstream with 503 once the deadline passes", async () => {

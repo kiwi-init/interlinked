@@ -7,7 +7,8 @@
 # Signing uses DEVELOPER_ID_IDENTITY ("Developer ID Application: …") from the
 # login or a temporary keychain. Notarization uses an App Store Connect API
 # key: NOTARY_KEY_PATH (.p8), NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Without an
-# identity the DMG is built unsigned and named so, for testing the pipeline.
+# identity the DMG is built unsigned and named so, for testing the pipeline;
+# signed without the key, it is named unnotarized, since Gatekeeper refuses it.
 #
 # Apple silicon only: the pinned Chromium SDK and the blocker are arm64.
 #
@@ -75,7 +76,11 @@ if [ -n "$identity" ]; then
 fi
 
 name="Interlinked-$version"
-[ -n "$identity" ] || name="$name-unsigned"
+if [ -z "$identity" ]; then
+  name="$name-unsigned"
+elif [ -z "${NOTARY_KEY_PATH:-}" ]; then
+  name="$name-unnotarized"
+fi
 dmg="$out/$name.dmg"
 stage="$out/dmg"
 mkdir -p "$stage"

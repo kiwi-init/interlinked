@@ -177,7 +177,7 @@ struct Toolbox: View {
     }
 
     private func closeActivePanel() {
-        if assistant.panel != nil { assistant.closePanel() }
+        if assistant.escapeCloses { assistant.closePanel() }
     }
 }
 

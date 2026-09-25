@@ -50,6 +50,9 @@ const nameAndValue = (arg, separator) => {
 // Each operator takes the current elements and returns the next ones.
 const cssSelector = (selector, elements, first) => {
   if (first) return document.querySelectorAll(selector);
+  // The engine keeps the combinator: " .ad" and " > .ad" look inside the
+  // current elements, while ".ad" or ":not(.keep)" narrows them.
+  if (!/^[\s>+~]/.test(selector)) return elements.filter(element => element.matches(selector));
   const relative = selector.trimStart();
   const rest = relative.slice(1).trim();
   return elements.flatMap(element => {

@@ -346,6 +346,7 @@ final class IntentTests: XCTestCase {
         XCTAssertEqual(Intent.command("go back a tab"), "prev-tab")
         XCTAssertEqual(Intent.command("go to tab three"), "focus-tab 2")
         XCTAssertEqual(Intent.command("close this page"), "close-tab")
+        XCTAssertNil(Intent.command("close tab two"))
     }
 
     func testRemovedWorkspaceCommandsAreNotExecutable() {
@@ -447,6 +448,25 @@ final class NavigationSafetyTests: XCTestCase {
         XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .popup).reasons.contains(.crossOriginPopup))
         XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .download).reasons.contains(.crossOriginDownload))
         XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .redirect).reasons.contains(.crossSiteRedirect))
+    }
+
+    func testPagesSaveFilesTheyMadeWithoutAWarning() throws {
+        let source = try XCTUnwrap(URL(string: "https://charts.test/report"))
+        for address in ["data:image/png;base64,iVBORw0KGgo=", "blob:https://charts.test/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"] {
+            let review = NavigationSafety.review(destination: try XCTUnwrap(URL(string: address)), source: source, kind: .download)
+            XCTAssertEqual(review.disposition, .allow, address)
+        }
+        let opened = NavigationSafety.review(destination: try XCTUnwrap(URL(string: "data:text/html,hi")), source: source, kind: .link)
+        XCTAssertEqual(opened.disposition, .block)
+    }
+
+    func testOnlyThePageCanDowngradeItself() throws {
+        let source = try XCTUnwrap(URL(string: "https://secure.test/"))
+        let destination = try XCTUnwrap(URL(string: "http://plain.test/"))
+        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .link).reasons.contains(.insecureDowngrade))
+        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .redirect).reasons.contains(.insecureDowngrade))
+        // Typed into the address field, or a link from another app.
+        XCTAssertFalse(NavigationSafety.review(destination: destination, source: source, kind: .other).reasons.contains(.insecureDowngrade))
     }
 
 }
@@ -707,6 +727,12 @@ final class SurfaceTests: XCTestCase {
         XCTAssertEqual(address(from: "localhost:3000/app").absoluteString, "http://localhost:3000/app")
         XCTAssertEqual(address(from: "127.0.0.1:8080").absoluteString, "http://127.0.0.1:8080")
         XCTAssertEqual(address(from: "[::1]:8080").absoluteString, "http://[::1]:8080")
+        XCTAssertEqual(address(from: "Localhost:3000").absoluteString, "http://localhost:3000")
+        XCTAssertEqual(address(from: "192.168.1.1").absoluteString, "https://192.168.1.1")
+        XCTAssertEqual(address(from: "example.com.").absoluteString, "https://example.com.")
+        for typed in ["me@gmail.com", "3.14", "v1.2.3", "e.g.", "user:pass@example.com"] {
+            XCTAssertEqual(address(from: typed, provider: .google).host, "www.google.com", typed)
+        }
         XCTAssertEqual(address(from: "file:///tmp/page.html").scheme, "file")
         XCTAssertEqual(address(from: " \n ").absoluteString, "about:blank")
     }

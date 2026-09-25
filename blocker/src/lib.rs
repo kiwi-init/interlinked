@@ -5,6 +5,7 @@
 use adblock::lists::{FilterSet, ParseOptions};
 use adblock::request::Request;
 use adblock::resources::{PermissionMask, Resource};
+use adblock::blocker::BlockerResult;
 use adblock::Engine;
 use std::collections::HashSet;
 use std::ffi::{c_char, CStr, CString};
@@ -139,20 +140,26 @@ pub unsafe extern "C" fn il_blocker_check(
     let Ok(request) = Request::new(text(url), text(source_url), text(request_type), text(method)) else {
         return IL_ALLOW;
     };
-    let result = (*blocker).engine.check_network_request(&request);
-    let block = result.should_block();
-    if let Some(redirect) = result.redirect {
-        *detail = give(redirect);
-        return IL_REDIRECT;
+    let (code, value) = verdict((*blocker).engine.check_network_request(&request));
+    if let Some(value) = value {
+        *detail = give(value);
     }
-    if block {
-        return IL_BLOCK;
+    code
+}
+
+/// A redirect only answers a request the engine blocks. `redirect-rule`
+/// names a stand-in without blocking anything, and an exception still wins.
+fn verdict(result: BlockerResult) -> (i32, Option<String>) {
+    if result.should_block() {
+        return match result.redirect {
+            Some(redirect) => (IL_REDIRECT, Some(redirect)),
+            None => (IL_BLOCK, None),
+        };
     }
-    if let Some(rewritten) = result.rewritten_url {
-        *detail = give(rewritten);
-        return IL_REWRITE;
+    match result.rewritten_url {
+        Some(rewritten) => (IL_REWRITE, Some(rewritten)),
+        None => (IL_ALLOW, None),
     }
-    IL_ALLOW
 }
 
 /// The page address without tracking parameters, or null when it has none.
@@ -219,5 +226,40 @@ mod tests {
             il_string_free(detail);
             il_blocker_free(blocker);
         }
+    }
+
+    /// The verdict for a script request under `rules`, with a noop.js stand-in.
+    fn check(rules: &str, url: &str, source: &str) -> i32 {
+        let resources = c"[{\"name\":\"noop.js\",\"aliases\":[],\"kind\":{\"mime\":\"application/javascript\"},\"content\":\"KGZ1bmN0aW9uKCl7fSkoKQ==\"}]";
+        let rules = CString::new(rules).unwrap();
+        let url = CString::new(url).unwrap();
+        let source = CString::new(source).unwrap();
+        unsafe {
+            let filters = il_filters_new();
+            il_filters_add(filters, rules.as_ptr(), false);
+            let blocker = il_blocker_new(filters, resources.as_ptr());
+            let mut detail = ptr::null_mut();
+            let verdict = il_blocker_check(blocker, url.as_ptr(), source.as_ptr(), c"script".as_ptr(), c"GET".as_ptr(), &mut detail);
+            il_string_free(detail);
+            il_blocker_free(blocker);
+            verdict
+        }
+    }
+
+    #[test]
+    fn redirect_rule_alone_leaves_the_request_alone() {
+        assert_eq!(check("||ads.example/lib.js$redirect-rule=noop.js", "https://ads.example/lib.js", "https://news.example/"), IL_ALLOW);
+    }
+
+    #[test]
+    fn exception_beats_a_redirecting_block() {
+        let rules = "||ads.example/lib.js$redirect=noop.js\n@@||ads.example/lib.js$domain=news.example";
+        assert_eq!(check(rules, "https://ads.example/lib.js", "https://news.example/"), IL_ALLOW);
+        assert_eq!(check(rules, "https://ads.example/lib.js", "https://other.example/"), IL_REDIRECT);
+    }
+
+    #[test]
+    fn blocked_request_without_a_stand_in_is_blocked() {
+        assert_eq!(check("||ads.example^", "https://ads.example/lib.js", "https://news.example/"), IL_BLOCK);
     }
 }
