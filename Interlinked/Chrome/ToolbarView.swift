@@ -63,7 +63,8 @@ struct PageHandle: View {
     private var splitRowHeight: CGFloat { workspace.isSplit ? 42 : 0 }
     private var controlsHeight: CGFloat { 32 + handleBarHeight + tabsHeight + splitRowHeight }
     private var historySize: CGSize {
-        let rows = CGFloat(workspace.browserHistory.visits.count) * 44 + 58
+        let count = workspace.historyClearing ? HistoryRange.allCases.count : workspace.browserHistory.visits.count
+        let rows = CGFloat(count) * 44 + 58
         return CGSize(width: min(330, available.width - 36), height: min(max(140, rows) + 44, available.height - 72))
     }
     private var downloadsSize: CGSize {

@@ -19,7 +19,7 @@ struct InterlinkedApp: App {
                 Button("New Page") { workspace.newPage() }
                     .keyboardShortcut("t", modifiers: .command)
                 Button("New Page Beside") { workspace.newPageBeside() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .keyboardShortcut("t", modifiers: [.command, .option])
                 Button("Close Tab") { workspace.closeActive() }
                     .keyboardShortcut("w", modifiers: .command)
             }
@@ -33,6 +33,10 @@ struct InterlinkedApp: App {
                 Button("Show Onboarding") { workspace.openOnboarding() }
             }
             CommandMenu("Tab") {
+                Button("Reopen Closed Tab") { workspace.reopenClosedTab() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(workspace.recentlyClosed.isEmpty)
+                Divider()
                 Button(workspace.isSplit ? "Move Side Page to Its Own Tab" : "Split View") { workspace.toggleSplitView() }
                     .keyboardShortcut("\\", modifiers: .command)
                 Button("Focus Other Page") { workspace.focusOtherPane() }

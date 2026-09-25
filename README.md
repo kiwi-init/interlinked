@@ -20,7 +20,9 @@ The page label stays visible while scrolling. Clicking the page dismisses open c
 
 Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
-Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored.
+Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored. ⇧⌘T reopens the last of up to 25 closed tabs. A corrupt session file is kept aside and the backup from the last good save opens instead. Back and forward lists do not survive a relaunch. [docs/session-state.md](docs/session-state.md) covers what is restored and why.
+
+Browsing history stays in `history.json` for 90 days, up to 5,000 visits. The History panel removes one visit, every visit to a site, or the last hour, today, or everything. Settings > Privacy turns history off, which also deletes it. History never goes to Jev.
 
 Links and scripts that request a new browser window become a new Interlinked tab when Chromium reports a user gesture. Unsolicited popups are discarded.
 

@@ -35,6 +35,7 @@ enum Control {
         "site-menu [state|search|close|home|enable|disable|page|more|item ID|submit QUERY|restore]",
         "new-page",
         "new-page-beside",
+        "reopen-closed-tab",
         "navigate ADDRESS",
         "open-address ADDRESS",
         "back [pane]",
@@ -52,7 +53,7 @@ enum Control {
         "find [state|open [text]|query text|next|prev|meaning on|off|close]",
         "reading [state|open|toggle|close]",
         "share-page [state|request|allow|remember|cancel|stop]",
-        "history [state|open|close|toggle|visit N|remove N]",
+        "history [state|open|close|toggle|visit N|remove N|remove-site N|clear [hour|today|all]]",
         "downloads [state|open|close|toggle|clear|cancel N|reveal N|allow-notifications]",
         "quick-switch [state|show|hide|toggle|select N]",
         "useful-info [state|copy address|copy contact [N]|contact open|close]",
@@ -144,6 +145,11 @@ enum Control {
 
         case "new-page-beside":
             workspace.newPageBeside()
+            return ok()
+
+        case "reopen-closed-tab":
+            guard !workspace.recentlyClosed.isEmpty else { return error("no closed tab to reopen") }
+            workspace.reopenClosedTab()
             return ok()
 
         case "navigate", "open-address":
@@ -716,6 +722,9 @@ enum Control {
             "overview": workspace.overviewOpen,
             "identity": workspace.identityOpen,
             "page_history": workspace.pageHistoryOpen,
+            "recently_closed": workspace.recentlyClosed.reversed().map { closed in
+                ["url": closed.url, "name": closed.name ?? NSNull(), "closed": timestamp(closed.closed)] as [String: Any]
+            },
             "downloads_panel": workspace.downloads.panelOpen,
             "quick_switch": workspace.quickSwitchOpen,
             "page_tool": panelName(workspace.assistance.panel),

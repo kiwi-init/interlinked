@@ -213,17 +213,39 @@ struct PageHistoryPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ToolboxPanelHeader(title: "History", close: close)
-            if workspace.browserHistory.visits.isEmpty {
-                Text("No history")
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.textDim)
-                Spacer()
+            if workspace.historyClearing {
+                ToolboxPanelHeader(title: "Clear History") { workspace.historyClearing = false }
+                VStack(spacing: 4) {
+                    ForEach(HistoryRange.allCases) { range in
+                        clearRow(range)
+                    }
+                }
+                Spacer(minLength: 0)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(workspace.browserHistory.visits) { visit in
-                            historyRow(visit)
+                HStack {
+                    Text("History").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    if !workspace.browserHistory.visits.isEmpty {
+                        Button("Clear…", action: workspace.beginClearingHistory)
+                            .font(.system(size: 10))
+                            .accessibilityIdentifier("history-clear")
+                    }
+                    Button(action: close) {
+                        Image(systemName: "xmark").frame(width: 24, height: 24)
+                    }
+                    .accessibilityLabel("Close History")
+                }
+                if workspace.browserHistory.visits.isEmpty {
+                    Text(workspace.browserHistory.enabled ? "No history" : "History is off in Settings")
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.textDim)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(workspace.browserHistory.visits) { visit in
+                                historyRow(visit)
+                            }
                         }
                     }
                 }
@@ -232,6 +254,18 @@ struct PageHistoryPanel: View {
         .buttonStyle(.pointing)
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func clearRow(_ range: HistoryRange) -> some View {
+        Button { workspace.clearHistory(range) } label: {
+            Text(range.title)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Clear \(range.title.lowercased())")
+        .accessibilityIdentifier("history-clear-\(range.rawValue)")
     }
 
     private func historyRow(_ visit: BrowserHistoryVisit) -> some View {
@@ -259,6 +293,9 @@ struct PageHistoryPanel: View {
         .accessibilityLabel("Open \(visit.title), \(visit.host)")
         .contextMenu {
             Button("Remove from History") { workspace.browserHistory.remove(visit.id) }
+            if !visit.host.isEmpty {
+                Button("Remove All from \(visit.host)") { workspace.browserHistory.removeSite(visit.host) }
+            }
         }
     }
 }

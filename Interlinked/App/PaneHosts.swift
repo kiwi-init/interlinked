@@ -10,6 +10,7 @@ final class PaneHosts {
     @ObservationIgnored private var coordinators: [PaneID: BrowserCoordinator] = [:]
     @ObservationIgnored private var uploadPanes: Set<PaneID> = []
     @ObservationIgnored private var pendingScroll: [PaneID: Double] = [:]
+    @ObservationIgnored private var savedScroll: [PaneID: ScrollMark] = [:]
     @ObservationIgnored private var memorySource: DispatchSourceMemoryPressure?
     @ObservationIgnored private var iconTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var iconCache = DomainIconCache<NSImage>()
@@ -48,6 +49,7 @@ final class PaneHosts {
             lifecycle.close(pane)
             uploadPanes.remove(pane)
             pendingScroll.removeValue(forKey: pane)
+            savedScroll.removeValue(forKey: pane)
             pageURLs.removeValue(forKey: pane)
             titles.removeValue(forKey: pane)
             favicons.removeValue(forKey: pane)
@@ -201,8 +203,15 @@ final class PaneHosts {
         removeBrowser(pane, downloads: workspace.downloads)
     }
 
+    /// A position from the last session, put back on the page's first load
+    /// only if it is still the same document.
+    func expectScroll(_ mark: ScrollMark) {
+        savedScroll[mark.pane] = mark
+    }
+
     func restoreScrollIfNeeded(_ page: ChromiumPage, pane: PaneID) {
-        guard let y = pendingScroll.removeValue(forKey: pane), y > 0 else { return }
+        let saved = savedScroll.removeValue(forKey: pane).flatMap { $0.fits(url: page.url, title: page.title) ? $0.y : nil }
+        guard let y = pendingScroll.removeValue(forKey: pane) ?? saved, y > 0 else { return }
         page.evaluateJavaScript("window.scrollTo(0, \(y))")
     }
 
@@ -275,6 +284,7 @@ final class BrowserCoordinator: ChromiumPageDelegate {
             workspace.assistance.committed(pane)
             workspace.usefulInfo.committed(pane)
             workspace.noteSiteMenuDocumentChanged(pane)
+            workspace.noteDocumentChanged(pane, url: page.url)
         }
         if effects.contains(.newAddress) { workspace.builtIns.apply(to: page) }
         workspace.hosts.updatePage(page, pane: pane)
