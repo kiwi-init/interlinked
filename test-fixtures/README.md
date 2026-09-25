@@ -17,6 +17,7 @@ Additional local pages:
 - `/runtime` — WebSocket echo, service worker registration, fullscreen, and history A/B.
 - `/favicon/endless`, `/favicon/drip`, `/favicon/oversized` — favicon responses that never finish: a fast endless stream, one byte every 0.2 seconds, and a declared 10 MB body sent at 80 KB a second. `FaviconDownloadTests` starts the server on a free port with `python3 test-fixtures/server.py 0`.
 - `/blocker/procedural`, `/blocker/redirect`, `/blocker/removeparam` — content blocker checks for `blocker-filters.txt`, the list the UI tests load in place of the standard lists (`INTERLINKED_UI_TEST_FILTERS`). Each page reports `pass` or the failed checks in its title. `/blocker/redirect` redirects from 127.0.0.1 to localhost, a different site, and the destination must get localhost's rules on its first document.
+- `/tracking/redirect` — redirects to `/blocker/removeparam` with `utm_source` and `fbclid`. Interlinked removes tracking parameters from every page address and redirect even with blocking off, so the page must report only `keep=1`.
 
 Failed login, upload, download, or popup on these local pages is a release blocker. The manual matrix for Gmail, Docs, GitHub, Slack, OAuth, a video meeting, and one checkout flow is `COMPATIBILITY.md`. Do not commit account passwords or payment details.
 
