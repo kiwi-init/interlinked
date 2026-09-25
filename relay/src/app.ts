@@ -92,6 +92,20 @@ function validDecision(body: Uint8Array): boolean {
   });
 }
 
+// Whether `response` answers exactly the questions in `body` with the
+// question's type. The app checks answers in full; this only keeps a partial
+// or error reply out of the five-day cache every tester shares.
+function answersEveryQuestion(body: Uint8Array, response: unknown): boolean {
+  if (!isRecord(response) || !isRecord(response.answers)) return false;
+  const questions = (JSON.parse(new TextDecoder().decode(body)) as { questions: Record<string, { type: string }> }).questions;
+  const answers = response.answers;
+  const ids = Object.keys(questions);
+  return Object.keys(answers).length === ids.length && ids.every(id => {
+    const answer = answers[id];
+    return isRecord(answer) && answer.type === questions[id].type;
+  });
+}
+
 // Settles with `work`, or rejects when `timeoutMs` passes first. The signal
 // lets `work` cancel its own I/O; the race covers work that ignores it.
 function withDeadline<T>(timeoutMs: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -119,14 +133,15 @@ export function createRelay(dependencies: RelayDependencies) {
     catch { return json(401, { error: "invalid_app_transaction" }); }
 
     const now = dependencies.now();
+    const key = createHash("sha256").update(request.body).digest("hex");
+    const cached = await dependencies.cache.get(key, now);
+    if (cached !== undefined) return json(200, cached, { "x-interlinked-cache": "hit" });
+
+    // The daily allowance counts OpenRouter calls; a cached answer costs nothing.
     const day = new Date(now).toISOString().slice(0, 10);
     if (!await dependencies.cache.consume(user, day, 250)) {
       return json(429, { error: "daily_limit" }, { "retry-after": "3600" });
     }
-
-    const key = createHash("sha256").update(request.body).digest("hex");
-    const cached = await dependencies.cache.get(key, now);
-    if (cached !== undefined) return json(200, cached, { "x-interlinked-cache": "hit" });
 
     let upstream: { status: number; body: Uint8Array };
     try {
@@ -146,7 +161,9 @@ export function createRelay(dependencies: RelayDependencies) {
     let response: unknown;
     try { response = JSON.parse(new TextDecoder().decode(upstream.body)); }
     catch { return json(502, { error: "invalid_upstream_response" }); }
-    await dependencies.cache.put(key, response, now + cacheLifetimeMs);
+    if (answersEveryQuestion(request.body, response)) {
+      await dependencies.cache.put(key, response, now + cacheLifetimeMs);
+    }
     return json(200, response, { "x-interlinked-cache": "miss" });
   };
 }

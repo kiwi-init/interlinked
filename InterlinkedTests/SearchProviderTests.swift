@@ -181,6 +181,9 @@ final class SearchProviderTests: XCTestCase {
             "token dGhpcyBpcyBhIHNlY3JldDEy",
             "550e8400-e29b-41d4-a716-446655440000",
             "averyveryverylongwordwithoutanyspacesatall",
+            // Addresses inside other words
+            "mybank.internal/accounts 2024",
+            "open example.com/account?id=5 now",
         ]
         for text in sensitive {
             XCTAssertTrue(SuggestionPrivacy.isSensitive(text), text)
@@ -192,6 +195,7 @@ final class SearchProviderTests: XCTestCase {
             "space x", "weather tomorrow", "C++ tutorial", "iphone 17 pro max", "covid-19 vaccine",
             "how to cook rice", "node.js tutorial", "1/2 cup in grams", "a/b testing", "state-of-the-art",
             "what is 2+2", "rust vs go", "meeting at 10:30:00", "café near me", "internationalization", "site: reviews",
+            "vue.js vs react", "pi is 3.14",
         ]
         for text in ordinary {
             XCTAssertFalse(SuggestionPrivacy.isSensitive(text), text)
@@ -237,6 +241,15 @@ final class LocalSuggestionTests: XCTestCase {
         XCTAssertTrue(LocalSuggestions.rank("ull", tabs: tabs, history: []).isEmpty)
         XCTAssertTrue(LocalSuggestions.rank("pull missing", tabs: tabs, history: []).isEmpty)
         XCTAssertTrue(LocalSuggestions.rank("  ", tabs: tabs, history: []).isEmpty)
+    }
+
+    func testATabThatDoesNotMatchKeepsTheHistoryVisitOfThatPage() {
+        // The tab shows an AI label; the history visit keeps the page's own title.
+        let page = "https://www.bbc.com/weather/2643743"
+        let tabs = [LocalCandidate(title: "Weather forecast", url: page)]
+        let history = [visit(page, "BBC Weather - London")]
+        XCTAssertEqual(LocalSuggestions.rank("london", tabs: tabs, history: history).map(\.source), [.history])
+        XCTAssertEqual(LocalSuggestions.rank("weather", tabs: tabs, history: history).map(\.source), [.tab])
     }
 
     func testAtMostEightUniquePages() {

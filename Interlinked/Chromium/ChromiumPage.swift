@@ -1,13 +1,13 @@
 import AppKit
 
 extension ChromiumPage: PageJavaScriptEvaluating {
-    func interlinkedEvaluate(_ body: String, arguments: [String: Any]) async throws -> Any? {
+    func interlinkedEvaluate(_ body: String, arguments: [String: Any], userGesture: Bool) async throws -> Any? {
         let declarations = try arguments.map { key, value -> String in
             let data = try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
             guard let json = String(data: data, encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
             return "const \(key)=\(json);"
         }.joined()
-        return try await evaluateJavaScript("(async()=>{\(declarations)\(body)})()")
+        return try await evaluateJavaScript("(async()=>{\(declarations)\(body)})()", userGesture: userGesture)
     }
 }
 
@@ -100,9 +100,9 @@ final class ChromiumPage: NSObject, ILChromiumViewDelegate {
     func close() { nativeView.closeBrowser() }
     func cancelDownload(_ identifier: UInt32) { nativeView.cancelDownload(identifier) }
 
-    func evaluateJavaScript(_ script: String) async throws -> Any? {
+    func evaluateJavaScript(_ script: String, userGesture: Bool = false) async throws -> Any? {
         try await withCheckedThrowingContinuation { continuation in
-            nativeView.evaluateJavaScript(script) { result, error in
+            nativeView.evaluateJavaScript(script, userGesture: userGesture) { result, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume(returning: result) }
             }

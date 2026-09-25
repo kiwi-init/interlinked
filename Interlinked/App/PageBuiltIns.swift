@@ -26,6 +26,7 @@ final class PageBuiltIns {
     @ObservationIgnored private let cacheURL: URL
     @ObservationIgnored private let resourcesCacheURL: URL
     @ObservationIgnored private var appearanceObservation: NSKeyValueObservation?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -58,6 +59,8 @@ final class PageBuiltIns {
 
     func stop() {
         appearanceObservation = nil
+        refreshTask?.cancel()
+        refreshTask = nil
         defaults.set(blockedTotal, forKey: "builtins.blockedTotal")
         workspace = nil
     }
@@ -100,6 +103,7 @@ final class PageBuiltIns {
         status = "Updating block lists…"
         defer { updating = false }
         var texts: [String] = []
+        var missing: [String] = []
         let trusted = NSMutableIndexSet()
         for list in BlockList.standard {
             var request = URLRequest(url: list.url, timeoutInterval: 30)
@@ -107,11 +111,21 @@ final class PageBuiltIns {
             guard let (data, response) = try? await URLSession.shared.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let text = String(data: data, encoding: .utf8), text.count > 1_000 else {
-                status = "Could not download \(list.name). Using the saved copy."
-                return
+                missing.append(list.name)
+                continue
             }
             if list.trusted { trusted.add(texts.count) }
             texts.append(text)
+        }
+        // A saved engine has every list, so it stays until all of them
+        // download. Without one, block with what arrived; the hourly check
+        // tries again because the lists are not marked updated.
+        if let first = missing.first {
+            if engineReady || texts.isEmpty {
+                status = engineReady ? "Could not download \(first). Using the saved copy."
+                                     : "Could not download the block lists. Blocking starts once they download."
+                return
+            }
         }
         if let remote = BlockerResources.remoteURL {
             await BlockerResources.refresh(from: remote, cache: resourcesCacheURL)
@@ -125,9 +139,13 @@ final class PageBuiltIns {
             return
         }
         engineReady = true
-        listsUpdatedAt = Date()
-        defaults.set(listsUpdatedAt, forKey: "builtins.listsUpdatedAt")
-        status = ""
+        if let first = missing.first {
+            status = "Could not download \(first). Blocking with the other lists until it downloads."
+        } else {
+            listsUpdatedAt = Date()
+            defaults.set(listsUpdatedAt, forKey: "builtins.listsUpdatedAt")
+            status = ""
+        }
         let url = cacheURL
         Task.detached(priority: .utility) {
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -167,6 +185,22 @@ final class PageBuiltIns {
             }
             if !restored || updatedAt.map({ Date().timeIntervalSince($0) > Self.refreshInterval }) ?? true {
                 await updateLists()
+            }
+        }
+        keepListsFresh()
+    }
+
+    /// Lists refresh daily while the app stays open, and a failed download is
+    /// tried again within the hour instead of at the next launch.
+    private func keepListsFresh() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600))
+                guard let self, !Task.isCancelled else { return }
+                if self.listsUpdatedAt.map({ Date().timeIntervalSince($0) > Self.refreshInterval }) ?? true {
+                    await self.updateLists()
+                }
             }
         }
     }

@@ -492,7 +492,7 @@ extension Control {
             var removed = 0
             switch group {
             case "jev":
-                for origin in grants.records where site.map({ named(origin, $0) }) ?? true { grants.revoke(origin); removed += 1 }
+                for origin in grants.records where site.map({ named(origin, $0) }) ?? true { workspace.assistance.revokeOrigin(origin); removed += 1 }
             case "permissions":
                 let kind = words.dropFirst(3).first
                 for record in permissions.records where site.map({ named(record.key.origin, $0) }) ?? true

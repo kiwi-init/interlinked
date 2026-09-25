@@ -190,15 +190,14 @@ enum Control {
             }
 
         case "edit-tab", "close-whole-tab":
-            let index = words.first.flatMap(Int.init)
-            let tab = index.map { workspace.tabs.indices.contains($0) ? workspace.tabs[$0] : nil } ?? workspace.activeTab
-            guard let tab else { return error("no tab \(words.first ?? "")") }
-            if command == "edit-tab" {
-                workspace.editTab(tab.id)
-            } else {
-                workspace.closeTab(tab.id)
+            return withTab(workspace, words.first) { tab in
+                if command == "edit-tab" {
+                    workspace.editTab(tab.id)
+                } else {
+                    workspace.closeTab(tab.id)
+                }
+                return ok()
             }
-            return ok()
 
         case "engine-state":
             return json([
@@ -377,21 +376,22 @@ enum Control {
             }
 
         case "close-tab", "close-pane":
-            let named = words.first.flatMap { UInt64($0) }.map { PaneID($0) }
-            let pane = named ?? workspace.activePane
-            guard let pane else { return error("there are no panes to close") }
-            return workspace.closePane(pane) ? ok() : error("no pane with that id")
+            return withPane(workspace, words.first) { pane in
+                workspace.closePane(pane) ? ok() : error("no pane with that id")
+            }
 
         case "focus":
             return withPane(workspace, words.first) { pane in
+                guard workspace.paneAlive(pane) else { return error("no pane with that id") }
                 workspace.activatePane(pane)
                 return ok()
             }
 
         case "focus-tab":
-            if let index = words.first.flatMap(Int.init) {
-                workspace.activateTab(index)
+            guard let word = words.first, let index = Int(word), workspace.tabs.indices.contains(index) else {
+                return error("no tab \(words.first ?? "")")
             }
+            workspace.activateTab(index)
             return ok()
 
         case "next-tab":
@@ -411,6 +411,7 @@ enum Control {
 
         case "clear":
             return withPane(workspace, words.first) { pane in
+                guard workspace.paneAlive(pane) else { return error("no pane with that id") }
                 workspace.clearPane(pane)
                 return ok()
             }
@@ -449,10 +450,9 @@ enum Control {
             }
 
         case "edit":
-            let named = words.first.flatMap { UInt64($0) }.map { PaneID($0) }
-            let pane = named ?? workspace.activePane
-            guard let pane else { return error("there is no pane to write in") }
-            return workspace.editLine(pane) ? ok() : error("no pane with that id")
+            return withPane(workspace, words.first) { pane in
+                workspace.editLine(pane) ? ok() : error("no pane with that id")
+            }
 
         case "type":
             let text = String(trimmed.drop(while: { !$0.isWhitespace }).dropFirst())
@@ -575,16 +575,10 @@ enum Control {
             return ok()
 
         case "clear-tab":
-            let index = words.first.flatMap(Int.init)
-            let tab: Tab?
-            if let index {
-                tab = workspace.tabs.indices.contains(index) ? workspace.tabs[index] : nil
-            } else {
-                tab = workspace.activeTab
+            return withTab(workspace, words.first) { tab in
+                workspace.nameTab(tab.id, "")
+                return ok()
             }
-            guard let tab else { return error("no tab \(String(describing: index))") }
-            workspace.nameTab(tab.id, "")
-            return ok()
 
         case "builtins":
             let builtIns = workspace.builtIns
@@ -832,6 +826,21 @@ enum Control {
         case .failed(let why):
             return ["state": "failed", "why": why]
         }
+    }
+
+    /// A tab index argument. A word that is not an open tab's index is an
+    /// error, never the active tab.
+    @MainActor
+    static func withTab(_ workspace: Workspace, _ named: String?, _ body: (Tab) -> String) -> String {
+        let tab: Tab?
+        if let named {
+            guard let index = Int(named), workspace.tabs.indices.contains(index) else { return error("no tab \(named)") }
+            tab = workspace.tabs[index]
+        } else {
+            tab = workspace.activeTab
+        }
+        guard let tab else { return error("there are no tabs") }
+        return body(tab)
     }
 
     @MainActor

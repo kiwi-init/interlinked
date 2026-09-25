@@ -7,6 +7,7 @@
   "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".note\"},{\"type\":\"min-text-length\",\"arg\":\"60\"}]}",
   "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".path-ad\"},{\"type\":\"matches-path\",\"arg\":\"/blocker/procedural\"}]}",
   "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".path-other\"},{\"type\":\"matches-path\",\"arg\":\"/elsewhere\"}]}",
+  "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".post\"},{\"type\":\"has-text\",\"arg\":\"Sponsored\"},{\"type\":\"css-selector\",\"arg\":\":not(.keep)\"}]}",
   "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".promo\"},{\"type\":\"has-text\",\"arg\":\"Promoted offer\"}],\"action\":{\"type\":\"remove\"}}",
   "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".slot\"},{\"type\":\"matches-css\",\"arg\":\"width: 300px\"}]}",
   "{\"selector\":[{\"type\":\"css-selector\",\"arg\":\".sticky\"}],\"action\":{\"type\":\"style\",\"arg\":\"position: static !important\"}}",

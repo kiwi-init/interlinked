@@ -98,14 +98,15 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          SIGNED: ${{ steps.signing.outputs.identity != '' }}
+          # Gatekeeper opens only a signed and notarized download.
+          NOTARIZED: ${{ steps.signing.outputs.identity != '' && env.NOTARY_KEY_PATH != '' }}
         run: |
           notes="$RUNNER_TEMP/notes.md"
           {
             echo "Requires macOS 26 on an Apple silicon Mac (M1 or later)."
             echo
-            if [ "$SIGNED" != "true" ]; then
-              echo "**This build is not signed or notarized.** macOS will refuse to open it until you right-click the app and choose Open."
+            if [ "$NOTARIZED" != "true" ]; then
+              echo "**This build is not notarized.** macOS will refuse to open it until you right-click the app and choose Open."
               echo
             fi
             echo "Jev features use your own OpenRouter key, added in Settings → Intelligence."

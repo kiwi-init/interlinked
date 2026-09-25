@@ -25,6 +25,11 @@ final class BlockerResourcesTests: XCTestCase {
         XCTAssertNil(BlockerResources.validated(try encode(good.map { $0.merging(["content": "not base64!"]) { $1 } })))
         XCTAssertNil(BlockerResources.validated(try encode(good.map { $0.merging(["kind": "script"]) { $1 } })))
         XCTAssertNil(BlockerResources.validated(try encode(good.map { $0.merging(["aliases": "one"]) { $1 } })))
+        // The engine reads a permission as one byte and rejects the whole list otherwise.
+        for permission: Any in [true, 256, -1, 1.5] {
+            XCTAssertNil(BlockerResources.validated(try encode(good.map { $0.merging(["permission": permission]) { $1 } })), "\(permission)")
+        }
+        XCTAssertNotNil(BlockerResources.validated(try encode(good.map { $0.merging(["permission": 1]) { $1 } })))
     }
 
     func testOversizedResourcesAreRefused() throws {

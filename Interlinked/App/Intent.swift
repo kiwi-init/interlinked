@@ -10,7 +10,9 @@ enum Intent {
         if page && hasAny(["new", "open", "another", "add"]) { return "new-tab" }
         if page && hasAny(["next", "forward"]) { return "next-tab" }
         if page && hasAny(["previous", "prev", "back", "last"]) { return "prev-tab" }
-        if hasAny(["close"]) && words.compactMap(number).isEmpty { return "close-tab" }
+        // Only the current tab closes by voice; "close tab two" is refused
+        // rather than read as "tab two".
+        if hasAny(["close"]) { return words.compactMap(number).isEmpty ? "close-tab" : nil }
         if hasAny(["clear", "erase"]) { return "clear" }
         if page {
             for pair in zip(words, words.dropFirst()) where ["tab", "page"].contains(pair.0) {

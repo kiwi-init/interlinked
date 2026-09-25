@@ -29,7 +29,9 @@ command -v cmake >/dev/null 2>&1 || { echo "error: Install CMake first." >&2; ex
 command -v ninja >/dev/null 2>&1 || { echo "error: Install Ninja first." >&2; exit 1; }
 /bin/mkdir -p "$root"
 
-if [ ! -d "$project/.git" ]; then
+if [ ! -f "$project/CMakeLists.txt" ]; then
+  # A fetch that failed part way leaves an empty repository; start over.
+  /bin/rm -rf "$project"
   git init -q "$project"
   git -C "$project" remote add origin https://github.com/chromiumembedded/cef-project.git
   git -C "$project" fetch -q --depth 1 origin "$cef_project_commit"

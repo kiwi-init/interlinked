@@ -64,11 +64,20 @@ enum BlockerResources {
         guard let name = resource["name"] as? String, !name.isEmpty,
               let content = resource["content"] as? String, Data(base64Encoded: content) != nil,
               strings("aliases"), strings("dependencies"),
-              resource["permission"] == nil || resource["permission"] is Int else { return false }
+              isPermission(resource["permission"]) else { return false }
         switch resource["kind"] {
         case let kind as [String: Any]: return kind["mime"] is String
         case let kind as String: return kind == "template"
         default: return false
         }
+    }
+
+    /// The engine reads a permission as one byte and drops the whole list over
+    /// anything else. JSON `true` would otherwise pass as the Int 1.
+    private static func isPermission(_ value: Any?) -> Bool {
+        guard let value else { return true }
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              !CFNumberIsFloatType(number) else { return false }
+        return (0...255).contains(number.intValue)
     }
 }

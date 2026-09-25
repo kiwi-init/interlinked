@@ -135,6 +135,23 @@ final class JevServiceTests: XCTestCase {
         for _ in 0..<2 { do { _ = try await service.decide(request); XCTFail() } catch { XCTAssertEqual(error as? JevError, .rateLimited) } }
         let calls = await fixture.calls; XCTAssertEqual(calls, 1)
     }
+    func testTheRelaysDailyLimitIsNotShownAsAOneMinutePause() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [JevURLProtocol.self]
+        var replies = 0
+        JevURLProtocol.handler = { request in
+            replies += 1
+            return (HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: ["Retry-After": "3600"])!,
+                    Data(#"{"error":"daily_limit"}"#.utf8))
+        }
+        defer { JevURLProtocol.handler = nil }
+        let provider = InterlinkedRelayJev(endpoint: URL(string: "https://relay.interlinked.test/v1/jev")!,
+                                           session: URLSession(configuration: configuration),
+                                           appTransaction: { "apple-signed-transaction" })
+        let service = JevService(provider: provider, cache: JevDecisionCache(file: nil))
+        for _ in 0..<2 { do { _ = try await service.decide(request); XCTFail() } catch { XCTAssertEqual(error as? JevError, .dailyLimit) } }
+        XCTAssertEqual(replies, 1)
+    }
     func testFullPageRequestsAreNotRejectedByLocalSizeOrQuestionCaps() async throws {
         let fixture = FixtureJev(), service = JevService(provider: fixture, cache: JevDecisionCache(file: nil))
         let fullPage = JevRequest(state: String(repeating: "Page content ", count: 50_000),
@@ -584,6 +601,16 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(PassageDecisions.shortlist(response, passages: passages).map(\.id), ["p1"])
         XCTAssertEqual(PassageDecisions.matches(response, passages: passages), [passages[0]])
         XCTAssertTrue(PassageDecisions.matches(JevResponse(answers: [:]), passages: passages).isEmpty)
+    }
+    func testRepeatedPassageIDsFromThePageKeepTheFirstPassage() throws {
+        // The page can replace the extraction bridge, so its IDs are untrusted.
+        let json = #"{"document":"d","url":"https://example.com/","passages":[{"id":"a","text":"first words of this passage"},{"id":"a","text":"second words of this passage"},{"id":"b","text":"third words of this passage"}]}"#
+        let extract = try JSONDecoder().decode(PageExtract.self, from: Data(json.utf8))
+        XCTAssertEqual(extract.passages.map(\.text), ["first words of this passage", "third words of this passage"])
+        let repeated = [PagePassage(id: "a", text: "one"), PagePassage(id: "a", text: "two")]
+        XCTAssertEqual(Set(PassageDecisions.scoreRequest(query: "q", passages: repeated).questions.keys), ["a"])
+        XCTAssertEqual(Set(PassageDecisions.readingRequest(repeated).questions.keys), ["a"])
+        XCTAssertEqual(Set(PassageDecisions.bestMatchRequest(query: "q", passages: repeated).questions.keys), ["best_match"])
     }
     func testIntentScoresRankSupportBeforeIncidentalWordStems() throws {
         let passages = [PagePassage(id: "body", text: "Recursos que ajudam nas fotos.", role: "passage"),

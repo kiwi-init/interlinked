@@ -442,7 +442,7 @@ final class Workspace {
         else if historyClearing { historyClearing = false }
         else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
-        else if assistance.panel != nil { assistance.closePanel() }
+        else if assistance.escapeCloses { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
         else if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
         else if editing != nil {
@@ -456,7 +456,7 @@ final class Workspace {
     /// Something Escape puts back. The page itself may hold focus, so the
     /// key monitor takes Escape for these rather than leaving it to SwiftUI.
     var escapeCloses: Bool {
-        usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.panel != nil || identityOpen
+        usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.escapeCloses || identityOpen
             || siteMenuSearching || siteMenuExpanded != nil || editing != nil || overviewOpen
     }
 
@@ -785,8 +785,8 @@ final class Workspace {
     }
 
     func activatePane(_ pane: PaneID) {
-        if activePane != pane { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.contains(pane) }) else { return }
+        if activePane != pane { assistance.changedTab() }
         active = index
         tabs[index].active = pane
         hosts.touch(pane)
@@ -799,6 +799,10 @@ final class Workspace {
         if identityOpen { closeIdentity() }
         if overviewOpen { overviewOpen = false }
         if quickSwitchOpen { quickSwitchOpen = false }
+        if pageHistoryOpen { pageHistoryOpen = false }
+        if downloads.panelOpen { downloads.closePanel() }
+        if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
+        if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
         if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
         hosts.touch(pane)
         if activePane != pane {
@@ -816,8 +820,13 @@ final class Workspace {
         }
         if activePane == target { assistance.changedTab() }
         guard let index = tabs.firstIndex(where: { $0.contains(target) }) else { return false }
+        // Closing the split ends a scene; the next one may open its own page.
+        var advanced = false
+        defer { if advanced { prepareOnboardingScene() } }
         if tabs[index].isSplit, let pane = onboarding.pane, tabs[index].contains(pane) {
+            let before = onboarding.progress
             onboarding.record(.closedPane)
+            advanced = onboarding.progress != before
         }
         rememberClosed(target, name: tabs[index].isSplit ? nil : tabs[index].name)
         if tabs[index].close(target) {
@@ -924,7 +933,7 @@ final class Workspace {
             activatePane(pane)
             return
         }
-        if onboarding.progress.done.isEmpty { switchOffOnboardingFeatures() }
+        if onboarding.startsFresh { switchOffOnboardingFeatures() }
         let pane = takePane()
         tabs.insert(Tab(id: TabID(nextTab), pane: pane), at: 0)
         nextTab += 1
@@ -1275,6 +1284,8 @@ final class Workspace {
         commitLine()
         overviewOpen = false
         identityOpen = false
+        pageHistoryOpen = false
+        downloads.closePanel()
         editing = LineEdit(target: target, text: text,
                            original: target.pane == nil ? nil : text)
     }

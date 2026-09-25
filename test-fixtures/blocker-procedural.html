@@ -3,7 +3,7 @@
 <title>Procedural filters: checking</title>
 <style>
   body { font: 15px/1.4 -apple-system, system-ui, sans-serif; margin: 32px; max-width: 720px; }
-  .card, .wrap, .slot, .note, .box, .path-ad, .path-other, .promo, .sticky, .banner, [data-xpath] {
+  .card, .post, .wrap, .slot, .note, .box, .path-ad, .path-other, .promo, .sticky, .banner, [data-xpath] {
     border: 1px solid #bbb; border-radius: 8px; margin: 8px 0; padding: 8px 12px;
   }
   .sticky { position: sticky; top: 0; background: #fff; }
@@ -17,6 +17,9 @@
 
 <div class="card" id="has-text-ad">Sponsored: a watch you did not ask for</div>
 <div class="card" id="has-text-plain">A story about rivers</div>
+
+<div class="post" id="css-after-operator-ad"><span>Sponsored post</span></div>
+<div class="post keep" id="css-after-operator-plain"><span id="css-after-operator-plain-text">Sponsored, and kept</span></div>
 
 <div class="wrap" id="upward-selector-ad"><div><span class="label">Advertisement</span></div></div>
 <div class="wrap" id="upward-selector-plain"><div><span class="label">Advertisement feature, by our editors</span></div></div>
@@ -67,6 +70,9 @@
   const checks = {
     'has-text': () => !shown('has-text-ad') && shown('has-text-plain'),
     'has-text after load': () => !shown('late-ad'),
+    // `:not(.keep)` narrows the posts themselves; it does not look inside them.
+    'css after an operator': () => !shown('css-after-operator-ad') && shown('css-after-operator-plain')
+      && shown('css-after-operator-plain-text'),
     'upward selector': () => !shown('upward-selector-ad') && shown('upward-selector-plain'),
     'upward count': () => !shown('upward-count-ad') && shown('upward-count-plain'),
     'matches-css': () => !shown('matches-css-ad') && shown('matches-css-plain'),
