@@ -128,6 +128,8 @@ final class WebKitPage: NSObject {
     private var certificateErrorReported = false
     /// Error pages are not documents the rest of Interlinked reads.
     private var errorPage: WKNavigation?
+    /// A person edited something in a frame since the page last committed.
+    private(set) var frameEdited = false
     private var errorPageURL: URL?
     /// The sign-in sheet a load is waiting on.
     private var signIn: NSAlert?
@@ -157,6 +159,8 @@ final class WebKitPage: NSObject {
         #endif
         nativeView.configuration.userContentController.addScriptMessageHandler(
             CosmeticsReplies(page: self), contentWorld: ContentBlocker.cosmeticsWorld, name: ContentBlocker.cosmeticsHandler)
+        nativeView.configuration.userContentController.add(
+            FrameEdits(page: self), contentWorld: Self.editsWorld, name: BrowserDiscardProbe.frameEditHandler)
         observations = [
             nativeView.observe(\.url) { [weak self] _, _ in MainActor.assumeIsolated { self?.changed() } },
             nativeView.observe(\.title) { [weak self] _, _ in MainActor.assumeIsolated { self?.changed() } },
@@ -205,15 +209,18 @@ final class WebKitPage: NSObject {
     static let editsWorld = WKContentWorld.world(name: "interlinked-edits")
 
     /// Whether the page can sleep without losing anything, from the world
-    /// that saw what the person changed.
-    func evaluateDiscardProbe(completion: @escaping (Any?, Error?) -> Void) {
+    /// that saw what the person changed. Nil when the page doesn't answer.
+    func evaluateDiscardProbe(completion: @escaping (BrowserDiscardProbe?) -> Void) {
         Task {
-            do {
-                completion(try await nativeView.callAsyncJavaScript("return \(BrowserDiscardProbe.script);",
-                                                                     contentWorld: Self.editsWorld), nil)
-            } catch { completion(nil, error) }
+            let value = try? await nativeView.callAsyncJavaScript("return \(BrowserDiscardProbe.script);",
+                                                                 contentWorld: Self.editsWorld)
+            guard var probe = BrowserDiscardProbe.decode(value) else { return completion(nil) }
+            if frameEdited { probe.safe = false }
+            completion(probe)
         }
     }
+
+    func noteFrameEdit() { frameEdited = true }
 
     func find(_ text: String, backwards: Bool, findNext: Bool = true, completion: @escaping (Bool) -> Void) {
         let configuration = WKFindConfiguration()
@@ -274,7 +281,7 @@ final class WebKitPage: NSObject {
         let controller = nativeView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(source: BrowserDiscardProbe.recordEdits, injectionTime: .atDocumentStart,
-                                              forMainFrameOnly: true, in: Self.editsWorld))
+                                              forMainFrameOnly: false, in: Self.editsWorld))
         if sharingScreenShield {
             controller.addUserScript(WKUserScript(source: SharingScreenShield.script, injectionTime: .atDocumentStart,
                                                   forMainFrameOnly: false, in: .page))
@@ -397,6 +404,20 @@ final class WebKitPage: NSObject {
             done(url)
         }
         if let window { panel.beginSheetModal(for: window, completionHandler: finish) } else { panel.begin(completionHandler: finish) }
+    }
+}
+
+/// A frame's first edit by a person. The discard probe reads only the main
+/// frame, so this keeps the page awake until it navigates.
+@MainActor
+private final class FrameEdits: NSObject, WKScriptMessageHandler {
+    weak var page: WebKitPage?
+
+    init(page: WebKitPage) { self.page = page }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard !message.frameInfo.isMainFrame else { return }
+        page?.noteFrameEdit()
     }
 }
 
@@ -526,6 +547,7 @@ extension WebKitPage: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         provisional = false
         redirected = false
+        frameEdited = false
         dismissSignIn()
         committedURL = webView.url
         delegate?.pageDidCommit(self)

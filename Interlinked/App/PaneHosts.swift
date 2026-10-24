@@ -316,8 +316,8 @@ final class PaneHosts {
         let answer = DiscardProbeAnswer()
         return await withCheckedContinuation { continuation in
             answer.continuation = continuation
-            page.evaluateDiscardProbe { value, error in
-                MainActor.assumeIsolated { answer.finish(error == nil ? BrowserDiscardProbe.decode(value) : nil) }
+            page.evaluateDiscardProbe { probe in
+                MainActor.assumeIsolated { answer.finish(probe) }
             }
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))

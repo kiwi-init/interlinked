@@ -44,17 +44,31 @@ struct BrowserDiscardProbe: Decodable, Equatable {
     var safe: Bool
     var scrollY: Double
 
+    /// Where a frame reports that a person edited something in it.
+    static let frameEditHandler = "interlinkedFrameEdit"
+
     /// Runs at document start in its own script world, out of the page's
     /// reach: remembers the fields a person changed. Values a page's own
-    /// scripts set are not anyone's unsaved work.
+    /// scripts set are not anyone's unsaved work. The check below reads only
+    /// the main frame, so other frames report their first edit instead.
     static let recordEdits = #"""
     (() => {
       const edited = new Set();
       globalThis.__interlinkedEdited = edited;
-      // composedPath reaches a field inside an open shadow root.
+      const inFrame = window !== window.top;
+      let reported = false;
       const note = event => {
+        // composedPath reaches a field inside an open shadow root.
         const target = event.composedPath()[0];
-        if (event.isTrusted && target instanceof Element) edited.add(target);
+        if (!event.isTrusted || !(target instanceof Element)) return;
+        // A field the page removed is nobody's unsaved work, and holding it
+        // would keep it alive.
+        for (const element of edited) if (!element.isConnected) edited.delete(element);
+        edited.add(target);
+        if (inFrame && !reported) {
+          reported = true;
+          globalThis.webkit?.messageHandlers?.\#(frameEditHandler)?.postMessage(true);
+        }
       };
       addEventListener('input', note, true);
       addEventListener('change', note, true);
