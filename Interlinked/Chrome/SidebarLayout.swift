@@ -2,12 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The conventional layout: open pages down a sidebar, a toolbar above the
-/// page, and nothing over the page itself. Each group morphs in place: the
-/// sidebar into History or Downloads, the address field into results or the
-/// site's connection, and the toolbar's tools into Find.
+/// page, and nothing over the page itself. The sidebar and toolbar sit flush
+/// on the window's tint, and the page is the only card. Each group morphs in
+/// place: the sidebar into History or Downloads, the address field into
+/// results or the site's connection, and the toolbar's tools into Find.
 struct SidebarLayout<Page: View>: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     var palette: Palette
     @ViewBuilder var page: () -> Page
     /// The width while the divider is dragged, before it settles.
@@ -31,6 +33,12 @@ struct SidebarLayout<Page: View>: View {
             ZStack(alignment: .top) {
                 page()
                     .clipShape(RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous))
+                    // A dark page on a dark tint still shows where it ends.
+                    .overlay {
+                        RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
+                            .strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
+                            .allowsHitTesting(false)
+                    }
                     .padding(.top, SidebarMetrics.toolbar)
                     .padding([.trailing, .bottom], 8)
                     .padding(.leading, workspace.sidebarCollapsed ? 8 : 0)
@@ -86,8 +94,9 @@ enum SidebarMetrics {
     static let row: CGFloat = 30
     static let icon: CGFloat = 20
     static let control: CGFloat = 32
-    /// The sidebar's and the page's corners.
-    static let radius: CGFloat = 16
+    /// The page's corners: 8 pt in from the window's 16 pt corners, so the two
+    /// curves run parallel, and the same as the sidebar's rows.
+    static let radius: CGFloat = 8
 }
 
 // MARK: - Sidebar
@@ -173,7 +182,6 @@ private struct TabSidebar: View {
         .font(.system(size: 12))
         .foregroundStyle(palette.text)
         .frame(maxHeight: .infinity, alignment: .top)
-        .modifier(PageGlass(radius: SidebarMetrics.radius))
         .animation(reduceMotion ? nil : Metrics.morph, value: historyOpen)
         .animation(reduceMotion ? nil : Metrics.morph, value: downloadsOpen)
     }
@@ -420,9 +428,7 @@ private struct PageToolbar: View {
                 }
                 .disabled(workspace.currentPageURL == nil)
             }
-            .padding(.horizontal, 4)
             .frame(height: SidebarMetrics.control)
-            .modifier(PageGlass(radius: SidebarMetrics.control / 2))
 
             AddressField(palette: palette)
 
@@ -430,6 +436,7 @@ private struct PageToolbar: View {
                 if finding {
                     ToolbarFindField(palette: palette)
                         .frame(width: 320)
+                        .background(palette.hover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 } else {
                     HStack(spacing: 0) {
                         control("Find for me", symbol: "magnifyingglass", id: "page-search-button",
@@ -441,11 +448,9 @@ private struct PageToolbar: View {
                                 id: "split-view-button", action: workspace.toggleSplitView)
                             .help(workspace.isSplit ? "Move the other page to its own tab · ⌘\\" : "Split view · ⌘\\")
                     }
-                    .padding(.horizontal, 4)
                 }
             }
             .frame(height: SidebarMetrics.control)
-            .modifier(PageGlass(radius: SidebarMetrics.control / 2))
         }
         .buttonStyle(.pointing)
         .foregroundStyle(palette.text)
@@ -467,10 +472,7 @@ private struct PageToolbar: View {
         let url = pane.flatMap(workspace.hosts.existingBrowser)?.url
         if let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             ShareLink(item: url) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: SidebarMetrics.control, height: SidebarMetrics.control)
-                    .contentShape(Rectangle())
+                ToolbarIcon(symbol: "square.and.arrow.up", palette: palette)
             }
             .buttonStyle(.pointing)
             .accessibilityLabel("Share page")
@@ -485,13 +487,61 @@ private struct PageToolbar: View {
 
     private func control(_ label: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .frame(width: SidebarMetrics.control, height: SidebarMetrics.control)
-                .contentShape(Rectangle())
+            ToolbarIcon(symbol: symbol, palette: palette)
         }
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
+    }
+}
+
+/// A toolbar button's icon. With no pill around it, a highlight under the
+/// pointer shows what a click will hit.
+private struct ToolbarIcon: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+    var symbol: String
+    var palette: Palette
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: SidebarMetrics.control, height: SidebarMetrics.control)
+            .background(hovering && isEnabled ? palette.hover : .clear,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+    }
+}
+
+/// The address field's surface: nothing at rest, a field under the pointer or
+/// while typing, and a solid panel once it opens over the page. Like
+/// `PageGlass`, it claims its empty space, so the page under an open panel
+/// never gets the click.
+private struct AddressSurface: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+    var open: Bool
+    var highlighted: Bool
+    var palette: Palette
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: open ? 12 : 8, style: .continuous)
+        content
+            .background {
+                if open {
+                    shape.fill(palette.panel).shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+                } else if highlighted {
+                    shape.fill(palette.hover)
+                }
+            }
+            .overlay {
+                if open {
+                    shape.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(shape)
+            .onTapGesture { }
+            .background(PageControlRegion(radius: open ? 12 : 8))
     }
 }
 
@@ -501,6 +551,7 @@ private struct AddressField: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var palette: Palette
+    @State private var hovering = false
 
     private var origin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
     private var results: [SearchResult] { workspace.editing == nil ? [] : workspace.searchResults }
@@ -522,8 +573,7 @@ private struct AddressField: View {
                         .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
                         .padding(.horizontal, 6)
                         .frame(height: 22)
-                        .background(palette.text.opacity(0.07), in: Capsule())
-                        .contentShape(Capsule())
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.pointing)
                     .help(origin.fullURL)
@@ -558,7 +608,8 @@ private struct AddressField: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .modifier(PageGlass(radius: open ? 16 : SidebarMetrics.control / 2))
+        .modifier(AddressSurface(open: open, highlighted: hovering || workspace.editing != nil, palette: palette))
+        .onHover { hovering = $0 }
         .animation(reduceMotion ? nil : Metrics.morph, value: open)
     }
 
