@@ -70,9 +70,7 @@ struct PagePortraitCache {
     }
 
     private static var defaultFile: URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Interlinked", isDirectory: true)
-            .appendingPathComponent("PagePortraits.json")
+        AppData.url("PagePortraits.json")
     }
 
     private static func load(_ file: URL) -> [String: Entry]? {

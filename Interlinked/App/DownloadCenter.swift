@@ -30,9 +30,7 @@ final class DownloadCenter {
     @ObservationIgnored private let storageURL: URL
 
     init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Interlinked", isDirectory: true)
-        storageURL = base.appendingPathComponent("downloads.json")
+        storageURL = AppData.url("downloads.json")
         if let data = try? Data(contentsOf: storageURL),
            let saved = try? JSONDecoder().decode([DownloadRecord].self, from: data) {
             records = saved.map { record in

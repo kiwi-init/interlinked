@@ -319,9 +319,8 @@ final class Workspace {
         Workspace.shared = self
         ChromeCursor.install()
         // Vault, favorites, and bookmarks were removed. Nothing reads their files.
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        for file in ["Interlinked/vault.json", "Interlinked/saved-sites.json"] {
-            try? FileManager.default.removeItem(at: support.appendingPathComponent(file))
+        for file in ["vault.json", "saved-sites.json"] {
+            try? FileManager.default.removeItem(at: AppData.url(file))
         }
         UserDefaults.standard.removeObject(forKey: "newTab.savedSites")
         // Critical Reading, Interlinked Menus, the prompts of other removed

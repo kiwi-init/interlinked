@@ -32,8 +32,7 @@ final class PageBuiltIns {
         darkMode = defaults.string(forKey: PageDarkMode.defaultsKey).flatMap(PageDarkMode.init) ?? .system
         unblockedSites = Set(defaults.stringArray(forKey: "builtins.unblockedSites") ?? [])
         lightSites = Set(defaults.stringArray(forKey: "builtins.lightSites") ?? [])
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Interlinked", isDirectory: true)
+        let directory = AppData.directory
         // blocker-engine.dat was built before the engine parsed procedural
         // filters and holds them as plain selectors, so it is rebuilt.
         cacheURL = directory.appendingPathComponent("blocker-engine-2.dat")

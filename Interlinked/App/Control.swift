@@ -82,11 +82,7 @@ enum Control {
         if let named = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"], !named.isEmpty {
             return named
         }
-        if let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            return base.appendingPathComponent("Interlinked/control/control.sock").path
-        }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return (home as NSString).appendingPathComponent("Library/Application Support/Interlinked/control/control.sock")
+        return AppData.url("control/control.sock").path
     }
 
     @MainActor

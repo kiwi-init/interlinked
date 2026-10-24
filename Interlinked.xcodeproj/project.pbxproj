@@ -23,6 +23,7 @@
 		24AE203B56D92B956828F228 /* SearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F8EFAB43CDC12373AADE8AA /* SearchProvider.swift */; };
 		2607C4EB3506CD53B0572477 /* NavigationSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CE8C070DD6BDDD3ED213AB1 /* NavigationSafety.swift */; };
 		2674B3B0B8902C6B834FD851 /* ContentBlocker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D07960E52104FC4B6A1F33F /* ContentBlocker.swift */; };
+		2B7680CFACF2AD4EA5FA09D8 /* AppData.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18E21D703ECFE67F32F65AF /* AppData.swift */; };
 		2D797F32E7AD5871F7DA748C /* PageBuiltInsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E27DBE4C6497D5849F0D0C0 /* PageBuiltInsModel.swift */; };
 		31B7A18957533111E7B4308F /* IntelligencePrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F722C2CE8787D712EA89FBAD /* IntelligencePrompts.swift */; };
 		32F4ED8A9DE3BF8984EA2EEC /* EmptyPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A852C28AA2A3D36F8F4311 /* EmptyPaneView.swift */; };
@@ -121,6 +122,7 @@
 		F4DC81584BF731BF009814F2 /* BrowserIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 278B9EAC8B38D47773A90C92 /* BrowserIntelligence.swift */; };
 		F62C07309719A7703C2E8C93 /* BrowserPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE2ECB2A4F4B5B8EE6C36B88 /* BrowserPrompts.swift */; };
 		F8549824CCE6DD7169346B04 /* Pane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435F2450025DF29A3A41E8BD /* Pane.swift */; };
+		FD367ACE1FBA74A26ED1C3B7 /* AppData.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18E21D703ECFE67F32F65AF /* AppData.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -198,6 +200,7 @@
 		AE41D915569F8E761096FE88 /* InterlinkedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InterlinkedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF23C32C661C86B47490AAEF /* Interlinked-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Interlinked-Bridging-Header.h"; sourceTree = "<group>"; };
 		AFADE67B9AF91C38B05E8AEF /* BrowsingHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowsingHistory.swift; sourceTree = "<group>"; };
+		B18E21D703ECFE67F32F65AF /* AppData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppData.swift; sourceTree = "<group>"; };
 		B63EB836F6676C9EF6F19FA0 /* WebKitPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebKitPage.swift; sourceTree = "<group>"; };
 		C016F79385A15E33505B5E88 /* FaviconDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconDownload.swift; sourceTree = "<group>"; };
 		C2F3550BDFB88FDDAC2AB788 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -330,6 +333,7 @@
 			isa = PBXGroup;
 			children = (
 				89DD8E4FB48299D932467656 /* AIContentGrants.swift */,
+				B18E21D703ECFE67F32F65AF /* AppData.swift */,
 				785DD5FB578C7FFB773534BC /* AssistancePreferences.swift */,
 				DC2C304AE97386CBE2718D7C /* BlockerResources.swift */,
 				278B9EAC8B38D47773A90C92 /* BrowserIntelligence.swift */,
@@ -596,6 +600,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				53879A6B7F1FD3FB752E6AB0 /* AIContentGrants.swift in Sources */,
+				2B7680CFACF2AD4EA5FA09D8 /* AppData.swift in Sources */,
 				980A41313BF0A554E924186C /* AssistancePreferences.swift in Sources */,
 				BADAF8399DDAA885E3CA544E /* BlockerCosmeticsTests.swift in Sources */,
 				C5E5FECF8D50433BA3821F04 /* BlockerResources.swift in Sources */,
@@ -663,6 +668,7 @@
 			files = (
 				A96FE7083C5AD46279F0E305 /* AIContentGrants.swift in Sources */,
 				5174FD5A88B87F46C74D5FE8 /* AboutView.swift in Sources */,
+				FD367ACE1FBA74A26ED1C3B7 /* AppData.swift in Sources */,
 				CCD32DD71486175DEF4B84DA /* AssistancePreferences.swift in Sources */,
 				4900B9793E32345DC85DDEF2 /* AssistanceView.swift in Sources */,
 				83AAD1A7E7995BA8ED4F6531 /* BlockerResources.swift in Sources */,

@@ -152,10 +152,7 @@ struct Session: Codable {
         if let named = ProcessInfo.processInfo.environment["INTERLINKED_SESSION"] {
             return URL(fileURLWithPath: named)
         }
-        guard let home = FileManager.default.homeDirectoryForCurrentUser as URL? else { return nil }
-        return home
-            .appendingPathComponent("Library/Application Support/Interlinked")
-            .appendingPathComponent("session.json")
+        return AppData.url("session.json")
     }
 
     static func backupPath(for path: URL) -> URL {

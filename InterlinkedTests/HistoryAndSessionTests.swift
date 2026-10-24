@@ -329,3 +329,36 @@ final class SessionStateTests: XCTestCase {
         }
     }
 }
+
+final class AppDataTests: XCTestCase {
+    private let support = URL(fileURLWithPath: "/Users/someone/Library/Application Support")
+
+    func testOnlyTheAppYouUseKeepsTheUsualFolder() {
+        XCTAssertEqual(AppData.directory(bundleID: "computer.interlinked", environment: [:], support: support).lastPathComponent,
+                       "Interlinked")
+        XCTAssertEqual(AppData.directory(bundleID: "computer.interlinked.isolated", environment: [:], support: support).lastPathComponent,
+                       "Interlinked.isolated")
+        XCTAssertEqual(AppData.directory(bundleID: "com.apple.dt.xctest.tool", environment: [:], support: support).lastPathComponent,
+                       "Interlinked (com.apple.dt.xctest.tool)")
+        XCTAssertEqual(AppData.directory(bundleID: nil, environment: [:], support: support).lastPathComponent,
+                       "Interlinked (unknown)")
+        // Not a suffix of the app's own ID, so not mistaken for one of its builds.
+        XCTAssertEqual(AppData.directory(bundleID: "computer.interlinkedx", environment: [:], support: support).lastPathComponent,
+                       "Interlinked (computer.interlinkedx)")
+    }
+
+    func testACopyWithAHomeOfItsOwnKeepsTheUsualNameThere() {
+        let isolated = URL(fileURLWithPath: "/tmp/data/Library/Application Support")
+        XCTAssertEqual(AppData.directory(bundleID: "computer.interlinked.perf", environment: ["CFFIXED_USER_HOME": "/tmp/data"],
+                                         support: isolated).path,
+                       "/tmp/data/Library/Application Support/Interlinked")
+        XCTAssertEqual(AppData.directory(bundleID: "computer.interlinked.perf", environment: ["CFFIXED_USER_HOME": ""],
+                                         support: support).lastPathComponent,
+                       "Interlinked.perf")
+    }
+
+    func testTheControlSocketFitsInAUnixSocketPathForALongSuffix() {
+        let folder = AppData.directory(bundleID: "computer.interlinked.isolated-uitests", environment: [:], support: support)
+        XCTAssertLessThan(folder.appendingPathComponent("control/control.sock").path.utf8.count, 104)
+    }
+}

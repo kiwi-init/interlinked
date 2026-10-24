@@ -95,8 +95,7 @@ final class BrowserHistoryStore {
         defaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
-        self.file = file ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Interlinked/history.json")
+        self.file = file ?? AppData.url("history.json")
         writer = BrowserHistoryWriter(file: self.file)
         self.retention = retention
         self.defaults = defaults
