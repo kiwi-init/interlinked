@@ -944,11 +944,16 @@ final class Workspace {
     }
 
     /// Leaves split view without losing a page: the pane beside the focused
-    /// one moves to its own tab, right after this one.
+    /// one moves to its own tab, right after this one. A focused page that
+    /// is still empty just closes, so Split View twice leaves the tab as it was.
     func unsplit() {
         guard let tab = activeTab, let other = tab.otherPane, let pane = activePane else { return }
         if editing != nil { discardLine() }
         tabs[active].close(other)
+        if !surfaces.holdsPage(pane), surfaces.holdsPage(other), !onboarding.contains(pane) {
+            _ = closePane(pane)
+            return
+        }
         tabs[active].active = pane
         tabs.insert(Tab(id: TabID(nextTab), pane: other), at: active + 1)
         nextTab += 1
