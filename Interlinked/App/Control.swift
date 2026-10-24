@@ -789,10 +789,11 @@ final class ControlServer {
             while self?.running == true {
                 let client = accept(fd, nil, nil)
                 if client < 0 {
+                    let failure = errno
                     guard self?.running == true else { break }
                     // Out of file descriptors, the pending connection stays
                     // queued: wait rather than spin on it.
-                    if errno != EINTR && errno != ECONNABORTED { usleep(50_000) }
+                    if failure != EINTR && failure != ECONNABORTED { usleep(50_000) }
                     continue
                 }
                 // Handle each client off the accept thread so one slow or
