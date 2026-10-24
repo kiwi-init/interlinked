@@ -50,18 +50,6 @@ struct SplitLayout: View {
                                 .transition(.opacity)
                         }
                     }
-                    .overlay(alignment: .top) {
-                        // The menu belongs to the focused page and centers on it.
-                        if pane == tab.active, workspace.siteMenu != nil {
-                            GeometryReader { geometry in
-                                let margin: CGFloat = panes.count > 1 ? 40 : 160
-                                SiteMenuBar(palette: palette, available: geometry.size, margin: margin)
-                                    .padding(.top, 18)
-                                    .padding(.horizontal, margin)
-                                    .frame(maxWidth: .infinity, alignment: .top)
-                            }
-                        }
-                    }
                     .animation(.easeOut(duration: 0.15), value: tab.active)
             }
         }
@@ -169,7 +157,6 @@ struct BrowserPage: View {
     @Environment(Workspace.self) private var workspace
     var pane: PaneID
     var palette: Palette
-    @State private var pageSize: CGSize = .zero
 
     var body: some View {
         Group {
@@ -186,12 +173,6 @@ struct BrowserPage: View {
                     .simultaneousGesture(TapGesture().onEnded { workspace.clickPane(pane) })
             } else {
                 BrowserPane(pane: pane)
-                    // A resize can make the site redraw its header.
-                    .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                        defer { pageSize = size }
-                        guard pageSize.width > 0, pageSize != size else { return }
-                        workspace.paneResized(pane)
-                    }
             }
         }
         .background(palette.pane)

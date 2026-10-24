@@ -596,7 +596,7 @@ private struct AILabel: View {
 
 /// A restrained version of the Apple Intelligence spectrum glow. It hugs a
 /// glass panel only while an AI-refined result is being revealed: the page
-/// label on the handle, or a freshly read site menu.
+/// label on the handle.
 struct AILabelGlow: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var effect: AILabelEffect?
@@ -628,8 +628,7 @@ struct AILabelGlow: ViewModifier {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
-        // A panel can be created by the same result that lights it up — the
-        // site menu appears only once its contents have been read — so the
+        // A panel can be created by the same result that lights it up, so the
         // effect has to be honored on arrival as well as on change.
         .onAppear { reveal(effect) }
         .onChange(of: effect) { _, update in reveal(update) }

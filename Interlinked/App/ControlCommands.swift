@@ -371,7 +371,6 @@ extension Control {
     static func value(_ setting: ControlSetting, _ workspace: Workspace) -> Any {
         let assistant = workspace.assistance
         switch setting {
-        case .siteMenu: return workspace.usesSiteMenu
         case .usefulAddress: return workspace.usefulInfo.showsAddress
         case .usefulContact: return workspace.usefulInfo.showsContact
         case .blocking: return workspace.builtIns.blockingEnabled
@@ -394,7 +393,6 @@ extension Control {
     static func set(_ setting: ControlSetting, _ value: ControlSetting.Value, _ workspace: Workspace) -> String? {
         let assistant = workspace.assistance
         switch (setting, value) {
-        case (.siteMenu, .bool(let on)): workspace.usesSiteMenu = on
         case (.usefulAddress, .bool(let on)): workspace.usefulInfo.showsAddress = on
         case (.usefulContact, .bool(let on)): workspace.usefulInfo.showsContact = on
         case (.blocking, .bool(let on)): workspace.builtIns.blockingEnabled = on

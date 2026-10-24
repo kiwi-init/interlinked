@@ -32,7 +32,6 @@ enum Control {
         "identity [show|hide|toggle]",
         "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
-        "site-menu [state|search|close|home|enable|disable|page|more|item ID|submit QUERY|restore]",
         "new-page",
         "new-page-beside",
         "reopen-closed-tab",
@@ -70,7 +69,6 @@ enum Control {
         "assistance-state",
         "identity",
         "measure-frames [pane]",
-        "site-menu",
         "useful-info",
         "find",
         "share-page",
@@ -202,73 +200,6 @@ enum Control {
                 "running": true,
                 "application_class": NSStringFromClass(type(of: NSApp)),
                 "active_pages": workspace.tabs.filter { workspace.hosts.existingBrowser($0.active) != nil }.count,
-            ])
-
-        case "site-menu":
-            switch words.first {
-            case "search": workspace.beginSiteMenuSearch()
-            case "close": workspace.collapseSiteMenuChrome()
-            case "home": workspace.goSiteHome()
-            case "page":
-                // Writes what the page shows at the top, to check for a doubled header.
-                guard let view = workspace.activePane.flatMap(workspace.hosts.existingBrowser) else { return error("no loaded web page") }
-                Task { @MainActor in
-                    let report = try? await view.evaluateJavaScript("""
-                    (() => {
-                      const hidden = [...document.querySelectorAll('[data-interlinked-site-menu]')]
-                        .filter(n => n.isConnected && getComputedStyle(n).visibility === 'hidden').length;
-                      const shown = [...document.querySelectorAll('a[href],button')].filter(el => {
-                        const r = el.getBoundingClientRect(), s = getComputedStyle(el);
-                        return r.bottom > 0 && r.top < 120 && r.width > 0 && s.visibility !== 'hidden' && s.display !== 'none';
-                      }).map(el => (el.innerText || '').trim()).filter(Boolean).slice(0, 12);
-                      return {hidden, siteLinksAtTop: shown};
-                    })()
-                    """)
-                    let output = ProcessInfo.processInfo.environment["INTERLINKED_SITE_MENU_REPORT"] ?? "/tmp/interlinked-site-menu-report.json"
-                    try? json(["report": report ?? NSNull()]).write(toFile: output, atomically: true, encoding: .utf8)
-                }
-                return ok()
-            case "enable": workspace.usesSiteMenu = true
-            case "disable": workspace.usesSiteMenu = false
-            case "more":
-                guard workspace.siteMenu != nil else { return error("this page has no site menu") }
-                workspace.siteMenuExpanded = SiteMenuItem.moreID
-            case "item":
-                // By id, or by label as the bar shows it.
-                let named = words.dropFirst().joined(separator: " ")
-                let items = workspace.siteMenu.map { $0.items + $0.items.flatMap(\.children) } ?? []
-                guard let item = items.first(where: { $0.id == named })
-                        ?? items.first(where: { $0.label.caseInsensitiveCompare(named) == .orderedSame }) else {
-                    return error("no site menu item '\(named)'")
-                }
-                workspace.activateSiteMenuItem(item)
-            case "submit":
-                guard workspace.siteMenu?.search != nil else { return error("this site menu has no search") }
-                workspace.submitSiteSearch(words.dropFirst().joined(separator: " "))
-            case "restore":
-                workspace.restoreSiteHeader()
-            case "state", nil: break
-            default: return error("site-menu takes state, search, close, home, enable, disable, page, more, item ID, submit QUERY, or restore")
-            }
-            guard let menu = workspace.siteMenu else {
-                return json(["shown": false, "uses_site_menu": workspace.usesSiteMenu])
-            }
-            return json([
-                "shown": true,
-                "uses_site_menu": workspace.usesSiteMenu,
-                "home": menu.home,
-                "name": menu.name,
-                "replaces_chrome": menu.replacesChrome,
-                "searching": workspace.siteMenuSearching,
-                "expanded": workspace.siteMenuExpanded ?? "",
-                "effect": workspace.siteMenuEffect != nil,
-                "search": menu.search.map {
-                    ["action": $0.action, "query_param": $0.queryParam, "placeholder": $0.placeholder]
-                } ?? [:],
-                "items": menu.items.map { item in
-                    ["id": item.id, "label": item.label, "href": item.href, "current": item.current,
-                     "children": item.children.map { ["id": $0.id, "label": $0.label, "href": $0.href] }] as [String: Any]
-                },
             ])
 
         case "assistance-state":
@@ -703,11 +634,6 @@ enum Control {
             "quick_switch": workspace.quickSwitchOpen,
             "page_tool": panelName(workspace.assistance.panel),
             "contact_open": workspace.usefulInfo.contactOpen,
-            "site_menu": [
-                "shown": workspace.siteMenu != nil,
-                "expanded": workspace.siteMenuExpanded ?? NSNull(),
-                "searching": workspace.siteMenuSearching,
-            ] as [String: Any],
             "onboarding": workspace.onboarding.pane != nil,
             "settings_window": settingsWindow()?.isVisible ?? false,
             "sharing_screen_mode": workspace.sharingScreenMode,

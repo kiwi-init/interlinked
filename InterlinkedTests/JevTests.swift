@@ -38,7 +38,6 @@ private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
         guard let label, let clean = PageLabels.generated(label) else { return nil }
         return PagePortrait(label: clean, about: about ?? "About \(clean)")
     }
-    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { true }
 }
 
 private final class JevURLProtocol: URLProtocol {

@@ -326,7 +326,6 @@ final class BrowserCoordinator: WebKitPageDelegate {
         if effects.contains(.newDocument) {
             workspace.assistance.committed(pane)
             workspace.usefulInfo.committed(pane)
-            workspace.noteSiteMenuDocumentChanged(pane)
             workspace.noteDocumentChanged(pane, url: page.url)
         }
         if effects.contains(.newAddress) { workspace.builtIns.apply(to: page) }
@@ -353,7 +352,6 @@ final class BrowserCoordinator: WebKitPageDelegate {
         workspace?.assistance.loaded(pane, page: page)
         workspace?.usefulInfo.loaded(pane, page: page)
         workspace?.browserHistory.record(page.url, title: page.title)
-        workspace?.captureSiteMenu(pane)
     }
 
     func page(_ page: WebKitPage, didFail message: String) { update(page) }
