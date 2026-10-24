@@ -173,7 +173,6 @@ enum BrowserPrompts {
 
     static func confirmNavigation(
         _ review: NavigationReview,
-        advice: String?,
         store: NavigationExceptionStore,
         window: NSWindow?
     ) async -> Bool {
@@ -184,7 +183,6 @@ enum BrowserPrompts {
         var details = ["Destination: \(review.destinationOrigin)"]
         if let source = review.sourceOrigin { details.append("From: \(source)") }
         details.append(contentsOf: review.reasons.map(\.rawValue))
-        if let advice, !advice.isEmpty { details.append(advice) }
         alert.informativeText = details.joined(separator: "\n\n")
         alert.addButton(withTitle: blocked ? "OK" : "Go Back")
         if !blocked { alert.addButton(withTitle: "Continue") }

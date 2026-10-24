@@ -63,50 +63,11 @@ struct MeaningDecision: Sendable {
 
 protocol LocalBrowserIntelligence: Sendable {
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait?
-    func navigationAdvice(_ review: NavigationReview) async throws -> String?
     func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool?
-}
-
-private final class NavigationAdviceRace: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<String?, Never>?
-    private var pendingResult: String??
-    private var resolved = false
-
-    func wait() async -> String? {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if let pendingResult {
-                lock.unlock()
-                continuation.resume(returning: pendingResult)
-            } else {
-                self.continuation = continuation
-                lock.unlock()
-            }
-        }
-    }
-
-    func resolve(_ result: String?) {
-        lock.lock()
-        guard !resolved else {
-            lock.unlock()
-            return
-        }
-        resolved = true
-        if let continuation {
-            self.continuation = nil
-            lock.unlock()
-            continuation.resume(returning: result)
-        } else {
-            pendingResult = .some(result)
-            lock.unlock()
-        }
-    }
 }
 
 struct UnavailableLocalIntelligence: LocalBrowserIntelligence {
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait? { nil }
-    func navigationAdvice(_ review: NavigationReview) async throws -> String? { nil }
     func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { nil }
 }
 
@@ -251,25 +212,6 @@ actor BrowserIntelligence {
             return results.compactMap { $0 }
         }
     }
-
-    func navigationAdvice(_ review: NavigationReview, timeout: Duration = .milliseconds(1_500)) async -> String? {
-        guard review.needsAdvisory else { return nil }
-        let race = NavigationAdviceRace()
-        let model = Task {
-            let result = try? await self.observed(source: .appleIntelligence, action: "Navigation check") {
-                try await self.local.navigationAdvice(review)
-            }
-            race.resolve(result)
-        }
-        let deadline = Task {
-            try? await Task.sleep(for: timeout)
-            race.resolve(nil)
-        }
-        let result = await race.wait()
-        model.cancel()
-        deadline.cancel()
-        return result
-    }
 }
 
 #if canImport(FoundationModels)
@@ -285,12 +227,6 @@ actor BrowserIntelligence {
 @Generable private struct AppleSiteMenuOutput {
     @Guide(description: "True if this top chrome is site navigation Interlinked can replace")
     var replace: Bool
-}
-
-@available(macOS 26.0, *)
-@Generable private struct AppleNavigationOutput {
-    @Guide(description: "One short sentence that restates the supplied warning facts, or empty if they are already clear")
-    var explanation: String
 }
 
 @available(macOS 26.0, *)
@@ -333,20 +269,6 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
             options: Self.greedy(maximumResponseTokens: 16)
         )
         return response.content.replace
-    }
-
-    func navigationAdvice(_ review: NavigationReview) async throws -> String? {
-        guard available else { return nil }
-        let session = LanguageModelSession(
-            instructions: IntelligencePromptPreferences.text(for: .appleNavigationCheck)
-        )
-        let response = try await session.respond(
-            to: review.advisoryEvidence,
-            generating: AppleNavigationOutput.self,
-            options: Self.greedy(maximumResponseTokens: 64)
-        )
-        let explanation = response.content.explanation.trimmingCharacters(in: .whitespacesAndNewlines)
-        return explanation.isEmpty ? nil : String(explanation.prefix(220))
     }
 }
 #endif

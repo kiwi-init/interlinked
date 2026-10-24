@@ -348,7 +348,7 @@ private struct IntelligenceSettingsPane: View {
                 )
                 ModelStatusRow(
                     symbol: "apple.intelligence", tint: .blue, title: "Apple Intelligence",
-                    detail: "On-device tab labels, page descriptions, and navigation warnings.",
+                    detail: "On-device tab labels and page descriptions.",
                     status: LocalIntelligenceRuntime.isAvailable
                         ? ("Available", .good) : ("Not on this Mac", .neutral)
                 )
@@ -397,7 +397,7 @@ private struct IntelligenceSettingsPane: View {
                 Toggle(isOn: workspace.binding(for: .appleIntelligence)) {
                     Text("Use Apple Intelligence")
                     Text(workspace.note(for: .appleIntelligence)
-                         ?? "Tab names, link warnings, and the site menu check. Runs on this Mac; nothing it reads leaves it.")
+                         ?? "Tab names and the site menu check. Runs on this Mac; nothing it reads leaves it.")
                 }
                 .toggleStyle(PointingSwitch())
                 .accessibilityIdentifier("settings-apple-intelligence")
