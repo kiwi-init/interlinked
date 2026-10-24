@@ -33,9 +33,12 @@ enum Metrics {
 }
 
 enum Tint: String, Codable, CaseIterable, Equatable {
-    case ink, violet, moss, amber, pine
+    /// `accent` follows the accent color chosen in System Settings.
+    case ink, violet, moss, amber, pine, accent
 
     var name: String { rawValue }
+
+    var title: String { self == .accent ? "Accent Color" : rawValue.capitalized }
 
     static func parse(_ word: String) -> Tint? {
         Tint(rawValue: word.lowercased())
@@ -48,6 +51,8 @@ enum Tint: String, Codable, CaseIterable, Equatable {
         case .moss: return (0x10, 0x15, 0x12)
         case .amber: return (0x17, 0x13, 0x0e)
         case .pine: return (0x02, 0x2c, 0x22)
+        // Unused: the accent color comes from the system.
+        case .accent: return (0x09, 0x09, 0x0b)
         }
     }
 
@@ -74,10 +79,19 @@ enum Tint: String, Codable, CaseIterable, Equatable {
     }
 
     var accent: Color {
+        if self == .accent { return .accentColor }
         let (hue, saturation, _) = hsl
         let wrapped = hue < 0 ? hue + 1 : hue
         return Color(hsla: wrapped, Swift.min(saturation, 0.75), 0.46)
     }
+
+    /// The color the glass takes on. Ink keeps it clear.
+    var glass: Color? { self == .ink ? nil : accent }
+}
+
+extension EnvironmentValues {
+    /// The tint every `PageGlass` and the window's backdrop take on.
+    @Entry var glassTint: Color?
 }
 
 struct Palette {

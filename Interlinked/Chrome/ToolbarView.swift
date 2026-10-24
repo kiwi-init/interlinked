@@ -179,10 +179,13 @@ struct AILabelGlow: ViewModifier {
     }
 }
 
+/// Liquid Glass in the chosen tint. Reduce Transparency and Increase Contrast
+/// get a solid surface, and macOS before 26 a translucent material.
 struct PageGlass: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.glassTint) private var tint
     var radius: CGFloat
 
     func body(content: Content) -> some View {
@@ -192,9 +195,10 @@ struct PageGlass: ViewModifier {
             if reduceTransparency || contrast == .increased {
                 content.background(backing, in: shape)
             } else if #available(macOS 26.0, *) {
-                content.glassEffect(.regular.interactive(), in: shape)
+                content.glassEffect(.regular.tint(tint?.opacity(0.14)).interactive(), in: shape)
             } else {
                 content.background(.ultraThinMaterial, in: shape)
+                    .background((tint ?? .clear).opacity(0.1), in: shape)
             }
         }
         // Glass is visual only. Claim its empty space as well as its controls,

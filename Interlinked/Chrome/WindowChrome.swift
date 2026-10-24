@@ -137,10 +137,11 @@ final class WindowButtonPlacement: NSView {
 }
 
 /// Frosted glass in the window's free spaces, between the sidebar, the
-/// toolbar, and the page, like a Finder sidebar. Reduce Transparency keeps
-/// the plain pane color.
+/// toolbar, and the page, like a Finder sidebar, washed with the tint.
+/// Reduce Transparency keeps the plain pane color.
 struct WindowBackdrop: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.glassTint) private var tint
     var fallback: Color
 
     var body: some View {
@@ -148,6 +149,7 @@ struct WindowBackdrop: View {
             fallback
         } else {
             BehindWindowBlur()
+                .overlay((tint ?? .clear).opacity(0.08))
         }
     }
 }

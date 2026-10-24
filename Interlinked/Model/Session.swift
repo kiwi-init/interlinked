@@ -216,7 +216,8 @@ extension Session {
         next_pane = try container.decode(UInt64.self, forKey: .next_pane)
         next_split = try container.decode(UInt64.self, forKey: .next_split)
         surfaces = try container.decode([SurfacePair].self, forKey: .surfaces)
-        tint = try container.decodeIfPresent(Tint.self, forKey: .tint) ?? .ink
+        // A tint from a newer build falls back rather than losing the session.
+        tint = (try? container.decodeIfPresent(Tint.self, forKey: .tint)) ?? .ink
         sidebar = try container.decodeIfPresent(Float.self, forKey: .sidebar) ?? Float(Metrics.sidebarWidth)
         sidebar_last = try container.decodeIfPresent(Float.self, forKey: .sidebar_last) ?? Float(Metrics.sidebarWidth)
         closed = Array((try container.decodeIfPresent([ClosedTab].self, forKey: .closed) ?? []).suffix(ClosedTab.limit))

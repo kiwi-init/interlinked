@@ -24,7 +24,7 @@ private extension SettingsDestination {
 
     var summary: String {
         switch self {
-        case .general: "Search, useful page information, and downloads."
+        case .general: "Tint, search, useful page information, and downloads."
         case .pages: "Blocking and dark pages, applied to every site you visit."
         case .intelligence: "Which models Interlinked uses, and when they run."
         case .sites: "Everything you have allowed, denied, or changed for a single site."
@@ -35,7 +35,7 @@ private extension SettingsDestination {
     /// Search matches what a pane contains, not only its name.
     var keywords: [String] {
         switch self {
-        case .general: ["search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
+        case .general: ["tint", "accent color", "color", "colour", "glass", "appearance", "search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
         case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "labels", "meaning search"]
         case .sites: ["permissions", "camera", "microphone", "location", "grants", "revoke", "blocking off", "kept light"]
@@ -116,6 +116,17 @@ private struct GeneralSettingsPane: View {
         let downloads = workspace.downloads
         @Bindable var usefulInfo = workspace.usefulInfo
         Form {
+            Section {
+                LabeledContent {
+                    TintPicker()
+                } label: {
+                    Text("Tint")
+                    Text("Colors the sidebar, the toolbar, and the frosted window around the page.")
+                }
+            } header: {
+                SettingsHero(section: .general, firstSection: "Appearance")
+            }
+
             SearchSection()
 
             Section {
@@ -169,6 +180,34 @@ private struct GeneralSettingsPane: View {
     }
 }
 
+/// One swatch per tint. Accent Color follows the color chosen in System
+/// Settings, and Ink leaves the glass clear.
+private struct TintPicker: View {
+    @Environment(Workspace.self) private var workspace
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Tint.allCases, id: \.self) { tint in
+                let chosen = workspace.tint == tint
+                Button { workspace.setTint(tint) } label: {
+                    Circle()
+                        .fill((tint.glass ?? .gray).gradient)
+                        .frame(width: 18, height: 18)
+                        .overlay { Circle().strokeBorder(.black.opacity(0.15)) }
+                        .padding(3)
+                        .overlay { Circle().strokeBorder(chosen ? Color.primary : .clear, lineWidth: 1.5) }
+                }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+                .help(tint.title)
+                .accessibilityLabel(tint.title)
+                .accessibilityAddTraits(chosen ? .isSelected : [])
+                .accessibilityIdentifier("settings-tint-\(tint.name)")
+            }
+        }
+    }
+}
+
 private struct SearchSection: View {
     @Environment(Workspace.self) private var workspace
 
@@ -216,7 +255,7 @@ private struct SearchSection: View {
                 }
             }
         } header: {
-            SettingsHero(section: .general, firstSection: "Search")
+            Text("Search")
         }
     }
 }

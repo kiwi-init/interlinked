@@ -2,13 +2,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The conventional layout: open pages down a glass sidebar, glass toolbar
-/// groups above the page, and nothing over the page itself. Each group morphs
-/// in place: the sidebar into History or Downloads, the address field into
-/// results or the site's connection, and the toolbar's tools into Find.
+/// groups above the page, and nothing over the page itself, which stands off
+/// the frosted window on its own shadow. Each group morphs in place: the
+/// sidebar into History or Downloads, the address field into results or the
+/// site's connection, and the toolbar's tools into Find.
 struct SidebarLayout<Page: View>: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var scheme
     var palette: Palette
     @ViewBuilder var page: () -> Page
     /// The width while the divider is dragged, before it settles.
@@ -38,11 +40,18 @@ struct SidebarLayout<Page: View>: View {
             ZStack(alignment: .top) {
                 page()
                     .clipShape(RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous))
-                    // A dark page still shows where it ends.
+                    // A hairline keeps a dark page's edge, and a shadow lifts
+                    // the page off the window.
                     .overlay {
                         RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
                             .strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
                             .allowsHitTesting(false)
+                    }
+                    .background {
+                        RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
+                            .fill(palette.pane)
+                            .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.16), radius: 18, y: 6)
+                            .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.08), radius: 2, y: 1)
                     }
                     .padding(.top, SidebarMetrics.toolbar)
                     .padding([.trailing, .bottom], 8)
@@ -567,8 +576,9 @@ private struct ToolbarIcon: View {
     }
 }
 
-/// The peeked sidebar: the sidebar's glass, raised over the page on a shadow,
-/// with the page dimmed underneath so its text stays readable over anything.
+/// The peeked sidebar, whose own glass card is raised over the page on a
+/// shadow, with the page dimmed underneath so its rows stay readable over
+/// anything.
 private struct PeekSurface: ViewModifier {
     @Environment(\.colorSchemeContrast) private var contrast
     var palette: Palette
@@ -576,7 +586,6 @@ private struct PeekSurface: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
         content
-            .modifier(PageGlass(radius: SidebarMetrics.radius))
             .overlay {
                 shape.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
                     .allowsHitTesting(false)

@@ -24,6 +24,7 @@ struct ContentView: View {
         }
         .background(WindowBackdrop(fallback: palette.pane))
         .background(WindowChrome())
+        .environment(\.glassTint, workspace.tint.glass)
         .frame(minWidth: 640, minHeight: 400)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear {
