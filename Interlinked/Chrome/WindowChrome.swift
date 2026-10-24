@@ -135,31 +135,3 @@ final class WindowButtonPlacement: NSView {
         needsLayout = true
     }
 }
-
-/// Frosted glass in the window's free spaces, between the sidebar, the
-/// toolbar, and the page, like a Finder sidebar. Reduce Transparency keeps
-/// the plain pane color.
-struct WindowBackdrop: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    var fallback: Color
-
-    var body: some View {
-        if reduceTransparency {
-            fallback
-        } else {
-            BehindWindowBlur()
-        }
-    }
-}
-
-private struct BehindWindowBlur: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .sidebar
-        view.blendingMode = .behindWindow
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
