@@ -343,7 +343,7 @@ private struct IntelligenceSettingsPane: View {
             Section {
                 ModelStatusRow(
                     symbol: "sparkles", tint: .purple, title: "Jev",
-                    detail: "Meaning search and related-tab grouping.",
+                    detail: "Meaning search in Find for me.",
                     status: jevStatus(assistant)
                 )
                 ModelStatusRow(

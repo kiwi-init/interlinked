@@ -458,30 +458,6 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(calls, 4 + 1)
     }
 
-    func testRelatedGroupsUseJevOnAboutsNotApple() async throws {
-        let pages = [
-            ResearchPage(id: "one", title: "First", detail: "", host: "one.test", about: "Sony A7 review"),
-            ResearchPage(id: "two", title: "Second", detail: "", host: "two.test", about: "Sony A7 shop"),
-            ResearchPage(id: "three", title: "Third", detail: "", host: "three.test", about: "Pasta recipes")
-        ]
-        let local = FixtureLocalIntelligence(label: "Ignored")
-        let jev = FixtureJev()
-        let intelligence = BrowserIntelligence(
-            jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)),
-            local: local,
-            portraits: PagePortraitCache(file: nil)
-        )
-
-        let decision = try await intelligence.relatedPageGroups(pages: pages)
-        let jevCalls = await jev.calls
-        let portraits = await local.portraitCalls
-
-        XCTAssertEqual(decision?.source, .jev)
-        XCTAssertEqual(jevCalls, 1)
-        XCTAssertEqual(portraits, 0)
-        XCTAssertEqual(Set(decision?.value.first?.members ?? []), Set(["one", "two", "three"]))
-    }
-
     func testNavigationAdviceRetainsTheWarningWhenAppleIntelligenceIsUnavailable() async throws {
         let local = FixtureLocalIntelligence(adviceUnavailable: true)
         let intelligence = BrowserIntelligence(
@@ -652,55 +628,6 @@ final class BrowserIntelligenceTests: XCTestCase {
         ])
         history.save()
         XCTAssertEqual(BrowserHistoryStore(file: file).visits, history.visits)
-    }
-    func testResearchGroupsKeepOriginalOrderAndUseExistingNames() {
-        let pages = [ResearchPage(id: "3", title: "Sony A7 camera review", detail: "", host: "reviews.test"), ResearchPage(id: "1", title: "Sony A7 camera shop", detail: "", host: "store.test"), ResearchPage(id: "2", title: "Cooking dinner", detail: "", host: "food.test")]
-        XCTAssertEqual(ResearchRelations.groups(pages).first?.members, ["3", "1"])
-        let groups = ResearchRelations.groups(pages, response: JevResponse(answers: ["3_1": JevAnswer(type: "noul", noul: 0.9)]))
-        XCTAssertEqual(groups.first?.title, pages[0].title)
-        XCTAssertEqual(groups.first?.members, ["3", "1"])
-        XCTAssertEqual(pages.map(\.id), ["3", "1", "2"])
-        XCTAssertTrue(ResearchRelations.groups(pages, response: JevResponse(answers: [:])).isEmpty)
-    }
-    func testRelatedCliquesDoNotUseTransitivity() {
-        let pages = [
-            ResearchPage(id: "a", title: "A", detail: "", host: "a.test", about: "Sony A7 review"),
-            ResearchPage(id: "b", title: "B", detail: "", host: "b.test", about: "Sony A7 shop"),
-            ResearchPage(id: "c", title: "C", detail: "", host: "c.test", about: "Unrelated pasta")
-        ]
-        let chain = ResearchRelations.groups(pages, response: JevResponse(answers: [
-            "a_b": JevAnswer(type: "noul", noul: 0.9),
-            "b_c": JevAnswer(type: "noul", noul: 0.9),
-            "a_c": JevAnswer(type: "noul", noul: 0.1)
-        ]))
-        XCTAssertEqual(chain.map { Set($0.members) }, [Set(["a", "b"])])
-        let clique = ResearchRelations.groups(pages, response: JevResponse(answers: [
-            "a_b": JevAnswer(type: "noul", noul: 0.9),
-            "b_c": JevAnswer(type: "noul", noul: 0.9),
-            "a_c": JevAnswer(type: "noul", noul: 0.9)
-        ]))
-        XCTAssertEqual(clique.map { Set($0.members) }, [Set(["a", "b", "c"])])
-    }
-    func testRelatedMergeKeepsFallbackGroupsThatIncludeUndescribedTabs() {
-        let pages = [
-            ResearchPage(id: "a", title: "Sony A7 camera review", detail: "", host: "a.test", about: "Sony A7 review"),
-            ResearchPage(id: "b", title: "Sony A7 camera shop", detail: "", host: "b.test", about: "Sony A7 shop"),
-            ResearchPage(id: "c", title: "Sony A7 camera listing", detail: "", host: "c.test", about: ""),
-            ResearchPage(id: "d", title: "Cooking dinner recipes", detail: "", host: "d.test", about: "")
-        ]
-        let fallback = ResearchRelations.groups(pages)
-        XCTAssertEqual(Set(fallback.first?.members ?? []), Set(["a", "b", "c"]))
-        let remote = [ResearchGroup(id: "a", title: pages[0].title, members: ["a", "b"])]
-        let merged = ResearchRelations.merge(remote: remote, fallback: fallback, pages: pages)
-        XCTAssertEqual(Set(merged.first { $0.members.contains("a") }?.members ?? []), Set(["a", "b", "c"]))
-        XCTAssertFalse(merged.contains { Set($0.members) == Set(["a", "b", "c", "d"]) })
-        let declined = ResearchRelations.merge(remote: [], fallback: fallback, pages: pages)
-        XCTAssertEqual(Set(declined.first?.members ?? []), Set(["a", "b", "c"]))
-        XCTAssertTrue(ResearchRelations.merge(
-            remote: [],
-            fallback: [ResearchGroup(id: "a", title: "Sony", members: ["a", "b"])],
-            pages: pages
-        ).isEmpty)
     }
     func testSensitiveAndLocalPagesCannotBeShared() {
         XCTAssertFalse(page("http://127.0.0.1:8000/").publicWebPage)

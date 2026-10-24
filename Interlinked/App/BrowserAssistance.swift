@@ -21,7 +21,6 @@ final class BrowserAssistance {
     var lastDecisionStatus = ""
     var findScores: [String: Double] = [:]
     var exactMatched = false
-    var groups: [ResearchGroup] = []
     private(set) var metadata: [PaneID: PageMetadata] = [:]
     private(set) var labels: [PaneID: String] = [:]
     private(set) var portraits: [PaneID: PagePortrait] = [:]
@@ -94,7 +93,6 @@ final class BrowserAssistance {
         for key in ["metadata-\(pane.rawValue)", "label-\(pane.rawValue)"] { cancel(key) }
         metadata.removeValue(forKey: pane); labels.removeValue(forKey: pane); portraits.removeValue(forKey: pane); grants.removeValue(forKey: pane)
         if labelEffect?.pane == pane { labelEffect = nil }
-        cancel("groups"); groups = []
         if wasActive {
             closePanel()
         }
@@ -139,7 +137,7 @@ final class BrowserAssistance {
         if let pane = workspace?.activePane { PageTextBridge.clear(workspace?.hosts.existingBrowser(pane)) }
         refreshCredentialStatus()
         grants.removeAll(); busy = false
-        matches = []; groups = []
+        matches = []
         labelEffect = nil
         labels = Dictionary(uniqueKeysWithValues: metadata.map { pane, page in
             (pane, (automaticLabels ? portraits[pane]?.label : nil) ?? PageLabels.fallback(page))
@@ -184,7 +182,7 @@ final class BrowserAssistance {
             grants.removeValue(forKey: pane)
             cancel("label-\(pane.rawValue)")
         }
-        cancel("find"); cancel("groups"); busy = false; matches = []; groups = []
+        cancel("find"); busy = false; matches = []
     }
     /// Removing a site from the shared list stops sharing it the way Stop
     /// Sharing This Page does, for every open page on that site.
@@ -341,30 +339,6 @@ final class BrowserAssistance {
             if !found, self.workspace?.activePane == pane, self.resultDocument == document {
                 self.matches = []; self.status = "The page changed. Run the search again."
             }
-        }
-    }
-
-    func related() {
-        guard let workspace else { return }
-        let pages = ResearchRelations.pages(tabs: workspace.tabs, metadata: metadata, portraits: portraits)
-        groups = ResearchRelations.groups(pages)
-        guard pages.count >= 2, enabled, hasJevAccess else { return }
-        let key = "groups", revision = token(key)
-        tasks[key] = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(350))
-                let decision = try await self.intelligence.relatedPageGroups(pages: pages)
-                guard self.accepts(key, revision), workspace.overviewOpen else { return }
-                if let decision {
-                    self.groups = ResearchRelations.merge(
-                        remote: decision.value,
-                        fallback: ResearchRelations.groups(pages),
-                        pages: pages
-                    )
-                    self.lastDecisionStatus = "\(decision.source.rawValue) decision received for related pages"
-                }
-            } catch { /* Local groups remain stable. */ }
         }
     }
 }

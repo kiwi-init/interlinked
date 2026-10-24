@@ -500,10 +500,7 @@ enum Control {
 
         case "overview", "sidebar":
             if words.isEmpty {
-                return json([
-                    "open": workspace.overviewOpen,
-                    "groups": workspace.assistance.groups.map { ["title": $0.title, "members": $0.members] as [String: Any] },
-                ])
+                return json(["open": workspace.overviewOpen])
             }
             switch words[0] {
             case "search", "submit":

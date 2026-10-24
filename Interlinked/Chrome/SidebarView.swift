@@ -21,25 +21,6 @@ struct WorkspaceOverview: View {
                       submit: submit, cancel: { workspace.setOverviewOpen(false) })
                 .frame(height: 24)
             ScrollView {
-                if !workspace.assistance.groups.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Related pages").font(.system(size: 10)).foregroundStyle(palette.textDim)
-                        ForEach(workspace.assistance.groups) { group in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(group.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                                HStack {
-                                    ForEach(group.members, id: \.self) { id in
-                                        if let tab = workspace.tabs.first(where: { String($0.id.rawValue) == id }) {
-                                            Button { workspace.selectWork(tab.id) } label: {
-                                                SiteIcon(pane: tab.active, palette: palette)
-                                            }.buttonStyle(.pointing).help(workspace.title(tab))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 8)
-                }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 145, maximum: 190), spacing: 10)], spacing: 10) {
                     ForEach(matches) { tab in
                         Button { workspace.selectWork(tab.id) } label: {

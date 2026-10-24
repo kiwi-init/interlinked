@@ -3,7 +3,7 @@ import XCTest
 final class IntelligencePromptTests: XCTestCase {
     func testEveryFeatureHasAVisibleDefaultAndCorrectProvider() {
         XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 3)
-        XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 3)
+        XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 2)
         for feature in IntelligencePromptFeature.allCases {
             XCTAssertFalse(feature.title.isEmpty)
             XCTAssertFalse(feature.defaultText.isEmpty)
@@ -26,18 +26,8 @@ final class IntelligencePromptTests: XCTestCase {
     }
 
     func testRuntimeVariablesRenderInsideTheShippedPrompt() {
-        XCTAssertEqual(
-            IntelligencePromptPreferences.rendered(
-                .jevRelatedPages,
-                values: ["first_page_id": "page-4", "second_page_id": "page-9"]
-            ).contains("page-4"),
-            true
-        )
-        XCTAssertTrue(
-            IntelligencePromptPreferences.rendered(
-                .jevRelatedPages,
-                values: ["first_page_id": "page-4", "second_page_id": "page-9"]
-            ).contains("page-9")
-        )
+        let rendered = IntelligencePromptPreferences.rendered(.jevMeaningScore, values: ["passage_id": "p-4"])
+        XCTAssertTrue(rendered.contains("page element ID p-4"))
+        XCTAssertFalse(rendered.contains("{passage_id}"))
     }
 }
