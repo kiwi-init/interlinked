@@ -18,7 +18,7 @@ Click a tab in the sidebar to switch to it. Right-click it to rename or close it
 
 The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state, while WebKit throttles their detached views and they lose focus. When macOS reports memory pressure, Interlinked pauses the oldest eligible background pages. It skips the active page and any page with playing media, an open file picker, an active download, or unsaved form work. Returning to a paused page restores its URL and scroll position. Background pages you leave alone for 30 minutes go to sleep the same way, with the same exceptions, and reload where you left them as soon as you return.
 
-Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
+Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open.
 
 Tabs restore from `~/Library/Application Support/Interlinked/session.json`, split views included. Workspaces from before split view migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored. ⇧⌘T reopens the last of up to 25 closed tabs. A corrupt session file is kept aside and the backup from the last good save opens instead. Back and forward lists do not survive a relaunch. [docs/session-state.md](docs/session-state.md) covers what is restored and why.
 
@@ -98,7 +98,6 @@ Manual validation (issue #14): register and authenticate on at least two indepen
 
 ```sh
 build/Build/Products/Debug/interlinked state
-build/Build/Products/Debug/interlinked overview show
 build/Build/Products/Debug/interlinked new-tab
 build/Build/Products/Debug/interlinked open-url https://example.com
 build/Build/Products/Debug/interlinked edit

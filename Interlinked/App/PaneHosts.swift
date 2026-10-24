@@ -22,10 +22,8 @@ final class PaneHosts {
     @ObservationIgnored private var iconCache = DomainIconCache<NSImage>()
     @ObservationIgnored private let iconStore = DomainIconStore()
     @ObservationIgnored private var pageURLs: [PaneID: URL] = [:]
-    @ObservationIgnored private var capturing: Set<PaneID> = []
     private(set) var titles: [PaneID: String] = [:]
     private(set) var favicons: [PaneID: NSImage] = [:]
-    private(set) var previews: [PaneID: NSImage] = [:]
     private(set) var canGoBack: [PaneID: Bool] = [:]
     private(set) var canGoForward: [PaneID: Bool] = [:]
     private(set) var lifecycle = TabLifecycleLedger()
@@ -59,7 +57,6 @@ final class PaneHosts {
             pageURLs.removeValue(forKey: pane)
             titles.removeValue(forKey: pane)
             favicons.removeValue(forKey: pane)
-            previews.removeValue(forKey: pane)
             canGoBack.removeValue(forKey: pane)
             canGoForward.removeValue(forKey: pane)
         }
@@ -91,30 +88,12 @@ final class PaneHosts {
         guard browsers[pane] === page else { return }
         if pageURLs[pane] != page.url {
             pageURLs[pane] = page.url
-            previews.removeValue(forKey: pane)
             lifecycle.touch(pane)
         }
         let title = page.title ?? ""
         if titles[pane] != title { titles[pane] = title }
         if canGoBack[pane] != page.canGoBack { canGoBack[pane] = page.canGoBack }
         if canGoForward[pane] != page.canGoForward { canGoForward[pane] = page.canGoForward }
-    }
-
-    func capturePreviews() {
-        for (pane, page) in browsers where page.window != nil { capture(page, pane: pane) }
-    }
-
-    func capture(_ page: WebKitPage, pane: PaneID) {
-        guard !capturing.contains(pane) else { return }
-        capturing.insert(pane)
-        let url = page.url
-        Task { [weak self, weak page] in
-            let image = await page?.snapshot()
-            guard let self else { return }
-            self.capturing.remove(pane)
-            guard let page, self.browsers[pane] === page, page.url == url, let image else { return }
-            self.previews[pane] = image
-        }
     }
 
     func syncFavicons(tabs: [Tab], surfaces: Surfaces) {

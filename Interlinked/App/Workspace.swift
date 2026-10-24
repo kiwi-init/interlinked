@@ -82,7 +82,6 @@ final class Workspace {
         }
     }
     let intelligenceAudit = IntelligenceAuditStore.shared
-    var overviewOpen = false
     var identityOpen = false
     var pageHistoryOpen = false {
         didSet { if !pageHistoryOpen { historyClearing = false } }
@@ -91,9 +90,6 @@ final class Workspace {
     var historyClearing = false
     /// Oldest first. ⇧⌘T reopens the last.
     private(set) var recentlyClosed: [ClosedTab] = []
-    var quickSwitchOpen = false
-    var leftCommandKeyHeld = false
-    var rightCommandKeyHeld = false
     var settingsDestination: SettingsDestination = .general
     private(set) var copiedPageURL: String?
 
@@ -106,8 +102,6 @@ final class Workspace {
     /// SwiftUI's `openSettings`, handed over by the browser window.
     @ObservationIgnored var openSettings: (() -> Void)?
     @ObservationIgnored private var mouseMonitor: Any?
-    @ObservationIgnored private var flagsMonitor: Any?
-    @ObservationIgnored private var commandStateObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var control: ControlServer?
     @ObservationIgnored private var copiedPageURLTask: Task<Void, Never>?
     @ObservationIgnored private var scrollMarks: [PaneID: ScrollMark] = [:]
@@ -121,10 +115,6 @@ final class Workspace {
 
     var activePane: PaneID? { activeTab?.active }
 
-    var quickTabs: [Tab] {
-        OpenWork.switcherTabs(tabs, current: activeTab?.id, pinned: onboardingTab?.id)
-    }
-
     /// The name a tab goes by everywhere: your name for it, else the label
     /// the page handle shows, else the page's own title.
     func title(_ tab: Tab) -> String {
@@ -132,25 +122,6 @@ final class Workspace {
         return OpenWork.title(customName: tab.name, pageTitle: assistance.labels[tab.active] ?? hosts.titles[tab.active],
                        fallback: surfaces.tabTitle(tab))
     }
-
-    func setOverviewOpen(_ open: Bool) {
-        guard open != overviewOpen else { return }
-        if open {
-            discardLine()
-            closeIdentity()
-            pageHistoryOpen = false
-            downloads.closePanel()
-            hosts.capturePreviews()
-            assistance.closePanel()
-        }
-        overviewOpen = open
-        if !open {
-            restoreFocus()
-            beginEmptyPageEditingIfNeeded()
-        }
-    }
-
-    func toggleOverview() { setOverviewOpen(!overviewOpen) }
 
     func selectWork(_ tab: TabID) {
         guard let index = tabs.firstIndex(where: { $0.id == tab }) else { return }
@@ -162,13 +133,6 @@ final class Workspace {
     func selectTab(at index: Int) -> Bool {
         guard tabs.indices.contains(index) else { return false }
         selectWork(tabs[index].id)
-        return true
-    }
-
-    @discardableResult
-    func selectQuickTab(_ index: Int) -> Bool {
-        guard quickTabs.indices.contains(index) else { return false }
-        selectWork(quickTabs[index].id)
         return true
     }
 
@@ -198,7 +162,7 @@ final class Workspace {
     }
 
     func beginEmptyPageEditingIfNeeded() {
-        guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil else { return }
+        guard isEmptyActivePage, !identityOpen, editing == nil else { return }
         editActiveLine()
     }
 
@@ -269,14 +233,13 @@ final class Workspace {
             discardLine()
             beginEmptyPageEditingIfNeeded()
         }
-        else if overviewOpen { setOverviewOpen(false) }
     }
 
     /// Something Escape puts back. The page itself may hold focus, so the
     /// key monitor takes Escape for these rather than leaving it to SwiftUI.
     var escapeCloses: Bool {
         usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.escapeCloses || identityOpen
-            || editing != nil || overviewOpen
+            || editing != nil
     }
 
     func toggleIdentity() {
@@ -286,7 +249,6 @@ final class Workspace {
         }
         guard currentPageURL != nil else { return }
         discardLine()
-        setOverviewOpen(false)
         assistance.closePanel()
         pageHistoryOpen = false
         downloads.closePanel()
@@ -319,7 +281,6 @@ final class Workspace {
 
     private func preparePagePanel() {
         discardLine()
-        setOverviewOpen(false)
         closeIdentity()
         assistance.closePanel()
         pageHistoryOpen = false
@@ -336,13 +297,12 @@ final class Workspace {
         let expectedPane = activePane
         DispatchQueue.main.async { [weak self] in
             guard let self, let pane = expectedPane,
-                  self.activePane == pane, !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
+                  self.activePane == pane, !self.identityOpen, self.editing == nil else { return }
             if self.hosts.focus(pane) { return }
             // SwiftUI may attach the retained page view one run-loop turn
             // after the selected tab changes.
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.activePane == pane,
-                      !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
+                guard let self, self.activePane == pane, !self.identityOpen, self.editing == nil else { return }
                 self.hosts.focus(pane)
             }
         }
@@ -411,13 +371,9 @@ final class Workspace {
         hosts.stopIdleSleep()
         builtIns.stop()
         keyMonitor.map(NSEvent.removeMonitor)
-        flagsMonitor.map(NSEvent.removeMonitor)
         mouseMonitor.map(NSEvent.removeMonitor)
         scrollMonitor.map(NSEvent.removeMonitor)
         scrollTask?.cancel()
-        commandStateObservers.forEach(NotificationCenter.default.removeObserver)
-        commandStateObservers.removeAll()
-        setCommandKeyState(CommandKeyState(left: false, right: false))
         control?.stop()
         Session.flush()
         Workspace.shared = nil
@@ -536,7 +492,6 @@ final class Workspace {
     func openTab(kind: Kind = .browser) {
         if editing != nil { discardLine() }
         assistance.changedTab()
-        overviewOpen = false
         let tab = Tab(id: TabID(nextTab), pane: takePane())
         nextTab += 1
         tabs.append(tab)
@@ -550,7 +505,6 @@ final class Workspace {
         guard tabs.indices.contains(index) else { return }
         if editing != nil { discardLine() }
         assistance.changedTab()
-        overviewOpen = false
         active = index
         if let pane = activePane {
             hosts.touch(pane)
@@ -565,7 +519,6 @@ final class Workspace {
         guard !tabs.isEmpty else { return }
         if editing != nil { discardLine() }
         assistance.changedTab()
-        overviewOpen = false
         let count = tabs.count
         active = ((active + step) % count + count) % count
         if let pane = activePane {
@@ -625,8 +578,6 @@ final class Workspace {
     func clickPane(_ pane: PaneID) {
         if editing != nil { editing = nil }
         if identityOpen { closeIdentity() }
-        if overviewOpen { overviewOpen = false }
-        if quickSwitchOpen { quickSwitchOpen = false }
         if pageHistoryOpen { pageHistoryOpen = false }
         if downloads.panelOpen { downloads.closePanel() }
         if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
@@ -749,13 +700,12 @@ final class Workspace {
     /// carries the rest of the instruction onto whatever page is showing.
     var showsOnboardingCoach: Bool {
         guard let tab = onboardingTab else { return false }
-        return activeTab?.id != tab.id && onboarding.progress.next != nil && !overviewOpen
+        return activeTab?.id != tab.id && onboarding.progress.next != nil
     }
 
     /// Opens the Onboarding tab first in line, or goes back to it.
     func openOnboarding() {
         if editing != nil { discardLine() }
-        overviewOpen = false
         if let pane = onboarding.pane, tabs.contains(where: { $0.contains(pane) }) {
             activatePane(pane)
             return
@@ -940,7 +890,6 @@ final class Workspace {
     func splitActive() {
         guard let pane = activePane, activeTab?.canSplit == true else { return }
         if editing != nil { discardLine() }
-        overviewOpen = false
         let new = takePane()
         guard tabs[active].split(pane, axis: .columns, new: new, id: SplitID(nextSplit)) else { return }
         nextSplit += 1
@@ -975,7 +924,6 @@ final class Workspace {
         guard let current = activeTab, dragged != current.id,
               let source = tabs.firstIndex(where: { $0.id == dragged }) else { return }
         if editing != nil { discardLine() }
-        overviewOpen = false
         let incoming = tabs[source].active
         var tab = current
         var emptiedSource = false
@@ -1059,7 +1007,6 @@ final class Workspace {
     @discardableResult
     func editLine(_ pane: PaneID) -> Bool {
         guard tabs.contains(where: { $0.contains(pane) }) else { return false }
-        overviewOpen = false
         activatePane(pane)
         startWriting(.pane(pane), surfaces.line(pane))
         return true
@@ -1081,7 +1028,6 @@ final class Workspace {
         assistance.closePanel()
         if editing?.target == target { return }
         commitLine()
-        overviewOpen = false
         identityOpen = false
         pageHistoryOpen = false
         downloads.closePanel()
@@ -1254,7 +1200,6 @@ final class Workspace {
 
     private func installMonitors() {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            self?.synchronizeCommandKeyState()
             guard !PageControlRegion.contains(event) else { return event }
             // In split view either page can be clicked; the one clicked leads.
             guard let self, let tab = self.activeTab, let root = event.window?.contentView,
@@ -1289,36 +1234,6 @@ final class Workspace {
             if let self, event.window === self.browserWindow { self.noteScrollSoon() }
             return event
         }
-        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            guard let self else { return event }
-            let previous = CommandKeyState(left: self.leftCommandKeyHeld, right: self.rightCommandKeyHeld)
-            let keys = CommandKeyState.updating(
-                previous,
-                eventKeyCode: event.keyCode,
-                rawModifierFlags: event.modifierFlags.rawValue
-            )
-            self.setCommandKeyState(keys)
-            return event
-        }
-
-        let center = NotificationCenter.default
-        commandStateObservers = [
-            center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.setCommandKeyState(CommandKeyState(left: false, right: false))
-                }
-            },
-            center.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.setCommandKeyState(CommandKeyState(left: false, right: false))
-                }
-            },
-            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.synchronizeCommandKeyState()
-                }
-            },
-        ]
     }
 
     /// Escape during input method composition cancels the candidates, not the
@@ -1330,15 +1245,6 @@ final class Workspace {
     private func closesWindow(_ event: NSEvent) -> Bool {
         event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command
             && event.charactersIgnoringModifiers?.lowercased() == "w"
-    }
-
-    private func setCommandKeyState(_ state: CommandKeyState) {
-        leftCommandKeyHeld = state.left
-        rightCommandKeyHeld = state.right
-    }
-
-    private func synchronizeCommandKeyState() {
-        setCommandKeyState(CommandKeyState.current())
     }
 
     private func performApplicationShortcut(_ event: NSEvent) -> Bool {
@@ -1415,7 +1321,6 @@ final class Workspace {
         settingsDestination = destination
         if assistance.panel != nil { assistance.closePanel() }
         editing = nil
-        overviewOpen = false
         identityOpen = false
         openSettings()
         return true

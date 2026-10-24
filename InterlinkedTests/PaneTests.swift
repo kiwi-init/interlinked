@@ -1,106 +1,5 @@
 import XCTest
 
-final class CommandKeyStateTests: XCTestCase {
-    func testPhysicalCommandKeysAreReadIndependently() {
-        XCTAssertNotEqual(CommandKeyState.leftMask, CommandKeyState.rightMask)
-        let genericCommand: UInt = 1 << 20
-
-        let leftOnly = CommandKeyState.read(rawModifierFlags: genericCommand | CommandKeyState.leftMask)
-        XCTAssertEqual(leftOnly, CommandKeyState(left: true, right: false))
-
-        let rightOnly = CommandKeyState.read(rawModifierFlags: genericCommand | CommandKeyState.rightMask)
-        XCTAssertEqual(rightOnly, CommandKeyState(left: false, right: true))
-
-        let both = CommandKeyState.read(
-            rawModifierFlags: genericCommand | CommandKeyState.leftMask | CommandKeyState.rightMask
-        )
-        XCTAssertEqual(both, CommandKeyState(left: true, right: true))
-
-        XCTAssertEqual(
-            CommandKeyState.read(rawModifierFlags: genericCommand),
-            CommandKeyState(left: false, right: false),
-            "The generic Command flag must not be mistaken for the left key"
-        )
-    }
-
-    func testRightCommandUsesItsPhysicalKeyCodeWhenDeviceBitsAreStripped() {
-        let pressed = CommandKeyState.updating(
-            CommandKeyState(left: false, right: false),
-            eventKeyCode: CommandKeyState.rightKeyCode,
-            rawModifierFlags: CommandKeyState.commandMask
-        )
-        XCTAssertEqual(pressed, CommandKeyState(left: false, right: true))
-
-        let released = CommandKeyState.updating(
-            pressed,
-            eventKeyCode: CommandKeyState.rightKeyCode,
-            rawModifierFlags: 0
-        )
-        XCTAssertEqual(released, CommandKeyState(left: false, right: false))
-    }
-
-    func testCommandSidesStayIndependentAcrossPressAndReleaseOrder() {
-        var state = CommandKeyState(left: false, right: false)
-        state = CommandKeyState.updating(
-            state,
-            eventKeyCode: CommandKeyState.leftKeyCode,
-            rawModifierFlags: CommandKeyState.commandMask
-        )
-        XCTAssertEqual(state, CommandKeyState(left: true, right: false))
-
-        state = CommandKeyState.updating(
-            state,
-            eventKeyCode: CommandKeyState.rightKeyCode,
-            rawModifierFlags: CommandKeyState.commandMask
-        )
-        XCTAssertEqual(state, CommandKeyState(left: true, right: true))
-
-        state = CommandKeyState.updating(
-            state,
-            eventKeyCode: CommandKeyState.leftKeyCode,
-            rawModifierFlags: CommandKeyState.commandMask
-        )
-        XCTAssertEqual(state, CommandKeyState(left: false, right: true))
-
-        state = CommandKeyState.updating(
-            state,
-            eventKeyCode: CommandKeyState.rightKeyCode,
-            rawModifierFlags: 0
-        )
-        XCTAssertEqual(state, CommandKeyState(left: false, right: false))
-    }
-
-    func testDeviceSpecificEventStateWinsOverStaleTrackedState() {
-        let stale = CommandKeyState(left: true, right: false)
-        let corrected = CommandKeyState.updating(
-            stale,
-            eventKeyCode: CommandKeyState.rightKeyCode,
-            rawModifierFlags: CommandKeyState.commandMask | CommandKeyState.rightMask
-        )
-        XCTAssertEqual(corrected, CommandKeyState(left: false, right: true))
-    }
-
-    func testUnrelatedModifierEventDoesNotChangeACommandSide() {
-        let held = CommandKeyState(left: false, right: true)
-        let unchanged = CommandKeyState.updating(
-            held,
-            eventKeyCode: 56,
-            rawModifierFlags: CommandKeyState.commandMask
-        )
-        XCTAssertEqual(unchanged, held)
-    }
-
-    func testGenericCommandReleaseClearsAnyStaleSideState() {
-        let stale = CommandKeyState(left: true, right: true)
-        let cleared = CommandKeyState.updating(
-            stale,
-            eventKeyCode: CommandKeyState.leftKeyCode,
-            rawModifierFlags: 0
-        )
-        XCTAssertEqual(cleared, CommandKeyState(left: false, right: false))
-    }
-}
-
 final class CopiedPageURLFeedbackTests: XCTestCase {
     func testCopiedFeedbackRequiresAnActualCopiedURL() {
         XCTAssertFalse(CopiedPageURLFeedback.isShowing(copied: nil, current: nil))
@@ -505,23 +404,7 @@ final class DownloadRecordTests: XCTestCase {
 }
 
 final class SurfaceTests: XCTestCase {
-    func testTabRowsAreBalancedAndNeverExceedFive() {
-        XCTAssertEqual(OpenWork.rows(count: 6).map(\.count), [3, 3])
-        XCTAssertEqual(OpenWork.rows(count: 11).map(\.count), [4, 4, 3])
-        XCTAssertEqual(OpenWork.rows(count: 5).map(\.count), [5])
-        XCTAssertTrue(OpenWork.rows(count: 0).isEmpty)
-        for count in 1...100 {
-            let rows = OpenWork.rows(count: count)
-            let sizes = rows.map(\.count)
-            XCTAssertEqual(rows.flatMap { Array($0) }, Array(0..<count))
-            XCTAssertLessThanOrEqual(sizes.max()!, 5)
-            XCTAssertLessThanOrEqual(sizes.max()! - sizes.min()!, 1)
-        }
-    }
-
-    func testQuickSwitcherOmitsCurrentTabAndKeepsCreationOrder() {
-        let tabs = [Tab(id: TabID(8), pane: PaneID(8)), Tab(id: TabID(2), pane: PaneID(2)), Tab(id: TabID(5), pane: PaneID(5))]
-        XCTAssertEqual(OpenWork.switcherTabs(tabs, current: TabID(5)).map(\.id), [TabID(2), TabID(8)])
+    func testCommandDigitsOneToNineNameTabs() {
         XCTAssertEqual(OpenWork.shortcutIndex("1"), 0)
         XCTAssertEqual(OpenWork.shortcutIndex("9"), 8)
         XCTAssertNil(OpenWork.shortcutIndex("0"))
@@ -587,18 +470,14 @@ final class SurfaceTests: XCTestCase {
         XCTAssertEqual(address(from: " \n ").absoluteString, "about:blank")
     }
 
-    func testOpenWorkDistinguishesDocumentsFromTheSameSite() {
+    func testOpenWorkPrefersThePageTitleToTheSite() {
         let title = OpenWork.title(customName: nil, pageTitle: "Interlinked explorations", fallback: "paper.design")
         XCTAssertEqual(title, "Interlinked explorations")
-        XCTAssertTrue(OpenWork.matches("interlinked paper", title: title, details: ["https://paper.design/123"]))
-        XCTAssertFalse(OpenWork.matches("invoice paper", title: title, details: ["https://paper.design/123"]))
     }
 
     func testOpenWorkKeepsCustomNamesAndHandlesMissingMetadata() {
         XCTAssertEqual(OpenWork.title(customName: " My work ", pageTitle: "Homepage", fallback: "site.test"), "My work")
         XCTAssertEqual(OpenWork.title(customName: nil, pageTitle: " \n ", fallback: "site.test"), "site.test")
-        XCTAssertTrue(OpenWork.matches(" \n ", title: "Page", details: []))
-        XCTAssertTrue(OpenWork.matches("CAFÉ", title: "Cafe notes", details: []))
     }
 
     func testAKindIsKnownByMoreThanOneName() {
