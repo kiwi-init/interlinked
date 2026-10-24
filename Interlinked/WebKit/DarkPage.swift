@@ -26,12 +26,19 @@ enum DarkPage {
         const light = () => {
           const root = document.documentElement;
           if (!root) return false;
-          for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2); el; el = el.parentElement) {
+          const layers = [];
+          for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2); el; el = el.parentElement) layers.push(el);
+          // The body's background fills the canvas when the root has none.
+          if (document.body) layers.push(document.body);
+          for (const el of layers) {
             const value = luminance(getComputedStyle(el).backgroundColor);
             if (value !== null) return value > 0.5;
           }
-          // Transparent all the way down: the canvas follows the page's color scheme.
-          return !/dark/.test(getComputedStyle(root).colorScheme);
+          // Transparent all the way down: the canvas follows the page's color
+          // scheme, from CSS or a meta tag, and so does its default text,
+          // which is light on a dark canvas.
+          const text = luminance(getComputedStyle(document.body ?? root).color);
+          return text === null || text < 0.5;
         };
         const adopted = () => document.adoptedStyleSheets.includes(sheet);
         const update = () => {
@@ -50,6 +57,9 @@ enum DarkPage {
             if (active) return;
             active = true;
             update();
+            // At document start the page has no styles yet. The first frame
+            // comes after its stylesheets and before anything is painted.
+            requestAnimationFrame(update);
             observer.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
           },
           stop() {
