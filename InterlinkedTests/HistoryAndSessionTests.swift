@@ -122,6 +122,24 @@ final class BrowserHistoryControlTests: XCTestCase {
         XCTAssertEqual(reopened.visits.map(\.title), ["Three"])
     }
 
+    func testAnUnreadableOrNewerHistoryFileIsKeptAside() throws {
+        for saved in [#"{"version":2,"visits":[{"id":"#, #"{"version":3,"visits":[]}"#] {
+            try? FileManager.default.removeItem(at: directory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data(saved.utf8).write(to: file)
+
+            let history = store()
+            history.record(URL(string: "https://new.test/"), title: "New")
+            history.save()
+
+            let aside = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasPrefix("history.json.corrupt-") }
+            XCTAssertEqual(aside.count, 1, saved)
+            XCTAssertEqual(try aside.first.map { try Data(contentsOf: $0) }, Data(saved.utf8), saved)
+            XCTAssertEqual(history.visits.map(\.title), ["New"])
+        }
+    }
+
     func testMigratesTheVersionOneArrayFileAndAppliesRetention() throws {
         let legacy = [
             visit("https://kept.test/", "Kept", daysAgo: 3),
