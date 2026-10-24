@@ -201,6 +201,20 @@ final class WebKitPage: NSObject {
         }
     }
 
+    /// Where `BrowserDiscardProbe` records the fields a person changed.
+    static let editsWorld = WKContentWorld.world(name: "interlinked-edits")
+
+    /// Whether the page can sleep without losing anything, from the world
+    /// that saw what the person changed.
+    func evaluateDiscardProbe(completion: @escaping (Any?, Error?) -> Void) {
+        Task {
+            do {
+                completion(try await nativeView.callAsyncJavaScript("return \(BrowserDiscardProbe.script);",
+                                                                     contentWorld: Self.editsWorld), nil)
+            } catch { completion(nil, error) }
+        }
+    }
+
     func find(_ text: String, backwards: Bool, findNext: Bool = true, completion: @escaping (Bool) -> Void) {
         let configuration = WKFindConfiguration()
         configuration.backwards = backwards
@@ -259,6 +273,8 @@ final class WebKitPage: NSObject {
     private func installUserScripts() {
         let controller = nativeView.configuration.userContentController
         controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(source: BrowserDiscardProbe.recordEdits, injectionTime: .atDocumentStart,
+                                              forMainFrameOnly: true, in: Self.editsWorld))
         if sharingScreenShield {
             controller.addUserScript(WKUserScript(source: SharingScreenShield.script, injectionTime: .atDocumentStart,
                                                   forMainFrameOnly: false, in: .page))

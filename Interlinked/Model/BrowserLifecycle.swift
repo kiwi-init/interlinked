@@ -39,23 +39,51 @@ struct BrowserDiscardProbe: Decodable, Equatable {
     var safe: Bool
     var scrollY: Double
 
+    /// Runs at document start in its own script world, out of the page's
+    /// reach: remembers the fields a person changed. Values a page's own
+    /// scripts set are not anyone's unsaved work.
+    static let recordEdits = #"""
+    (() => {
+      const edited = new Set();
+      globalThis.__interlinkedEdited = edited;
+      // composedPath reaches a field inside an open shadow root.
+      const note = event => {
+        const target = event.composedPath()[0];
+        if (event.isTrusted && target instanceof Element) edited.add(target);
+      };
+      addEventListener('input', note, true);
+      addEventListener('change', note, true);
+    })()
+    """#
+
+    /// Runs in the same world as `recordEdits`. A page where that never ran
+    /// falls back to checking every field.
     static let script = #"""
     (() => {
       const media = Array.from(document.querySelectorAll('audio,video'))
         .some(element => !element.paused && !element.ended);
-      const inputs = Array.from(document.querySelectorAll('input')).some(input => {
-        if (['button','submit','reset','hidden'].includes(input.type)) return false;
-        if (input.type === 'file') return input.files && input.files.length > 0;
-        if (input.type === 'checkbox' || input.type === 'radio') return input.checked !== input.defaultChecked;
-        return input.value !== input.defaultValue;
-      });
-      const textareas = Array.from(document.querySelectorAll('textarea'))
-        .some(input => input.value !== input.defaultValue);
-      const selects = Array.from(document.querySelectorAll('select'))
-        .some(select => Array.from(select.options).some(option => option.selected !== option.defaultSelected));
-      const editable = Array.from(document.querySelectorAll('[contenteditable="true"],[contenteditable=""]'))
-        .some(element => element.textContent.trim().length > 0);
-      return JSON.stringify({safe: !(media || inputs || textareas || selects || editable), scrollY: window.scrollY});
+      // Whether a form field differs from its default; null for anything else.
+      const changed = element => {
+        if (element instanceof HTMLInputElement) {
+          if (['button','submit','reset','hidden'].includes(element.type)) return false;
+          if (element.type === 'file') return element.files && element.files.length > 0;
+          if (element.type === 'checkbox' || element.type === 'radio') return element.checked !== element.defaultChecked;
+          return element.value !== element.defaultValue;
+        }
+        if (element instanceof HTMLTextAreaElement) return element.value !== element.defaultValue;
+        if (element instanceof HTMLSelectElement) {
+          return Array.from(element.options).some(option => option.selected !== option.defaultSelected);
+        }
+        return null;
+      };
+      const recorded = globalThis.__interlinkedEdited;
+      // Something a person typed into that isn't a plain field, such as a
+      // rich editor or a closed component, counts as unsaved.
+      const unsaved = recorded
+        ? Array.from(recorded).some(element => element.isConnected && (changed(element) ?? true))
+        : Array.from(document.querySelectorAll('input,textarea,select,[contenteditable="true"],[contenteditable=""]'))
+            .some(element => changed(element) ?? element.textContent.trim().length > 0);
+      return JSON.stringify({safe: !(media || unsaved), scrollY: window.scrollY});
     })()
     """#
 
