@@ -14,7 +14,7 @@ The address field shows the page label beside a separate trusted origin. Titles,
 
 Type an address or search words. Three Google suggestions appear below the address after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
 
-Click a tab in the sidebar to switch to it. Right-click it to rename or close it. Drag it onto the page to open the two side by side.
+Click a tab in the sidebar to switch to it. Right-click it to rename or close it. Drag it up or down the sidebar to reorder your tabs, or onto the page to open the two side by side.
 
 The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state, while WebKit throttles their detached views and they lose focus. When macOS reports memory pressure, Interlinked pauses the oldest eligible background pages. It skips the active page and any page with playing media, an open file picker, an active download, or unsaved form work. Returning to a paused page restores its URL and scroll position. Background pages you leave alone for 30 minutes go to sleep the same way, with the same exceptions, and reload where you left them as soon as you return.
 

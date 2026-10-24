@@ -404,6 +404,24 @@ final class DownloadRecordTests: XCTestCase {
 }
 
 final class SurfaceTests: XCTestCase {
+    func testATabDroppedBetweenRowsLandsInThatGap() {
+        // Moves a tab the way dropTab(_:slot:) does, from a drop in a gap.
+        func drop(_ from: Int, before gap: Int, in tabs: [String] = ["A", "B", "C", "D"]) -> [String] {
+            var tabs = tabs
+            let slot = OpenWork.slot(from: from, gap: gap, count: tabs.count)
+            tabs.insert(tabs.remove(at: from), at: slot)
+            return tabs
+        }
+        XCTAssertEqual(drop(0, before: 2), ["B", "A", "C", "D"])
+        XCTAssertEqual(drop(0, before: 4), ["B", "C", "D", "A"])
+        XCTAssertEqual(drop(3, before: 0), ["D", "A", "B", "C"])
+        XCTAssertEqual(drop(3, before: 1), ["A", "D", "B", "C"])
+        // Either side of itself, a tab stays where it is.
+        XCTAssertEqual(drop(1, before: 1), ["A", "B", "C", "D"])
+        XCTAssertEqual(drop(1, before: 2), ["A", "B", "C", "D"])
+        XCTAssertEqual(drop(2, before: 9), ["A", "B", "D", "C"])
+    }
+
     func testCommandDigitsOneToNineNameTabs() {
         XCTAssertEqual(OpenWork.shortcutIndex("1"), 0)
         XCTAssertEqual(OpenWork.shortcutIndex("9"), 8)

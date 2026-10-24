@@ -10,6 +10,12 @@ enum OpenWork {
         return fallback
     }
 
+    /// Where a tab dragged from `from` lands when it's dropped in the gap
+    /// before the tab now at `gap`. A gap past the last tab is the end.
+    static func slot(from: Int, gap: Int, count: Int) -> Int {
+        min(max(gap > from ? gap - 1 : gap, 0), count - 1)
+    }
+
     static func shortcutIndex(_ characters: String) -> Int? {
         guard characters.count == 1, let digit = Int(characters), (1...9).contains(digit) else { return nil }
         return digit - 1

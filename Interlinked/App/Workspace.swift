@@ -970,6 +970,13 @@ final class Workspace {
         restoreFocus()
     }
 
+    /// Moves a tab into the gap before the tab now at `gap`, or to the end,
+    /// as dropping it between the sidebar's rows does.
+    func moveTab(_ dragged: TabID, toGap gap: Int) {
+        guard let from = tabs.firstIndex(where: { $0.id == dragged }) else { return }
+        dropTab(dragged, slot: OpenWork.slot(from: from, gap: gap, count: tabs.count))
+    }
+
     func dropTab(_ dragged: TabID, slot: Int) {
         guard let from = tabs.firstIndex(where: { $0.id == dragged }) else { return }
         guard from != slot, tabs.indices.contains(slot) else { return }

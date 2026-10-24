@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The conventional layout: open pages down a sidebar, a toolbar above the
 /// page, and nothing over the page itself. Each group morphs in place: the
@@ -91,10 +92,50 @@ enum SidebarMetrics {
 
 // MARK: - Sidebar
 
+/// Drops a dragged tab between the sidebar's rows: over a row's upper half it
+/// goes before that row, over its lower half after it. The New Page row
+/// (`row` nil) takes it to the end.
+private struct TabReorderDrop: DropDelegate {
+    var row: Int?
+    @Binding var gap: Int?
+    var workspace: Workspace
+
+    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.interlinkedTab]) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let next = resolve(info)
+        if gap != next { withAnimation(.easeOut(duration: 0.12)) { gap = next } }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        // The next row may already have claimed its gap.
+        if gap == resolve(info) { withAnimation(.easeOut(duration: 0.12)) { gap = nil } }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let target = resolve(info)
+        gap = nil
+        guard let provider = info.itemProviders(for: [.interlinkedTab]).first else { return false }
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.interlinkedTab.identifier) { data, _ in
+            guard let data, let raw = UInt64(String(decoding: data, as: UTF8.self)) else { return }
+            Task { @MainActor in workspace.moveTab(TabID(raw), toGap: target) }
+        }
+        return true
+    }
+
+    private func resolve(_ info: DropInfo) -> Int {
+        guard let row else { return workspace.tabs.count }
+        return info.location.y < SidebarMetrics.control / 2 ? row : row + 1
+    }
+}
+
 private struct TabSidebar: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var palette: Palette
+    /// Where a tab dragged over the list would land: the gap before this row.
+    @State private var dropGap: Int?
 
     private var historyOpen: Bool { workspace.pageHistoryOpen && workspace.editing == nil }
     private var downloadsOpen: Bool { workspace.downloads.panelOpen && workspace.editing == nil }
@@ -140,20 +181,38 @@ private struct TabSidebar: View {
     private var tabs: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(workspace.tabs) { tab in
+                ForEach(Array(workspace.tabs.enumerated()), id: \.element.id) { index, tab in
                     SidebarTabRow(tab: tab, palette: palette)
+                        .overlay(alignment: .top) { dropLine(before: index) }
+                        .onDrop(of: [.interlinkedTab], delegate: TabReorderDrop(row: index, gap: $dropGap, workspace: workspace))
                 }
                 Button(action: workspace.newPage) {
                     SidebarRowLabel(title: "New Page", symbol: "plus", palette: palette)
                         .foregroundStyle(palette.textDim)
                 }
                 .buttonStyle(.pointing)
+                .overlay(alignment: .top) { dropLine(before: workspace.tabs.count) }
+                // Dropped here, a tab goes to the end.
+                .onDrop(of: [.interlinkedTab], delegate: TabReorderDrop(row: nil, gap: $dropGap, workspace: workspace))
                 .accessibilityIdentifier("sidebar-new-page-row")
             }
             .padding(.horizontal, 6)
             .padding(.top, 4)
         }
         .scrollIndicators(.never)
+    }
+
+    /// The line a dragged tab would drop on, centred in the spacing above a row.
+    @ViewBuilder
+    private func dropLine(before index: Int) -> some View {
+        if dropGap == index {
+            Capsule()
+                .fill(palette.accent)
+                .frame(height: 2)
+                .padding(.horizontal, 4)
+                .offset(y: -2)
+                .allowsHitTesting(false)
+        }
     }
 
     private var tools: some View {
@@ -290,7 +349,7 @@ private struct SidebarTabRow: View {
             Button("Close Tab") { workspace.closeTab(tab.id) }
         }
         .accessibilityLabel(active ? "\(workspace.title(tab)), current tab" : "Switch to \(workspace.title(tab))")
-        .accessibilityHint("Drag onto the page to open it side by side")
+        .accessibilityHint("Drag up or down to reorder, or onto the page to open it side by side")
         .accessibilityIdentifier("sidebar-tab-\(tab.id.rawValue)")
     }
 }
