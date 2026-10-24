@@ -15,7 +15,11 @@ struct SidebarLayout<Page: View>: View {
     /// The width while the divider is dragged, before it settles.
     @State private var dragging: CGFloat?
     @State private var dragStart: CGFloat = 0
-    /// Puts the peeked sidebar away shortly after the pointer leaves it.
+    /// Where the pointer is: the edge strip and the peeked sidebar each report
+    /// their own hover, in no set order.
+    @State private var overEdge = false
+    @State private var overPeek = false
+    /// Puts the peeked sidebar away shortly after the pointer leaves both.
     @State private var unpeek: Task<Void, Never>?
 
     private var width: CGFloat {
@@ -69,14 +73,16 @@ struct SidebarLayout<Page: View>: View {
                 .frame(width: 8)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .onHover { $0 ? showPeek() : leavePeek() }
+                .onHover { overEdge = $0; pointerMoved() }
+                .onDisappear { overEdge = false }
                 .accessibilityHidden(true)
             if workspace.sidebarPeeking {
                 TabSidebar(palette: palette)
                     .frame(width: workspace.sidebarLast)
                     .modifier(PeekSurface(palette: palette))
                     .padding(8)
-                    .onHover { $0 ? showPeek() : leavePeek() }
+                    .onHover { overPeek = $0; pointerMoved() }
+                    .onDisappear { overPeek = false }
                     .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
             }
         }
@@ -84,21 +90,21 @@ struct SidebarLayout<Page: View>: View {
                    value: workspace.sidebarPeeking)
     }
 
-    private func showPeek() {
+    /// Over either the edge or the peek, it shows; off both, it tucks away
+    /// after a short pause, so a quick pass over the edge doesn't flicker it.
+    /// A tab dragged out onto the page keeps it open until the button comes up.
+    private func pointerMoved() {
         unpeek?.cancel()
-        if !workspace.sidebarPeeking { workspace.sidebarPeeking = true }
-    }
-
-    /// A quick pass over the edge doesn't flicker it, and a tab dragged out
-    /// onto the page keeps it open until the button comes up.
-    private func leavePeek() {
-        unpeek?.cancel()
+        if overEdge || overPeek {
+            if !workspace.sidebarPeeking { workspace.sidebarPeeking = true }
+            return
+        }
         unpeek = Task { @MainActor in
             repeat {
                 try? await Task.sleep(for: .milliseconds(250))
                 if Task.isCancelled { return }
             } while NSEvent.pressedMouseButtons & 1 != 0
-            workspace.sidebarPeeking = false
+            workspace.closePeek()
         }
     }
 
