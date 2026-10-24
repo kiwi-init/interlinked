@@ -24,8 +24,9 @@ test "$team" = "57249C654W"
 # Quit the Interlinked you use, which shares this build's data, and force
 # only this build's own binary: test and isolated copies keep running.
 /usr/bin/osascript -e 'tell application id "computer.interlinked" to quit' >/dev/null 2>&1 || true
+# Up to 5 s, so a quit still saving the session, history, and downloads finishes.
 attempt=0
-while /usr/bin/pgrep -f "$bin" >/dev/null && [ "$attempt" -lt 20 ]; do
+while /usr/bin/pgrep -f "$bin" >/dev/null && [ "$attempt" -lt 50 ]; do
   /bin/sleep 0.1
   attempt=$((attempt + 1))
 done
