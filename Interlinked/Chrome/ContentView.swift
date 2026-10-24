@@ -4,6 +4,7 @@ struct ContentView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
+    @State private var fullScreen = false
 
     var body: some View {
         let palette = Palette.of(colorScheme, tint: workspace.tint)
@@ -20,6 +21,11 @@ struct ContentView: View {
                 }
                 .padding(18)
             }
+            .overlay(alignment: .topLeading) {
+                if !fullScreen {
+                    WindowButtonsGlass()
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 PageActions(palette: palette, available: geometry.size)
                     .padding(18)
@@ -31,7 +37,7 @@ struct ContentView: View {
             }
         }
         .background(palette.pane)
-        .background(WindowChrome())
+        .background(WindowChrome(fullScreen: $fullScreen))
         .frame(minWidth: 640, minHeight: 400)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear {
