@@ -468,7 +468,8 @@ final class Workspace {
                 guard tab.isSplit else { return nil }
                 var rest = tab
                 rest.close(pane)
-                return rest
+                // The scene's own page opens again beside onboarding.
+                return rest.active == onboarding.sidePane ? nil : rest
             }
         }
         let current = activeTab?.id
@@ -949,11 +950,11 @@ final class Workspace {
     func unsplit() {
         guard let tab = activeTab, let other = tab.otherPane, let pane = activePane else { return }
         if editing != nil { discardLine() }
-        tabs[active].close(other)
         if !surfaces.holdsPage(pane), surfaces.holdsPage(other), !onboarding.contains(pane) {
             _ = closePane(pane)
             return
         }
+        tabs[active].close(other)
         tabs[active].active = pane
         tabs.insert(Tab(id: TabID(nextTab), pane: other), at: active + 1)
         nextTab += 1
