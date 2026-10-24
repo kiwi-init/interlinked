@@ -63,6 +63,19 @@ final class WebKitPageTests: XCTestCase {
         XCTAssertFalse(delegate.finished.contains(server.url("/page", host: "localhost")))
     }
 
+    func testScriptNavigationThatRedirectsToAnotherSiteIsReviewed() async throws {
+        // WebKit calls a page's own location change `other`, like an address
+        // Interlinked opens, but the page started it.
+        server.route("/hop", .redirect(to: server.url("/page", host: "localhost")))
+        let (page, delegate) = makePage()
+        page.load(server.url("/page"))
+        try await waitFor { delegate.finished.contains(self.server.url("/page")) }
+        _ = try await page.evaluateJavaScript("location.href = '/hop'")
+        try await waitFor { delegate.finished.contains(self.server.url("/page", host: "localhost")) }
+        XCTAssertTrue(delegate.reviews.contains(.init(destination: server.url("/page", host: "localhost"),
+                                                      source: server.url("/hop"), kind: .redirect)), "\(delegate.reviews)")
+    }
+
     func testOpenedAddressThatRedirectsToAnotherSiteIsNotReviewedAsARedirect() async throws {
         // Typed, or opened from another app: the person chose the address,
         // and links from mail often bounce through a tracker on another site.

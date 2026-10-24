@@ -117,21 +117,25 @@ final class WebKitPage: NSObject {
     private var committedURL: URL?
     /// The last main-frame address the navigation policy allowed.
     private var allowedURL: URL?
-    /// How that address was reached.
-    private var allowedKind: NavigationKind?
-    /// Where the provisional navigation began, how, and whether a server has
-    /// redirected it since.
+    /// Whether the page itself started the navigation to that address.
+    private var allowedFromPage = false
+    /// Where the provisional navigation began, whether the page started it,
+    /// and whether a server has redirected it since. Only a chain a page
+    /// started is reviewed as a redirect: an address typed or opened from
+    /// another app often bounces through a tracker on another site, and the
+    /// person chose it.
     private var chainStart: URL?
-    private var chainKind: NavigationKind?
+    private var chainFromPage = false
     private var provisional = false
     private var redirected = false
-    /// Only a chain a page started is reviewed as a redirect. An address
-    /// typed or opened from another app often bounces through a tracker on
-    /// another site, and the person chose it.
-    private var chainFromPage: Bool { [.link, .form, .redirect].contains(chainKind) }
+    /// Loads Interlinked asked for that have not started yet. WebKit
+    /// describes them, and a page's own script navigation, as `.other`, but
+    /// it starts each with the navigation `load` returned. One WebKit drops
+    /// is released, and leaves the table by itself.
+    private let appNavigations = NSHashTable<WKNavigation>.weakObjects()
     /// A navigation restarted without its tracking parameters, which keeps
-    /// the kind and source it was reviewed with.
-    private var restarted: (url: URL, kind: NavigationKind, source: URL?)?
+    /// how it was reviewed and who started it.
+    private var restarted: (url: URL, kind: NavigationKind, source: URL?, fromPage: Bool)?
     private var certificateErrorReported = false
     /// Error pages are not documents the rest of Interlinked reads.
     private var errorPage: WKNavigation?
@@ -180,8 +184,10 @@ final class WebKitPage: NSObject {
 
     private func changed() { delegate?.pageDidChange(self) }
 
-    func load(_ request: URLRequest) { nativeView.load(request) }
-    func load(_ url: URL) { nativeView.load(URLRequest(url: url)) }
+    func load(_ request: URLRequest) {
+        if let navigation = nativeView.load(request) { appNavigations.add(navigation) }
+    }
+    func load(_ url: URL) { load(URLRequest(url: url)) }
     func goBack() { nativeView.goBack() }
     func goForward() { nativeView.goForward() }
     func reload() { nativeView.reload() }
@@ -471,11 +477,16 @@ extension WebKitPage: WKNavigationDelegate {
 
         var kind = Self.navigationKind(action.navigationType)
         var source = committedURL
+        var fromPage = false
         // Subframes load while a restarted page waits, and must not clear it.
         if frame.isMainFrame {
+            // A freed navigation can still be counted, so look at live ones.
+            let fromApp = action.navigationType == .other && !appNavigations.allObjects.isEmpty
+            fromPage = !fromApp && ![.backForward, .reload].contains(action.navigationType)
             if let restarted, restarted.url == destination {
                 kind = restarted.kind
                 source = restarted.source
+                fromPage = restarted.fromPage
             }
             restarted = nil
         }
@@ -488,9 +499,10 @@ extension WebKitPage: WKNavigationDelegate {
             decisionHandler(.cancel)
             if frame.isMainFrame {
                 // A redirect restarted at its clean address is still reviewed
-                // as one.
-                restarted = provisional && chainFromPage ? (clean, .redirect, chainStart) : (clean, kind, source)
-                nativeView.load(URLRequest(url: clean))
+                // as one, and belongs to whoever started its chain.
+                let restartFromPage = provisional ? chainFromPage : fromPage
+                restarted = provisional && chainFromPage ? (clean, .redirect, chainStart, true) : (clean, kind, source, restartFromPage)
+                if let navigation = nativeView.load(URLRequest(url: clean)), !restartFromPage { appNavigations.add(navigation) }
             } else {
                 let literal = String(decoding: (try? JSONSerialization.data(withJSONObject: clean.absoluteString,
                                                                              options: .fragmentsAllowed)) ?? Data(), as: UTF8.self)
@@ -500,7 +512,6 @@ extension WebKitPage: WKNavigationDelegate {
         }
         guard frame.isMainFrame else { return decisionHandler(.allow) }
 
-        let reviewedKind = kind
         let proceed: () -> Void = { [weak self] in
             guard let self else { return decisionHandler(.cancel) }
             // Mail, phone, and app links belong to the app that handles them;
@@ -511,7 +522,7 @@ extension WebKitPage: WKNavigationDelegate {
                 return
             }
             self.allowedURL = destination
-            self.allowedKind = reviewedKind
+            self.allowedFromPage = fromPage
             self.certificateErrorReported = false
             self.prepareDocument(for: destination)
             decisionHandler(.allow)
@@ -545,7 +556,8 @@ extension WebKitPage: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         chainStart = allowedURL
-        chainKind = allowedKind
+        chainFromPage = allowedFromPage && !appNavigations.contains(navigation)
+        appNavigations.remove(navigation)
         provisional = true
         redirected = false
     }
