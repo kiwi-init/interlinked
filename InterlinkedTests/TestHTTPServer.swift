@@ -10,6 +10,10 @@ final class TestHTTPServer: @unchecked Sendable {
         var status = 200
         var headers = ["Content-Type": "text/html; charset=utf-8"]
         var body = Data()
+        /// Close the connection without answering, so the load fails.
+        var drops = false
+
+        static let drop = Response(drops: true)
 
         static func html(_ text: String) -> Response { Response(body: Data(text.utf8)) }
 
@@ -41,15 +45,6 @@ final class TestHTTPServer: @unchecked Sendable {
         let server = TestHTTPServer(listener: listener, port: try await ready(listener))
         accepted.serve { [weak server] connection in server?.serve(connection) ?? connection.cancel() }
         return server
-    }
-
-    /// An address nothing listens on, for loads that must fail.
-    static func closedURL() async throws -> URL {
-        let listener = try loopbackListener()
-        listener.newConnectionHandler = { $0.cancel() }
-        let port = try await ready(listener)
-        listener.cancel()
-        return URL(string: "http://127.0.0.1:\(port)/")!
     }
 
     func url(_ path: String, host: String = "127.0.0.1") -> URL {
@@ -102,6 +97,7 @@ final class TestHTTPServer: @unchecked Sendable {
             let target = head.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
             let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? "/"
             let response = self.lock.withLock { self.routes[path] } ?? Response(status: 404, body: Data("Not found".utf8))
+            guard !response.drops else { return connection.cancel() }
             connection.send(content: Self.encode(response), completion: .contentProcessed { _ in connection.cancel() })
         }
     }
