@@ -1,0 +1,9 @@
+#!/bin/sh
+# Draw the app icon (draw.mjs → icon.svg) and render every size of
+# Interlinked/Assets.xcassets/AppIcon.appiconset from it. Run it after changing
+# the drawing, and commit what it makes. Needs Node and Xcode's Swift.
+set -e
+cd "$(dirname "$0")/../.."
+
+node script/app-icon/draw.mjs > script/app-icon/icon.svg
+xcrun swift script/app-icon/png.swift script/app-icon/icon.svg Interlinked/Assets.xcassets/AppIcon.appiconset
