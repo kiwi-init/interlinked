@@ -330,6 +330,10 @@ final class BrowserCoordinator: WebKitPageDelegate {
         }
         if effects.contains(.newAddress) { workspace.builtIns.apply(to: page) }
         workspace.hosts.updatePage(page, pane: pane)
+        if effects.rereadsPage(loading: page.isLoading) {
+            workspace.assistance.loaded(pane, page: page)
+            workspace.usefulInfo.loaded(pane, page: page)
+        }
         if effects.contains(.newAddress) {
             workspace.hosts.syncFavicons(tabs: workspace.tabs, surfaces: workspace.surfaces)
             if let url = page.url, url.absoluteString != "about:blank" {
