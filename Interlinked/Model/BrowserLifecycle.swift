@@ -153,6 +153,14 @@ struct PageNavigationEffects: OptionSet, Equatable {
     static let newDocument = Self(rawValue: 1 << 0)
     /// The address moved: the line, favicon, and history follow it.
     static let newAddress = Self(rawValue: 1 << 1)
+
+    /// A route change inside a loaded document (pushState, replaceState, an
+    /// #anchor) keeps the page's state but not what it shows, so its label
+    /// and contact details are read again. A page still loading is read
+    /// once it finishes.
+    func rereadsPage(loading: Bool) -> Bool {
+        contains(.newAddress) && !contains(.newDocument) && !loading
+    }
 }
 
 /// WebKit reports pushState and #fragment navigations as an address change

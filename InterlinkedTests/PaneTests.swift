@@ -950,6 +950,16 @@ final class PageNavigationTests: XCTestCase {
         XCTAssertEqual(commitFirst.addressChanged(to: next), [])
     }
 
+    func testOnlyARouteChangeInALoadedPageReadsItAgain() {
+        var navigation = PageNavigationTracker()
+        XCTAssertFalse(navigation.committed(to: page).rereadsPage(loading: false), "a new document is read when it finishes")
+        let route = URL(string: "https://app.example.com/inbox/4")!
+        XCTAssertTrue(navigation.addressChanged(to: route).rereadsPage(loading: false))
+        XCTAssertFalse(navigation.addressChanged(to: route).rereadsPage(loading: false), "nothing moved")
+        let next = URL(string: "https://other.example.com/")!
+        XCTAssertFalse(navigation.addressChanged(to: next).rereadsPage(loading: true), "a load in progress is read when it finishes")
+    }
+
     func testReloadingTheSameAddressIsANewDocument() {
         var navigation = PageNavigationTracker()
         _ = navigation.committed(to: page)
