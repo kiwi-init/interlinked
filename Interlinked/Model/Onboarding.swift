@@ -158,10 +158,7 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
             title: nil,
             parts: [
                 OnboardingPart(step: .split,
-                               instruction: [
-                                   .words("You can drag that new tab to split it! Hold left"), .keys(["⌘"]),
-                                   .words("or hover the bottom left to see your tabs."),
-                               ],
+                               instruction: [.words("You can drag that new tab from the sidebar onto this page to split it!")],
                                check: "Split the window"),
                 OnboardingPart(step: .closedPane,
                                instruction: [.words("Afterwards click on that page and press"), .keys(["⌘", "W"]), .words("to close it.")],
