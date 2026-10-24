@@ -10,7 +10,7 @@ macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a t
 
 ## Browse
 
-The address field shows the page label beside a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. Click the label to edit the address. The sidebar lists every tab with its icon and label, and hovering one shows its close button. ⌘1 to ⌘9 pick tabs in sidebar order. ⌃⌘S or the toolbar's sidebar button tucks the sidebar away; drag its edge to resize it. History, Downloads, Sharing Screen Mode, and Settings sit at the bottom of the sidebar.
+The address field shows the page label beside a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. Click the label to edit the address. The sidebar lists every tab with its icon and label, and hovering one shows its close button. ⌘1 to ⌘9 pick tabs in sidebar order. ⌃⌘S or the toolbar's sidebar button tucks the sidebar away; drag its edge to resize it. Tucked away, it slides back over the page while the pointer rests on the window's left edge, and Escape or moving away puts it back. History, Downloads, Sharing Screen Mode, and Settings sit at the bottom of the sidebar.
 
 Type an address or search words. Three Google suggestions appear below the address after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
 
