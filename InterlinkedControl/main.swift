@@ -124,6 +124,14 @@ guard !tooLarge else {
     fputs("interlinked: reply too large\n", stderr)
     exit(1)
 }
+// Every reply ends in a newline. Without one the app closed the connection
+// or stalled past the timeout, and a script must not read that as success.
+guard sawNewline else {
+    // quit ends the app before it can answer.
+    if request == "quit" { exit(0) }
+    fputs("interlinked: no reply from \(path)\n", stderr)
+    exit(1)
+}
 
 let reply = String(data: data, encoding: .utf8) ?? ""
 if let json = try? JSONSerialization.jsonObject(with: data),

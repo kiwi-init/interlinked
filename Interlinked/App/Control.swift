@@ -718,10 +718,13 @@ final class ControlServer {
     private var listenFD: Int32 = -1
     private var thread: Thread?
     private var running = false
+    /// The socket file this copy created. Another copy started on the same
+    /// path replaces it, and must keep its own when this one stops.
+    private var socketNode: (device: dev_t, inode: ino_t)?
 
     func start(handler: @escaping (String) -> String) {
         let path = Control.socketPath()
-        let usingOverride = ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] != nil
+        let usingOverride = !(ProcessInfo.processInfo.environment["INTERLINKED_SOCKET"] ?? "").isEmpty
 
         let probe = sockaddr_un()
         let sunPathCapacity = MemoryLayout.size(ofValue: probe.sun_path)
@@ -777,6 +780,8 @@ final class ControlServer {
         }
         // The socket lives in a 0700 directory; lock the node itself down too.
         _ = path.withCString { Darwin.chmod($0, 0o600) }
+        var node = stat()
+        if stat(path, &node) == 0 { socketNode = (node.st_dev, node.st_ino) }
         listenFD = fd
         running = true
         print("interlinked: control channel on \(path)")
@@ -784,8 +789,11 @@ final class ControlServer {
             while self?.running == true {
                 let client = accept(fd, nil, nil)
                 if client < 0 {
-                    if self?.running == true { continue }
-                    break
+                    guard self?.running == true else { break }
+                    // Out of file descriptors, the pending connection stays
+                    // queued: wait rather than spin on it.
+                    if errno != EINTR && errno != ECONNABORTED { usleep(50_000) }
+                    continue
                 }
                 // Handle each client off the accept thread so one slow or
                 // wedged peer cannot starve the channel.
@@ -807,7 +815,12 @@ final class ControlServer {
             shutdown(fd, SHUT_RDWR)
             close(fd)
         }
-        unlink(Control.socketPath())
+        let path = Control.socketPath()
+        var node = stat()
+        if let socketNode, stat(path, &node) == 0, node.st_dev == socketNode.device, node.st_ino == socketNode.inode {
+            unlink(path)
+        }
+        socketNode = nil
     }
 
     private static func ensureControlDirectory(for socketPath: String) -> Bool {
