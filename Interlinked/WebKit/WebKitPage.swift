@@ -128,6 +128,7 @@ final class WebKitPage: NSObject {
     private var certificateErrorReported = false
     /// Error pages are not documents the rest of Interlinked reads.
     private var errorPage: WKNavigation?
+    private var errorPageURL: URL?
     /// The sign-in sheet a load is waiting on.
     private var signIn: NSAlert?
     private var downloads: [UInt32: WKDownload] = [:]
@@ -284,6 +285,7 @@ final class WebKitPage: NSObject {
         main{max-width:30rem;padding:24px}h1{margin:0 0 8px;font-size:22px;font-weight:600}p{margin:0;opacity:.72}
         </style></head><body><main><h1>Can’t open this page</h1><p><strong>\(host)</strong>: \(message)</p></main></body></html>
         """
+        errorPageURL = url
         errorPage = nativeView.loadSimulatedRequest(URLRequest(url: url), responseHTML: html)
     }
 
@@ -325,6 +327,12 @@ final class WebKitPage: NSObject {
         downloadIDs[ObjectIdentifier(download)] = nextDownload
         downloads[nextDownload] = download
         download.delegate = self
+    }
+
+    /// A download that was refused before it started.
+    private func forget(_ download: WKDownload) {
+        guard let identifier = downloadIDs.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        downloads.removeValue(forKey: identifier)
     }
 
     private func observeProgress(_ download: WKDownload, identifier: UInt32, destination: URL) {
@@ -411,13 +419,22 @@ extension WebKitPage: WKNavigationDelegate {
             return
         }
 
+        // The error page for a failed load was reviewed as that load.
+        if frame.isMainFrame, let errorPageURL {
+            self.errorPageURL = nil
+            if destination == errorPageURL { return decisionHandler(.allow) }
+        }
+
         var kind = Self.navigationKind(action.navigationType)
         var source = committedURL
-        if let restarted, restarted.url == destination {
-            kind = restarted.kind
-            source = restarted.source
+        // Subframes load while a restarted page waits, and must not clear it.
+        if frame.isMainFrame {
+            if let restarted, restarted.url == destination {
+                kind = restarted.kind
+                source = restarted.source
+            }
+            restarted = nil
         }
-        restarted = nil
 
         // Tracking parameters never reach a page, whether or not blocking is
         // on. Only GET restarts without replaying a body.
@@ -566,13 +583,12 @@ extension WebKitPage: WKDownloadDelegate {
     ) {
         guard let identifier = downloadIDs[ObjectIdentifier(download)],
               let url = download.originalRequest?.url ?? response.url, let delegate else {
-            downloadIDs.removeValue(forKey: ObjectIdentifier(download))
+            forget(download)
             return completionHandler(nil)
         }
         delegate.page(self, decideDownloadFrom: committedURL, to: url) { [weak self] allow in
             guard let self, allow, self.delegate != nil else {
-                self?.downloads.removeValue(forKey: identifier)
-                self?.downloadIDs.removeValue(forKey: ObjectIdentifier(download))
+                self?.forget(download)
                 return completionHandler(nil)
             }
             self.delegate?.page(self, didStartDownload: identifier, url: url, suggestedFilename: suggestedFilename)
