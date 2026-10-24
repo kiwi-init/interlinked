@@ -76,7 +76,6 @@
 		98B1BF0AB978276412FD322E /* PageBuiltInsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E27DBE4C6497D5849F0D0C0 /* PageBuiltInsModel.swift */; };
 		9B3DDA113FE01C46D9554A0C /* BrowserLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83FF773D8CA272B3E7C7CE5 /* BrowserLifecycle.swift */; };
 		9D91E379D489E48535599BEC /* UsefulInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB7B0275D08EDD64EB69A36 /* UsefulInfo.swift */; };
-		9DEFCE9138AB88C38C97B814 /* NavigationExceptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349C2F07BFC76E9B8D30D992 /* NavigationExceptions.swift */; };
 		A01A49427F4D2908BCEB4439 /* PageContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA3C7C996F7CFE815315977E /* PageContext.swift */; };
 		A34EF15A612C181C95AE0CC4 /* IntelligencePromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1418283E977F6F0C32592809 /* IntelligencePromptTests.swift */; };
 		A79F62218D170508FC78E022 /* Surface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820D9AB9677B72D3241B02AD /* Surface.swift */; };
@@ -123,7 +122,6 @@
 		F4DC81584BF731BF009814F2 /* BrowserIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 278B9EAC8B38D47773A90C92 /* BrowserIntelligence.swift */; };
 		F62C07309719A7703C2E8C93 /* BrowserPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE2ECB2A4F4B5B8EE6C36B88 /* BrowserPrompts.swift */; };
 		F8549824CCE6DD7169346B04 /* Pane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435F2450025DF29A3A41E8BD /* Pane.swift */; };
-		F877CECF615A637DB218FB5E /* NavigationExceptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349C2F07BFC76E9B8D30D992 /* NavigationExceptions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -166,7 +164,6 @@
 		2AFB0B76340D2698E0D4C367 /* Jev.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Jev.swift; sourceTree = "<group>"; };
 		2B73DBD242CB3B3D104CA994 /* Interlinked.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Interlinked.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		30384C1BD486E6E98605314C /* InterlinkedTestFlight.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = InterlinkedTestFlight.entitlements; sourceTree = "<group>"; };
-		349C2F07BFC76E9B8D30D992 /* NavigationExceptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationExceptions.swift; sourceTree = "<group>"; };
 		3A05F82E2008D549CF797733 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3A32DF687DB8361C26C792E8 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		3CA716B3FF3670CB11284AB1 /* JevCredential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JevCredential.swift; sourceTree = "<group>"; };
@@ -352,7 +349,6 @@
 				2AFB0B76340D2698E0D4C367 /* Jev.swift */,
 				3CA716B3FF3670CB11284AB1 /* JevCredential.swift */,
 				6E04B9D07839C1AE4C380A41 /* JevDecisionCache.swift */,
-				349C2F07BFC76E9B8D30D992 /* NavigationExceptions.swift */,
 				6CE8C070DD6BDDD3ED213AB1 /* NavigationSafety.swift */,
 				1E37F1D1CA78D085F66F5E41 /* Onboarding.swift */,
 				7E27DBE4C6497D5849F0D0C0 /* PageBuiltInsModel.swift */,
@@ -629,7 +625,6 @@
 				E641778E6A0C337B76D7B125 /* JevCredential.swift in Sources */,
 				7DFED30A4E5690A25AE7DFCC /* JevDecisionCache.swift in Sources */,
 				397E8234CB51EDADCFE8DAE2 /* JevTests.swift in Sources */,
-				F877CECF615A637DB218FB5E /* NavigationExceptions.swift in Sources */,
 				C39ED4D1DD2BF46B8687FDAA /* NavigationSafety.swift in Sources */,
 				20BAE2F406B8B2DB29F26874 /* Onboarding.swift in Sources */,
 				087A05EF30338EE874BC806D /* OnboardingTests.swift in Sources */,
@@ -699,7 +694,6 @@
 				C98E1017D27E916A462253A8 /* Jev.swift in Sources */,
 				E2BA064B0591E427E83B93B4 /* JevCredential.swift in Sources */,
 				72FD41505CA24D79BA29F711 /* JevDecisionCache.swift in Sources */,
-				9DEFCE9138AB88C38C97B814 /* NavigationExceptions.swift in Sources */,
 				2607C4EB3506CD53B0572477 /* NavigationSafety.swift in Sources */,
 				B0DE4F4E631B2CB2B507C8F3 /* Onboarding.swift in Sources */,
 				D97C412E5DDD70B2EA5AA12B /* OnboardingGuide.swift in Sources */,

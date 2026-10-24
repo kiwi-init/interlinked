@@ -432,7 +432,6 @@ extension Control {
     static func sites(_ words: [String], _ workspace: Workspace) -> String {
         let grants = workspace.assistance.originGrants
         let permissions = workspace.permissions
-        let exceptions = workspace.navigationExceptions
         let builtIns = workspace.builtIns
         func named(_ origin: String, _ site: String) -> Bool {
             origin == site || URL(string: origin)?.host == site
@@ -442,7 +441,7 @@ extension Control {
         case "remove", "remove-all":
             let all = words[0] == "remove-all"
             guard let group = words.dropFirst().first, all || words.count >= 3 else {
-                return error("sites \(words[0]) takes jev|permissions|unblocked|light|exceptions\(all ? "" : " and a site")")
+                return error("sites \(words[0]) takes jev|permissions|unblocked|light\(all ? "" : " and a site")")
             }
             let site = all ? nil : words[2]
             var removed = 0
@@ -459,10 +458,8 @@ extension Control {
                 for entry in builtIns.unblockedSites where site.map({ entry == $0 }) ?? true { builtIns.removeUnblockedSite(entry); removed += 1 }
             case "light":
                 for entry in builtIns.lightSites where site.map({ entry == $0 }) ?? true { builtIns.removeLightSite(entry); removed += 1 }
-            case "exceptions":
-                for record in exceptions.records where site.map({ named(record.key.origin, $0) }) ?? true { exceptions.revoke(record.key); removed += 1 }
             default:
-                return error("no site group '\(group)'. Try: jev permissions unblocked light exceptions")
+                return error("no site group '\(group)'. Try: jev permissions unblocked light")
             }
             guard removed > 0 else { return error("nothing saved for \(site ?? group)") }
         default:
@@ -475,7 +472,6 @@ extension Control {
             },
             "unblocked": builtIns.unblockedSites.sorted(),
             "light": builtIns.lightSites.sorted(),
-            "exceptions": exceptions.records.map { ["origin": $0.key.origin, "reasons": $0.key.reasons] as [String: Any] },
         ])
     }
 

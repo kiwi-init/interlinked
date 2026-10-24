@@ -328,142 +328,24 @@ final class SplitViewTests: XCTestCase {
 }
 
 final class NavigationSafetyTests: XCTestCase {
-    func testOrdinarySameSiteNavigationIsAllowed() throws {
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://shop.example.com/cart")),
-            source: try XCTUnwrap(URL(string: "https://www.example.com/products")),
-            kind: .link,
-            linkText: "View cart"
-        )
-        XCTAssertEqual(review.disposition, .allow)
-        XCTAssertTrue(review.reasons.isEmpty)
-    }
-
-    func testActiveContentDestinationsAreBlocked() throws {
-        for address in ["javascript:alert(1)", "data:text/html,hello"] {
-            let review = NavigationSafety.review(
-                destination: try XCTUnwrap(URL(string: address)), source: nil, kind: .link)
-            XCTAssertEqual(review.disposition, .block)
-            XCTAssertTrue(review.reasons.contains(.activeContentURL))
+    func testActiveContentNeverOpensAsAPage() throws {
+        for address in ["javascript:alert(1)", "data:text/html,hello", "JavaScript:alert(1)"] {
+            XCTAssertTrue(NavigationSafety.blocks(try XCTUnwrap(URL(string: address))), address)
         }
     }
 
-    func testCredentialsAndPrivateURLPartsStayOutOfTheWarning() throws {
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://person:secret@example.com/private?token=hidden#account")),
-            source: try XCTUnwrap(URL(string: "https://source.test/start?private=yes")),
-            kind: .link
-        )
-        XCTAssertEqual(review.disposition, .warn)
-        XCTAssertTrue(review.reasons.contains(.embeddedCredentials))
-        XCTAssertEqual(review.destinationOrigin, "https://example.com")
-        XCTAssertEqual(review.sourceOrigin, "https://source.test")
-        let shown = ([review.destinationOrigin, review.sourceOrigin ?? ""] + review.reasons.map(\.rawValue)).joined(separator: "\n")
-        for privateValue in ["person", "secret", "private", "token", "hidden", "account"] {
-            XCTAssertFalse(shown.contains(privateValue))
+    func testOrdinaryAddressesOpen() throws {
+        for address in ["https://destination.test/end", "http://plain.test/", "https://person@example.com/",
+                        "http://xn--paypl-3ve.test:8080/login", "mailto:someone@example.com", "about:blank"] {
+            XCTAssertFalse(NavigationSafety.blocks(try XCTUnwrap(URL(string: address))), address)
         }
     }
 
-    func testDowngradesEncodedHostsAndUnusualPortsWarn() throws {
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "http://xn--paypl-3ve.test:8080/login")),
-            source: try XCTUnwrap(URL(string: "https://bank.test")),
-            kind: .link
-        )
-        XCTAssertEqual(review.disposition, .warn)
-        XCTAssertTrue(review.reasons.contains(.insecureDowngrade))
-        XCTAssertTrue(review.reasons.contains(.encodedHostname))
-        XCTAssertTrue(review.reasons.contains(.unusualPort))
-    }
-
-    func testInvalidPortsAreBlocked() throws {
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://example.test:99999/path")),
-            source: nil,
-            kind: .link
-        )
-        XCTAssertEqual(review.disposition, .block)
-        XCTAssertTrue(review.reasons.contains(.invalidPort))
-    }
-
-    func testCrossSiteFormsAndMisleadingHostTextWarn() throws {
-        let source = try XCTUnwrap(URL(string: "https://accounts.example.com/profile"))
-        let crossSite = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://collector.test/submit")),
-            source: source,
-            kind: .form
-        )
-        XCTAssertTrue(crossSite.reasons.contains(.crossOriginForm))
-
-        let sameSite = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://checkout.example.com/submit")),
-            source: source,
-            kind: .form
-        )
-        XCTAssertFalse(sameSite.reasons.contains(.crossOriginForm))
-
-        let misleading = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://paypa1.test/sign-in")),
-            source: source,
-            kind: .link,
-            linkText: "Sign in at paypal.com"
-        )
-        XCTAssertTrue(misleading.reasons.contains(.misleadingLinkText))
-    }
-
-    func testUnexpectedCrossSitePopupDownloadAndRedirectWarn() throws {
-        let source = try XCTUnwrap(URL(string: "https://source.test/start"))
-        let destination = try XCTUnwrap(URL(string: "https://destination.test/end"))
-
-        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .popup).reasons.contains(.crossOriginPopup))
-        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .download).reasons.contains(.crossOriginDownload))
-        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .redirect).reasons.contains(.crossSiteRedirect))
-    }
-
-    func testPagesSaveFilesTheyMadeWithoutAWarning() throws {
-        let source = try XCTUnwrap(URL(string: "https://charts.test/report"))
+    func testPagesSaveFilesTheyMade() throws {
         for address in ["data:image/png;base64,iVBORw0KGgo=", "blob:https://charts.test/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"] {
-            let review = NavigationSafety.review(destination: try XCTUnwrap(URL(string: address)), source: source, kind: .download)
-            XCTAssertEqual(review.disposition, .allow, address)
+            XCTAssertFalse(NavigationSafety.blocks(try XCTUnwrap(URL(string: address)), download: true), address)
         }
-        let opened = NavigationSafety.review(destination: try XCTUnwrap(URL(string: "data:text/html,hi")), source: source, kind: .link)
-        XCTAssertEqual(opened.disposition, .block)
-    }
-
-    func testOnlyThePageCanDowngradeItself() throws {
-        let source = try XCTUnwrap(URL(string: "https://secure.test/"))
-        let destination = try XCTUnwrap(URL(string: "http://plain.test/"))
-        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .link).reasons.contains(.insecureDowngrade))
-        XCTAssertTrue(NavigationSafety.review(destination: destination, source: source, kind: .redirect).reasons.contains(.insecureDowngrade))
-        // Typed into the address field, or a link from another app.
-        XCTAssertFalse(NavigationSafety.review(destination: destination, source: source, kind: .other).reasons.contains(.insecureDowngrade))
-    }
-
-}
-
-@MainActor
-final class NavigationExceptionStoreTests: XCTestCase {
-    func testExceptionsAreExactOriginAndReasonScopedAndRevocable() throws {
-        let suite = "NavigationExceptionStoreTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = NavigationExceptionStore(defaults: defaults, storageKey: "exceptions")
-        let warned = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://example.test:8443/path")),
-            source: nil,
-            kind: .link
-        )
-        store.allow(warned)
-        XCTAssertTrue(store.contains(warned))
-
-        let otherReason = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "http://example.test:8443/path")),
-            source: try XCTUnwrap(URL(string: "https://source.test")),
-            kind: .link
-        )
-        XCTAssertFalse(store.contains(otherReason))
-        store.revoke(try XCTUnwrap(warned.exceptionKey))
-        XCTAssertFalse(store.contains(warned))
+        XCTAssertTrue(NavigationSafety.blocks(try XCTUnwrap(URL(string: "javascript:alert(1)")), download: true))
     }
 }
 

@@ -20,25 +20,12 @@ protocol WebKitPageDelegate: AnyObject {
     func page(_ page: WebKitPage, requestedPopup url: URL)
     func page(_ page: WebKitPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String)
     func page(_ page: WebKitPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool)
-    /// Returns false to allow the navigation now, or true and later calls
-    /// `completion` exactly once.
-    func page(
-        _ page: WebKitPage,
-        decideNavigationTo destination: URL,
-        source: URL?,
-        kind: NavigationKind,
-        completion: @escaping (Bool) -> Void
-    ) -> Bool
+    /// A mail, phone, or app link, which belongs to the app that handles it.
+    func page(_ page: WebKitPage, opensApp url: URL)
     func page(
         _ page: WebKitPage,
         decidePermissionFor origin: String,
         kind: WebsitePermissionKind,
-        completion: @escaping (Bool) -> Void
-    )
-    func page(
-        _ page: WebKitPage,
-        decideDownloadFrom source: URL?,
-        to destination: URL,
         completion: @escaping (Bool) -> Void
     )
     func page(_ page: WebKitPage, didRejectCertificateAt url: URL, error: String)
@@ -113,29 +100,8 @@ final class WebKitPage: NSObject {
     /// The blocking scripts registered for the next document.
     private var blocking: DocumentBlocking?
     private var attachedRuleLists: [WKContentRuleList] = []
-    /// The main frame's committed address: the page a navigation leaves.
-    private var committedURL: URL?
     /// The last main-frame address the navigation policy allowed.
     private var allowedURL: URL?
-    /// Whether the page itself started the navigation to that address.
-    private var allowedFromPage = false
-    /// Where the provisional navigation began, whether the page started it,
-    /// and whether a server has redirected it since. Only a chain a page
-    /// started is reviewed as a redirect: an address typed or opened from
-    /// another app often bounces through a tracker on another site, and the
-    /// person chose it.
-    private var chainStart: URL?
-    private var chainFromPage = false
-    private var provisional = false
-    private var redirected = false
-    /// Loads Interlinked asked for that have not started yet. WebKit
-    /// describes them, and a page's own script navigation, as `.other`, but
-    /// it starts each with the navigation `load` returned. One WebKit drops
-    /// is released, and leaves the table by itself.
-    private let appNavigations = NSHashTable<WKNavigation>.weakObjects()
-    /// A navigation restarted without its tracking parameters, which keeps
-    /// how it was reviewed and who started it.
-    private var restarted: (url: URL, kind: NavigationKind, source: URL?, fromPage: Bool)?
     private var certificateErrorReported = false
     /// Error pages are not documents the rest of Interlinked reads.
     private var errorPage: WKNavigation?
@@ -184,9 +150,7 @@ final class WebKitPage: NSObject {
 
     private func changed() { delegate?.pageDidChange(self) }
 
-    func load(_ request: URLRequest) {
-        if let navigation = nativeView.load(request) { appNavigations.add(navigation) }
-    }
+    func load(_ request: URLRequest) { nativeView.load(request) }
     func load(_ url: URL) { load(URLRequest(url: url)) }
     func goBack() { nativeView.goBack() }
     func goForward() { nativeView.goForward() }
@@ -338,16 +302,6 @@ final class WebKitPage: NSObject {
             .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
-    private static func navigationKind(_ type: WKNavigationType) -> NavigationKind {
-        switch type {
-        case .linkActivated: .link
-        case .formSubmitted, .formResubmitted: .form
-        case .backForward: .history
-        case .reload: .reload
-        default: .other
-        }
-    }
-
     private static func isWeb(_ url: URL) -> Bool {
         ["http", "https"].contains(url.scheme?.lowercased() ?? "")
     }
@@ -469,26 +423,11 @@ extension WebKitPage: WKNavigationDelegate {
             return
         }
 
-        // The error page for a failed load was reviewed as that load.
+        // The error page stands in for the load that failed, which was
+        // already allowed.
         if frame.isMainFrame, let errorPageURL {
             self.errorPageURL = nil
             if destination == errorPageURL { return decisionHandler(.allow) }
-        }
-
-        var kind = Self.navigationKind(action.navigationType)
-        var source = committedURL
-        var fromPage = false
-        // Subframes load while a restarted page waits, and must not clear it.
-        if frame.isMainFrame {
-            // A freed navigation can still be counted, so look at live ones.
-            let fromApp = action.navigationType == .other && !appNavigations.allObjects.isEmpty
-            fromPage = !fromApp && ![.backForward, .reload].contains(action.navigationType)
-            if let restarted, restarted.url == destination {
-                kind = restarted.kind
-                source = restarted.source
-                fromPage = restarted.fromPage
-            }
-            restarted = nil
         }
 
         // Tracking parameters never reach a page, whether or not blocking is
@@ -498,11 +437,7 @@ extension WebKitPage: WKNavigationDelegate {
                                                           subframe: !frame.isMainFrame) {
             decisionHandler(.cancel)
             if frame.isMainFrame {
-                // A redirect restarted at its clean address is still reviewed
-                // as one, and belongs to whoever started its chain.
-                let restartFromPage = provisional ? chainFromPage : fromPage
-                restarted = provisional && chainFromPage ? (clean, .redirect, chainStart, true) : (clean, kind, source, restartFromPage)
-                if let navigation = nativeView.load(URLRequest(url: clean)), !restartFromPage { appNavigations.add(navigation) }
+                nativeView.load(URLRequest(url: clean))
             } else {
                 let literal = String(decoding: (try? JSONSerialization.data(withJSONObject: clean.absoluteString,
                                                                              options: .fragmentsAllowed)) ?? Data(), as: UTF8.self)
@@ -511,26 +446,16 @@ extension WebKitPage: WKNavigationDelegate {
             return
         }
         guard frame.isMainFrame else { return decisionHandler(.allow) }
-
-        let proceed: () -> Void = { [weak self] in
-            guard let self else { return decisionHandler(.cancel) }
-            // Mail, phone, and app links belong to the app that handles them;
-            // the person has already confirmed leaving the web.
-            if !Self.isWeb(destination), !Self.pageSchemes.contains(destination.scheme?.lowercased() ?? "") {
-                decisionHandler(.cancel)
-                NSWorkspace.shared.open(destination)
-                return
-            }
-            self.allowedURL = destination
-            self.allowedFromPage = fromPage
-            self.certificateErrorReported = false
-            self.prepareDocument(for: destination)
-            decisionHandler(.allow)
+        if NavigationSafety.blocks(destination) { return decisionHandler(.cancel) }
+        if !Self.isWeb(destination), !Self.pageSchemes.contains(destination.scheme?.lowercased() ?? "") {
+            decisionHandler(.cancel)
+            delegate?.page(self, opensApp: destination)
+            return
         }
-        let reviewing = delegate?.page(self, decideNavigationTo: destination, source: source, kind: kind) { allow in
-            if allow { proceed() } else { decisionHandler(.cancel) }
-        } ?? false
-        if !reviewing { proceed() }
+        allowedURL = destination
+        certificateErrorReported = false
+        prepareDocument(for: destination)
+        decisionHandler(.allow)
     }
 
     func webView(
@@ -540,38 +465,12 @@ extension WebKitPage: WKNavigationDelegate {
     ) {
         let attachment = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")?
             .lowercased().hasPrefix("attachment") == true
-        if !response.canShowMIMEType || attachment { return decisionHandler(.download) }
-        // WebKit asks about each redirect before it reports one, so the chain
-        // as a whole is reviewed here, from where it began.
-        guard response.isForMainFrame, redirected, chainFromPage, let start = chainStart,
-              let destination = response.response.url, Self.isWeb(destination) else { return decisionHandler(.allow) }
-        let chain: [NavigationReview.Reason] = [.crossSiteRedirect, .insecureDowngrade]
-        let review = NavigationSafety.review(destination: destination, source: start, kind: .redirect)
-        guard review.reasons.contains(where: chain.contains) else { return decisionHandler(.allow) }
-        let reviewing = delegate?.page(self, decideNavigationTo: destination, source: start, kind: .redirect) { allow in
-            decisionHandler(allow ? .allow : .cancel)
-        } ?? false
-        if !reviewing { decisionHandler(.allow) }
-    }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        chainStart = allowedURL
-        chainFromPage = allowedFromPage && !appNavigations.contains(navigation)
-        appNavigations.remove(navigation)
-        provisional = true
-        redirected = false
-    }
-
-    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
-        redirected = true
+        decisionHandler(!response.canShowMIMEType || attachment ? .download : .allow)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        provisional = false
-        redirected = false
         frameEdited = false
         dismissSignIn()
-        committedURL = webView.url
         delegate?.pageDidCommit(self)
     }
 
@@ -590,8 +489,6 @@ extension WebKitPage: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        provisional = false
-        redirected = false
         dismissSignIn()
         let error = error as NSError
         // WebKit's own codes mean a policy, a download, or a plug-in took the load.
@@ -642,26 +539,21 @@ extension WebKitPage: WKDownloadDelegate {
         completionHandler: @escaping @MainActor (URL?) -> Void
     ) {
         guard let identifier = downloadIDs[ObjectIdentifier(download)],
-              let url = download.originalRequest?.url ?? response.url, let delegate else {
+              let url = download.originalRequest?.url ?? response.url, let delegate,
+              !NavigationSafety.blocks(url, download: true) else {
             forget(download)
             return completionHandler(nil)
         }
-        delegate.page(self, decideDownloadFrom: committedURL, to: url) { [weak self] allow in
-            guard let self, allow, self.delegate != nil else {
-                self?.forget(download)
-                return completionHandler(nil)
+        delegate.page(self, didStartDownload: identifier, url: url, suggestedFilename: suggestedFilename)
+        chooseDestination(suggestedFilename) { destination in
+            // The tab may have closed while the panel was up.
+            guard let destination, self.delegate != nil else {
+                completionHandler(nil)
+                self.reportDownload(identifier, cancelled: true)
+                return
             }
-            self.delegate?.page(self, didStartDownload: identifier, url: url, suggestedFilename: suggestedFilename)
-            self.chooseDestination(suggestedFilename) { destination in
-                // The tab may have closed while the panel was up.
-                guard let destination, self.delegate != nil else {
-                    completionHandler(nil)
-                    self.reportDownload(identifier, cancelled: true)
-                    return
-                }
-                completionHandler(destination)
-                self.observeProgress(download, identifier: identifier, destination: destination)
-            }
+            completionHandler(destination)
+            self.observeProgress(download, identifier: identifier, destination: destination)
         }
     }
 

@@ -405,35 +405,13 @@ final class BrowserCoordinator: WebKitPageDelegate {
 
     func page(_ page: WebKitPage, didFail message: String) { update(page) }
 
-    func page(
-        _ page: WebKitPage,
-        decideNavigationTo destination: URL,
-        source: URL?,
-        kind: NavigationKind,
-        completion: @escaping (Bool) -> Void
-    ) -> Bool {
-        guard let workspace else { return false }
-        let preliminary = NavigationSafety.review(destination: destination, source: source, kind: kind)
-        let inspectLink = kind == .link && source.map { !NavigationSafety.sameSite($0, destination) } == true
-        if preliminary.disposition == .allow, !inspectLink { return false }
-        if preliminary.disposition == .warn,
-           workspace.navigationExceptions.contains(preliminary), !inspectLink { return false }
+    func page(_ page: WebKitPage, opensApp url: URL) {
         Task { @MainActor [weak self, weak page] in
             guard let self, let page, let workspace = self.workspace,
-                  workspace.hosts.existingBrowser(self.pane) === page else {
-                completion(false)
-                return
-            }
-            let linkText = inspectLink ? await PageTextBridge.navigationLinkText(page, destination: destination) : nil
-            let review = NavigationSafety.review(
-                destination: destination,
-                source: source,
-                kind: kind,
-                linkText: linkText
-            )
-            completion(await self.allow(review, page: page, workspace: workspace))
+                  workspace.hosts.existingBrowser(self.pane) === page,
+                  await BrowserPrompts.confirmOpeningApp(for: url, window: page.window) else { return }
+            NSWorkspace.shared.open(url)
         }
-        return true
     }
 
     func page(
@@ -462,30 +440,6 @@ final class BrowserCoordinator: WebKitPageDelegate {
         }
     }
 
-    func page(
-        _ page: WebKitPage,
-        decideDownloadFrom source: URL?,
-        to destination: URL,
-        completion: @escaping (Bool) -> Void
-    ) {
-        guard workspace != nil else {
-            completion(false)
-            return
-        }
-        let review = NavigationSafety.review(destination: destination, source: source, kind: .download)
-        Task { @MainActor [weak self, weak page] in
-            guard let self, let page, let workspace = self.workspace,
-                  workspace.hosts.existingBrowser(self.pane) === page else {
-                completion(false)
-                return
-            }
-            let allowed = await self.allow(review, page: page, workspace: workspace)
-            // The tab may have closed while the warning was up; a download
-            // started then would have no record to show, cancel, or interrupt.
-            completion(allowed && workspace.hosts.existingBrowser(self.pane) === page)
-        }
-    }
-
     func page(_ page: WebKitPage, didRejectCertificateAt url: URL, error: String) {
         Task { @MainActor [weak page] in
             await BrowserPrompts.showCertificateError(url: url, error: error, window: page?.window)
@@ -501,14 +455,8 @@ final class BrowserCoordinator: WebKitPageDelegate {
 
     func page(_ page: WebKitPage, requestedPopup url: URL) {
         // Pages must not open file:, data:, or custom-scheme tabs on their own.
-        guard let destination = ExternalURLRouting.webURL(url), workspace != nil else { return }
-        let review = NavigationSafety.review(destination: destination, source: page.url, kind: .popup)
-        Task { @MainActor [weak self, weak page] in
-            guard let self, let page, let workspace = self.workspace,
-                  workspace.hosts.existingBrowser(self.pane) === page,
-                  await self.allow(review, page: page, workspace: workspace) else { return }
-            workspace.openAddress(destination.absoluteString)
-        }
+        guard let destination = ExternalURLRouting.webURL(url) else { return }
+        workspace?.openAddress(destination.absoluteString)
     }
 
     func page(_ page: WebKitPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String) {
@@ -521,13 +469,4 @@ final class BrowserCoordinator: WebKitPageDelegate {
 
     func pageWillChooseFiles(_ page: WebKitPage) { workspace?.hosts.beginUpload(pane) }
     func pageDidChooseFiles(_ page: WebKitPage) { workspace?.hosts.endUpload(pane) }
-
-    private func allow(_ review: NavigationReview, page: WebKitPage, workspace: Workspace) async -> Bool {
-        if review.disposition == .allow || workspace.navigationExceptions.contains(review) { return true }
-        return await BrowserPrompts.confirmNavigation(
-            review,
-            store: workspace.navigationExceptions,
-            window: page.window
-        )
-    }
 }
