@@ -94,6 +94,9 @@ final class Workspace {
     private(set) var copiedPageURL: String?
 
     var sidebarCollapsed: Bool { sidebar <= 0 }
+    /// The hidden sidebar, shown over the page while the pointer rests on the
+    /// window's left edge.
+    var sidebarPeeking = false
 
     @ObservationIgnored private var written: Data?
     @ObservationIgnored private var started = false
@@ -224,7 +227,8 @@ final class Workspace {
     }
 
     func escape() {
-        if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
+        if sidebarPeeking { sidebarPeeking = false }
+        else if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
         else if historyClearing { historyClearing = false }
         else if pageHistoryOpen { pageHistoryOpen = false }
         else if downloads.panelOpen { downloads.closePanel() }
@@ -239,8 +243,8 @@ final class Workspace {
     /// Something Escape puts back. The page itself may hold focus, so the
     /// key monitor takes Escape for these rather than leaving it to SwiftUI.
     var escapeCloses: Bool {
-        usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.escapeCloses || identityOpen
-            || editing != nil
+        sidebarPeeking || usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.escapeCloses
+            || identityOpen || editing != nil
     }
 
     func toggleIdentity() {
@@ -1001,6 +1005,7 @@ final class Workspace {
         let next: CGFloat = width <= 0 ? 0 : width.clamped(to: Metrics.sidebarMin...Metrics.sidebarMax)
         if next > 0 { sidebarLast = next }
         sidebar = next
+        sidebarPeeking = false
         keep()
     }
 

@@ -15,6 +15,8 @@ struct SidebarLayout<Page: View>: View {
     /// The width while the divider is dragged, before it settles.
     @State private var dragging: CGFloat?
     @State private var dragStart: CGFloat = 0
+    /// Puts the peeked sidebar away shortly after the pointer leaves it.
+    @State private var unpeek: Task<Void, Never>?
 
     private var width: CGFloat {
         guard let dragging else { return workspace.sidebar }
@@ -51,7 +53,53 @@ struct SidebarLayout<Page: View>: View {
             // A gap shows the sidebar's edge.
             .padding(.leading, workspace.sidebarCollapsed ? 0 : 8)
         }
+        .overlay(alignment: .topLeading) {
+            if workspace.sidebarCollapsed { peek }
+        }
         .animation(reduceMotion ? nil : Metrics.morph, value: workspace.sidebarCollapsed)
+    }
+
+    /// Hidden, the sidebar slides back over the page while the pointer rests
+    /// on the window's left edge, and tucks away again once it leaves.
+    private var peek: some View {
+        ZStack(alignment: .topLeading) {
+            // The page's leading inset, on the chrome, so resting here never
+            // fights the page for the pointer.
+            Color.clear
+                .frame(width: 8)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onHover { $0 ? showPeek() : leavePeek() }
+                .accessibilityHidden(true)
+            if workspace.sidebarPeeking {
+                TabSidebar(palette: palette)
+                    .frame(width: workspace.sidebarLast)
+                    .modifier(PeekSurface(palette: palette))
+                    .padding(8)
+                    .onHover { $0 ? showPeek() : leavePeek() }
+                    .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.34, dampingFraction: 0.78),
+                   value: workspace.sidebarPeeking)
+    }
+
+    private func showPeek() {
+        unpeek?.cancel()
+        if !workspace.sidebarPeeking { workspace.sidebarPeeking = true }
+    }
+
+    /// A quick pass over the edge doesn't flicker it, and a tab dragged out
+    /// onto the page keeps it open until the button comes up.
+    private func leavePeek() {
+        unpeek?.cancel()
+        unpeek = Task { @MainActor in
+            repeat {
+                try? await Task.sleep(for: .milliseconds(250))
+                if Task.isCancelled { return }
+            } while NSEvent.pressedMouseButtons & 1 != 0
+            workspace.sidebarPeeking = false
+        }
     }
 
     private var resizer: some View {
@@ -94,8 +142,9 @@ enum SidebarMetrics {
     static let row: CGFloat = 30
     static let icon: CGFloat = 20
     static let control: CGFloat = 32
-    /// The page's corners: 8 pt in from the window's 16 pt corners, so the two
-    /// curves run parallel, and the same as the sidebar's rows.
+    /// The page's and the peeked sidebar's corners: 8 pt in from the window's
+    /// 16 pt corners, so the curves run parallel, and the same as the sidebar's
+    /// rows.
     static let radius: CGFloat = 8
 }
 
@@ -510,6 +559,27 @@ private struct ToolbarIcon: View {
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
+    }
+}
+
+/// The peeked sidebar: the window's tint, raised over the page. Like
+/// `PageGlass`, it claims its empty space, so the page under it never gets
+/// the click.
+private struct PeekSurface: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+    var palette: Palette
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
+        content
+            .background(shape.fill(palette.chrome).shadow(color: .black.opacity(0.35), radius: 18, x: 4))
+            .overlay {
+                shape.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(shape)
+            .onTapGesture { }
+            .background(PageControlRegion(radius: SidebarMetrics.radius))
     }
 }
 

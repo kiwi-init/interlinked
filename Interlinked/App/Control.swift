@@ -24,7 +24,7 @@ enum Control {
         "name-tab [index] name",
         "clear-tab [index]",
         "tint [name]",
-        "sidebar [width|collapse|expand|toggle]",
+        "sidebar [width|collapse|expand|toggle|peek|unpeek]",
         "identity [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
         "new-page",
@@ -389,7 +389,8 @@ enum Control {
 
         case "sidebar":
             if words.isEmpty {
-                return json(["width": Double(workspace.sidebar), "collapsed": workspace.sidebarCollapsed])
+                return json(["width": Double(workspace.sidebar), "collapsed": workspace.sidebarCollapsed,
+                             "peeking": workspace.sidebarPeeking])
             }
             switch words[0] {
             case "hide", "collapse":
@@ -401,9 +402,13 @@ enum Control {
             case "toggle":
                 workspace.toggleSidebar()
                 return ok()
+            case "peek", "unpeek":
+                guard workspace.sidebarCollapsed else { return error("the sidebar only peeks while it is hidden") }
+                workspace.sidebarPeeking = words[0] == "peek"
+                return ok()
             default:
                 guard let width = Double(words[0]), width.isFinite else {
-                    return error("sidebar wants a width, or collapse, expand, toggle. Said '\(words[0])'")
+                    return error("sidebar wants a width, or collapse, expand, toggle, peek, unpeek. Said '\(words[0])'")
                 }
                 workspace.setSidebar(CGFloat(width))
                 return ok()
