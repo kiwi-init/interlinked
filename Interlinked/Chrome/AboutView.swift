@@ -59,7 +59,7 @@ struct AboutView: View {
 
             statement("Data on this Mac", (JevRuntime.includesJev ? "This build does not need or store an OpenRouter key." : "Your OpenRouter key is stored in macOS Keychain.") + " Browser history stays for \(HistoryRetention.standard.days) days in a local file readable only by your macOS account, and you can turn it off in Settings.")
 
-            statement("Your controls", "Settings can turn Jev off, disable AI page labels, clear the five-day AI cache, revoke site grants, and revoke saved navigation exceptions. Local builds that use a personal OpenRouter key can also remove it. A visit grant ends when you quit. A remembered grant stays until you revoke it. Navigating or reloading ends a page-sharing session for that load and cancels stale results.")
+            statement("Your controls", "Settings can turn Jev off, disable AI page labels, clear the five-day AI cache, and revoke site grants. Local builds that use a personal OpenRouter key can also remove it. A visit grant ends when you quit. A remembered grant stays until you revoke it. Navigating or reloading ends a page-sharing session for that load and cancels stale results.")
 
             Text("AI matches can be wrong. Read the highlighted source text and decide for yourself.")
                 .font(.callout.weight(.semibold))
