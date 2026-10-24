@@ -227,7 +227,7 @@ final class Workspace {
     }
 
     func escape() {
-        if sidebarPeeking { sidebarPeeking = false }
+        if sidebarPeeking { closePeek() }
         else if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
         else if historyClearing { historyClearing = false }
         else if pageHistoryOpen { pageHistoryOpen = false }
@@ -999,6 +999,15 @@ final class Workspace {
     func setTint(_ tint: Tint) {
         self.tint = tint
         keep()
+    }
+
+    /// Puts the peeked sidebar away, with any History or Downloads opened in
+    /// it, which would otherwise stay open with nothing on screen.
+    func closePeek() {
+        guard sidebarPeeking else { return }
+        sidebarPeeking = false
+        pageHistoryOpen = false
+        downloads.closePanel()
     }
 
     func setSidebar(_ width: CGFloat) {

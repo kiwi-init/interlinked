@@ -404,7 +404,7 @@ enum Control {
                 return ok()
             case "peek", "unpeek":
                 guard workspace.sidebarCollapsed else { return error("the sidebar only peeks while it is hidden") }
-                workspace.sidebarPeeking = words[0] == "peek"
+                if words[0] == "peek" { workspace.sidebarPeeking = true } else { workspace.closePeek() }
                 return ok()
             default:
                 guard let width = Double(words[0]), width.isFinite else {
