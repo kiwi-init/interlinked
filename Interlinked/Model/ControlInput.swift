@@ -74,7 +74,6 @@ struct ControlKey: Equatable {
 
 /// A Settings value by the name the control channel uses for it.
 enum ControlSetting: String, CaseIterable {
-    case siteMenu = "site-menu"
     case usefulAddress = "useful-info.address"
     case usefulContact = "useful-info.contact"
     case blocking

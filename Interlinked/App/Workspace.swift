@@ -83,27 +83,6 @@ final class Workspace {
             hosts.forEachBrowser { $0.sharingScreenShield = sharingScreenMode }
         }
     }
-    var usesSiteMenu = SiteMenuPreference.enabled() {
-        didSet {
-            SiteMenuPreference.set(usesSiteMenu)
-            noteOnboarding()
-            if usesSiteMenu, let pane = activePane {
-                declinedSiteMenu.remove(pane)
-                captureSiteMenu(pane)
-            } else {
-                restoreAllSiteHeaders()
-            }
-        }
-    }
-    private(set) var siteMenus: [PaneID: SiteMenu] = [:]
-    @ObservationIgnored private var resizeTasks: [PaneID: Task<Void, Never>] = [:]
-    /// Set when a page's menu has been read and is about to be shown, so the
-    /// bar arrives with the same spectrum glow as an AI-refined page label.
-    private(set) var siteMenuEffect: AILabelEffect?
-    @ObservationIgnored private var siteMenuEffectTask: Task<Void, Never>?
-    var siteMenuExpanded: String?
-    var siteMenuSearching = false
-    private var declinedSiteMenu: Set<PaneID> = []
     let intelligenceAudit = IntelligenceAuditStore.shared
     var overviewOpen = false
     var identityOpen = false
@@ -143,11 +122,6 @@ final class Workspace {
     }
 
     var activePane: PaneID? { activeTab?.active }
-
-    var siteMenu: SiteMenu? {
-        guard let pane = activePane else { return nil }
-        return siteMenus[pane]
-    }
 
     var quickTabs: [Tab] {
         OpenWork.switcherTabs(tabs, current: activeTab?.id, pinned: onboardingTab?.id)
@@ -259,159 +233,6 @@ final class Workspace {
         keep()
     }
 
-    func noteSiteMenuDocumentChanged(_ pane: PaneID) {
-        siteMenus[pane] = nil
-        declinedSiteMenu.remove(pane)
-        if siteMenuEffect?.pane == pane { siteMenuEffect = nil }
-        if activePane == pane { collapseSiteMenuChrome() }
-    }
-
-    func collapseSiteMenuChrome() {
-        siteMenuExpanded = nil
-        siteMenuSearching = false
-    }
-
-    /// Light the bar with the spectrum glow, then retire the effect so that
-    /// redisplaying the same menu later does not replay it.
-    private func revealSiteMenu(_ pane: PaneID) {
-        siteMenuEffect = AILabelEffect(pane: pane)
-        siteMenuEffectTask?.cancel()
-        siteMenuEffectTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled, let self, self.siteMenuEffect?.pane == pane else { return }
-            self.siteMenuEffect = nil
-        }
-    }
-
-    /// The search icon morphs the pill into a field, so the destination list
-    /// and any open submenu step aside while it is up.
-    func beginSiteMenuSearch() {
-        guard siteMenu?.search != nil else { return }
-        if editing != nil { discardLine() }
-        siteMenuExpanded = nil
-        siteMenuSearching = true
-    }
-
-    func activateSiteMenuItem(_ item: SiteMenuItem) {
-        if !item.children.isEmpty {
-            siteMenuSearching = false
-            siteMenuExpanded = item.id
-            return
-        }
-        if !item.href.isEmpty {
-            navigateActive(item.href)
-            return
-        }
-        guard let pane = activePane, let view = hosts.existingBrowser(pane) else { return }
-        Task { _ = await PageTextBridge.activateSiteMenuItem(view, id: item.id) }
-    }
-
-    func goSiteHome() {
-        guard !onboarding.contains(activePane) else { return }
-        guard let menu = siteMenu, let home = SiteMenuHome.url(menu.home, current: currentPageURL) else { return }
-        collapseSiteMenuChrome()
-        navigateActive(home.absoluteString)
-    }
-
-    func submitSiteSearch(_ query: String) {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let search = siteMenu?.search, !text.isEmpty,
-              var parts = URLComponents(string: search.action) else { return }
-        var items = parts.queryItems ?? []
-        items.removeAll { $0.name == search.queryParam }
-        items.append(URLQueryItem(name: search.queryParam, value: text))
-        parts.queryItems = items
-        guard let url = parts.url else { return }
-        collapseSiteMenuChrome()
-        navigateActive(url.absoluteString)
-    }
-
-    func captureSiteMenu(_ pane: PaneID) {
-        guard usesSiteMenu, !declinedSiteMenu.contains(pane), paneAlive(pane), let view = hosts.existingBrowser(pane) else { return }
-        if NewTabPage.matches(line: surfaces.line(pane)) {
-            siteMenus[pane] = nil
-            return
-        }
-        // The bar is the browser's, so it is up before the page answers.
-        if siteMenus[pane] == nil, let baseline = SiteMenuPolicy.baseline(line: surfaces.line(pane)) {
-            siteMenus[pane] = baseline
-        }
-        let pageURL = view.url
-        Task { @MainActor [weak self] in
-            guard let self, self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
-                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
-            let extracted = await PageTextBridge.siteMenu(view)
-            guard self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
-                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
-            let accepted = extracted.flatMap { SiteMenuPolicy.accept($0) }
-                ?? SiteMenuPolicy.baseline(line: self.surfaces.line(pane))
-            guard let accepted else {
-                self.siteMenus[pane] = nil
-                return
-            }
-            if accepted.replacesChrome {
-                guard await PageTextBridge.hideSiteMenu(view), self.paneAlive(pane),
-                      self.hosts.existingBrowser(pane) === view, view.url == pageURL,
-                      self.usesSiteMenu, !self.declinedSiteMenu.contains(pane) else { return }
-            }
-            let arrived = self.siteMenus[pane] != accepted
-            self.siteMenus[pane] = accepted
-            // The read menu is the browser reading the page for you. Announce
-            // it the way a refined page label is announced.
-            if arrived, pane == self.activePane { self.revealSiteMenu(pane) }
-        }
-    }
-
-    /// Responsive sites redraw their header when their page changes size,
-    /// which can bring it back beside the Interlinked menu. Once the size
-    /// settles, read and hide the header again, or restore it if the new
-    /// layout has no menu worth replacing.
-    func paneResized(_ pane: PaneID) {
-        guard usesSiteMenu, !declinedSiteMenu.contains(pane) else { return }
-        resizeTasks[pane]?.cancel()
-        resizeTasks[pane] = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(450))
-            guard !Task.isCancelled, let self, self.usesSiteMenu, self.paneAlive(pane) else { return }
-            self.resizeTasks[pane] = nil
-            guard self.siteMenus[pane] != nil else {
-                self.captureSiteMenu(pane)
-                return
-            }
-            guard let view = self.hosts.existingBrowser(pane) else { return }
-            let pageURL = view.url
-            let refreshed = await PageTextBridge.refreshSiteMenu(view)
-            guard self.usesSiteMenu, !self.declinedSiteMenu.contains(pane), self.paneAlive(pane),
-                  self.hosts.existingBrowser(pane) === view, view.url == pageURL else { return }
-            let accepted = refreshed.flatMap { SiteMenuPolicy.accept($0) }
-                ?? SiteMenuPolicy.baseline(line: self.surfaces.line(pane))
-            if accepted?.replacesChrome != true {
-                await PageTextBridge.showSiteMenu(view)
-            }
-            self.siteMenus[pane] = accepted
-        }
-    }
-
-    func restoreSiteHeader(_ pane: PaneID? = nil) {
-        let target = pane ?? activePane
-        guard let target else { return }
-        declinedSiteMenu.insert(target)
-        siteMenus[target] = nil
-        collapseSiteMenuChrome()
-        Task { @MainActor [weak self] in
-            await PageTextBridge.showSiteMenu(self?.hosts.existingBrowser(target))
-        }
-    }
-
-    func restoreAllSiteHeaders() {
-        let panes = Array(siteMenus.keys)
-        siteMenus.removeAll()
-        Task { @MainActor [weak self] in
-            for pane in panes {
-                await PageTextBridge.showSiteMenu(self?.hosts.existingBrowser(pane))
-            }
-        }
-    }
-
     func openAddress(_ address: String) {
         openTab(kind: .browser)
         guard let pane = activePane else { return }
@@ -443,7 +264,6 @@ final class Workspace {
         else if downloads.panelOpen { downloads.closePanel() }
         else if assistance.escapeCloses { assistance.closePanel() }
         else if identityOpen { closeIdentity() }
-        else if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
         else if editing != nil {
             discardLine()
             beginEmptyPageEditingIfNeeded()
@@ -456,7 +276,7 @@ final class Workspace {
     /// key monitor takes Escape for these rather than leaving it to SwiftUI.
     var escapeCloses: Bool {
         usefulInfo.contactOpen || pageHistoryOpen || downloads.panelOpen || assistance.escapeCloses || identityOpen
-            || siteMenuSearching || siteMenuExpanded != nil || editing != nil || overviewOpen
+            || editing != nil || overviewOpen
     }
 
     func toggleIdentity() {
@@ -768,7 +588,6 @@ final class Workspace {
         hosts.forget(keep: holdsPage, downloads: downloads)
         assistance.committed(pane)
         usefulInfo.committed(pane)
-        siteMenus.removeValue(forKey: pane)
     }
 
     private func holdsPage(_ pane: PaneID) -> Bool {
@@ -800,7 +619,6 @@ final class Workspace {
         if pageHistoryOpen { pageHistoryOpen = false }
         if downloads.panelOpen { downloads.closePanel() }
         if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
-        if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
         if assistance.panel != nil { assistance.closePanel() }
         hosts.touch(pane)
         if activePane != pane {
@@ -1025,16 +843,6 @@ final class Workspace {
 
     func binding(for feature: OnboardingFeature) -> Binding<Bool> {
         switch feature {
-        case .siteMenu:
-            Binding(get: { self.usesSiteMenu }, set: { on in
-                self.usesSiteMenu = on
-                // The menu shows on the focused page: hand focus back to the
-                // real page beside onboarding, where the change happens.
-                if on, let side = self.onboarding.sidePane, self.paneAlive(side) {
-                    self.clickPane(side)
-                    self.captureSiteMenu(side)
-                }
-            })
         case .appleIntelligence:
             Binding(
                 get: { self.assistance.appleEnabled && LocalIntelligenceRuntime.isAvailable },
@@ -1091,7 +899,6 @@ final class Workspace {
     /// Features a fresh onboarding introduces start off, so switching them
     /// on is part of learning them.
     private func switchOffOnboardingFeatures() {
-        usesSiteMenu = false
         builtIns.blockingEnabled = false
         builtIns.darkMode = .off
         sharingScreenMode = false
@@ -1499,8 +1306,6 @@ final class Workspace {
         hosts.forget(keep: holdsPage, downloads: downloads)
         usefulInfo.prune(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
-        siteMenus = siteMenus.filter { paneAlive($0.key) }
-        declinedSiteMenu = declinedSiteMenu.filter(paneAlive)
         scrollMarks = scrollMarks.filter { paneAlive($0.key) }
         if let editing {
             let gone: Bool

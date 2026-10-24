@@ -63,12 +63,10 @@ struct MeaningDecision: Sendable {
 
 protocol LocalBrowserIntelligence: Sendable {
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait?
-    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool?
 }
 
 struct UnavailableLocalIntelligence: LocalBrowserIntelligence {
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait? { nil }
-    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { nil }
 }
 
 enum LocalIntelligenceRuntime {
@@ -134,12 +132,6 @@ actor BrowserIntelligence {
             await DebugIntelligenceMonitor.shared.finish(activity, failed: true)
             #endif
             throw error
-        }
-    }
-
-    func shouldReplaceSiteMenu(host: String, labels: String) async -> Bool? {
-        try? await observed(source: .appleIntelligence, action: "Site menu") {
-            try await local.shouldReplaceSiteMenu(host: host, labels: labels)
         }
     }
 
@@ -224,12 +216,6 @@ actor BrowserIntelligence {
 }
 
 @available(macOS 26.0, *)
-@Generable private struct AppleSiteMenuOutput {
-    @Guide(description: "True if this top chrome is site navigation Interlinked can replace")
-    var replace: Bool
-}
-
-@available(macOS 26.0, *)
 struct AppleFoundationModels: LocalBrowserIntelligence {
     private var available: Bool { SystemLanguageModel.default.isAvailable }
 
@@ -256,19 +242,6 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
         #else
         GenerationOptions(sampling: .greedy, maximumResponseTokens: maximumResponseTokens)
         #endif
-    }
-
-    func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? {
-        guard available else { return nil }
-        let session = LanguageModelSession(
-            instructions: IntelligencePromptPreferences.text(for: .appleSiteMenu)
-        )
-        let response = try await session.respond(
-            to: "Untrusted chrome labels for \(host):\n\(labels)",
-            generating: AppleSiteMenuOutput.self,
-            options: Self.greedy(maximumResponseTokens: 16)
-        )
-        return response.content.replace
     }
 }
 #endif

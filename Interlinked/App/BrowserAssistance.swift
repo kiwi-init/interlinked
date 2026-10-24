@@ -28,8 +28,8 @@ final class BrowserAssistance {
     private(set) var grants: [PaneID: String] = [:]
     var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.object(forKey: "jev.labels") as? Bool ?? true
-    /// Every on-device model call: tab names and descriptions, and the site
-    /// menu check. Off, the browser uses its own rules for each.
+    /// Every on-device model call: tab names and descriptions. Off, the
+    /// browser names tabs by its own rules.
     var appleEnabled = UserDefaults.standard.object(forKey: "apple.enabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(appleEnabled, forKey: "apple.enabled") }
     }
@@ -123,11 +123,6 @@ final class BrowserAssistance {
 
     func activated(_ pane: PaneID) {
         PageTextBridge.clear(workspace?.hosts.existingBrowser(pane))
-    }
-
-    func shouldReplaceSiteMenu(host: String, labels: String) async -> Bool? {
-        guard appleEnabled else { return nil }
-        return await intelligence.shouldReplaceSiteMenu(host: host, labels: labels)
     }
 
     func configure() {

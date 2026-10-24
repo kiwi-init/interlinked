@@ -7,8 +7,6 @@ enum OnboardingStep: String, Codable, CaseIterable, Sendable {
     case cameBack
     case split
     case closedPane
-    /// Next on the Interlinked Menus scene. The switch itself is optional.
-    case menusNext
     /// Next on the Browser Intelligence scene. Both switches are optional.
     case intelligenceNext
     /// Find for me highlighted a match on the demo page.
@@ -21,23 +19,18 @@ enum OnboardingStep: String, Codable, CaseIterable, Sendable {
 
 /// Real pages onboarding opens beside itself.
 enum OnboardingPage: Sendable {
-    /// A real site with a full header, for Interlinked Menus.
-    case figma
     /// The demo blog, for Find for me.
     case slowMornings
 
     var url: URL {
         switch self {
-        case .figma: URL(string: "https://www.figma.com/")!
         case .slowMornings: OnboardingDemo.url()
         }
     }
 
-    /// Onboarding's share of the split. Figma shows its full header, the one
-    /// Interlinked Menus reads, only when it has nearly all of the window.
+    /// Onboarding's share of the split.
     var onboardingShare: Double {
         switch self {
-        case .figma: 0.2
         case .slowMornings: 0.34
         }
     }
@@ -61,7 +54,6 @@ enum OnboardingDemo {
 /// A feature a scene introduces, switched with a real toggle on the page.
 /// Every one starts off during onboarding, so turning it on is the lesson.
 enum OnboardingFeature: String, Sendable {
-    case siteMenu
     case appleIntelligence
     case jev
     case sharingScreen
@@ -71,7 +63,6 @@ enum OnboardingFeature: String, Sendable {
 
     var title: String {
         switch self {
-        case .siteMenu: "Interlinked Menus"
         case .appleIntelligence: "Apple Intelligence"
         case .jev: "Jev"
         case .sharingScreen: "Sharing Screen Mode"
@@ -83,7 +74,6 @@ enum OnboardingFeature: String, Sendable {
 
     var summary: String {
         switch self {
-        case .siteMenu: "We replace a website's menus with a quieter, more predictable one."
         case .appleIntelligence: "Runs on your Mac. Nothing leaves it."
         case .jev: "A classifier, not generative AI. Runs in the cloud."
         case .sharingScreen: "Blurs emails, phone numbers, cards and passwords while you share your screen. ⇧⌘S anytime."
@@ -96,7 +86,6 @@ enum OnboardingFeature: String, Sendable {
     /// The feature's official mark: an SF Symbol, or an asset in the catalog.
     var mark: (symbol: String?, asset: String?) {
         switch self {
-        case .siteMenu: (nil, nil)
         case .appleIntelligence: ("apple.intelligence", nil)
         case .jev: (nil, "JevMark")
         case .sharingScreen, .usefulInfo, .adBlocking, .darkPages: (nil, nil)
@@ -183,18 +172,6 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
         ),
         OnboardingScene(
             id: 3,
-            title: "Now let's get to the cool parts!",
-            paragraphs: ["Everything we're gonna show you is optional. Turn it on and off as you like."],
-            features: [.siteMenu],
-            page: .figma,
-            parts: [
-                OnboardingPart(step: .menusNext, instruction: [], check: "Saw Interlinked Menus"),
-            ],
-            away: [.words("Press"), .keys(["⌘", "1"]), .words("to go back to the welcome tab and keep going.")],
-            gif: "onboarding-scene-3"
-        ),
-        OnboardingScene(
-            id: 4,
             title: "Browser Intelligence",
             paragraphs: [
                 "We're not building an AI browser. Quietly, it just makes browsing better and safer.",
@@ -205,10 +182,10 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
                 OnboardingPart(step: .intelligenceNext, instruction: [], check: "Saw Browser Intelligence"),
             ],
             away: [.words("Press"), .keys(["⌘", "1"]), .words("to go back to the welcome tab and keep going.")],
-            gif: "onboarding-scene-4"
+            gif: "onboarding-scene-3"
         ),
         OnboardingScene(
-            id: 5,
+            id: 4,
             title: "Let's try it on a real page",
             page: .slowMornings,
             parts: [
@@ -220,10 +197,10 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
                                check: "Found it with Find for me"),
             ],
             away: [.words("Press"), .keys(["⌘", "1"]), .words("to go back to the welcome tab and keep going.")],
-            gif: "onboarding-scene-5"
+            gif: "onboarding-scene-4"
         ),
         OnboardingScene(
-            id: 6,
+            id: 5,
             title: "A couple more handy ones",
             features: [.sharingScreen, .usefulInfo],
             page: .slowMornings,
@@ -231,10 +208,10 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
                 OnboardingPart(step: .extrasNext, instruction: [], check: "Saw Sharing Screen Mode and Address & contact"),
             ],
             away: [.words("Press"), .keys(["⌘", "1"]), .words("to go back to the welcome tab and keep going.")],
-            gif: "onboarding-scene-6"
+            gif: "onboarding-scene-5"
         ),
         OnboardingScene(
-            id: 7,
+            id: 6,
             title: "That's it for now!",
             paragraphs: [
                 "Interlinked is still pretty experimental. It will keep improving and bring more features for your experience and safety.",
@@ -247,7 +224,7 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
                 OnboardingPart(step: .finished, instruction: [], check: "Started browsing"),
             ],
             away: [.words("Press"), .keys(["⌘", "1"]), .words("to go back to the welcome tab and finish.")],
-            gif: "onboarding-scene-7"
+            gif: "onboarding-scene-6"
         ),
     ]
 }

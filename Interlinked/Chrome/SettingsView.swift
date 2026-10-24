@@ -24,7 +24,7 @@ private extension SettingsDestination {
 
     var summary: String {
         switch self {
-        case .general: "The site menu, search, useful page information, and downloads."
+        case .general: "Search, useful page information, and downloads."
         case .pages: "Blocking and dark pages, applied to every site you visit."
         case .intelligence: "Which models Interlinked uses, and when they run."
         case .sites: "Everything you have allowed, denied, or changed for a single site."
@@ -35,7 +35,7 @@ private extension SettingsDestination {
     /// Search matches what a pane contains, not only its name.
     var keywords: [String] {
         switch self {
-        case .general: ["site menu", "header", "search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
+        case .general: ["search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
         case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "labels", "meaning search"]
         case .sites: ["permissions", "camera", "microphone", "location", "grants", "exceptions", "revoke", "blocking off", "kept light", "navigation"]
@@ -116,20 +116,6 @@ private struct GeneralSettingsPane: View {
         let downloads = workspace.downloads
         @Bindable var usefulInfo = workspace.usefulInfo
         Form {
-            Section {
-                Toggle(isOn: Binding(
-                    get: { workspace.usesSiteMenu },
-                    set: { workspace.usesSiteMenu = $0 }
-                )) {
-                    Text("Replace site headers with the Interlinked menu")
-                    Text("The same compact menu on every site, with its main destinations and search. Turn this off to put the site's own header back.")
-                }
-                .toggleStyle(PointingSwitch())
-                .accessibilityIdentifier("settings-site-menu")
-            } header: {
-                SettingsHero(section: .general, firstSection: "Site menu")
-            }
-
             SearchSection()
 
             Section {
@@ -230,7 +216,7 @@ private struct SearchSection: View {
                 }
             }
         } header: {
-            Text("Search")
+            SettingsHero(section: .general, firstSection: "Search")
         }
     }
 }
@@ -397,7 +383,7 @@ private struct IntelligenceSettingsPane: View {
                 Toggle(isOn: workspace.binding(for: .appleIntelligence)) {
                     Text("Use Apple Intelligence")
                     Text(workspace.note(for: .appleIntelligence)
-                         ?? "Tab names and the site menu check. Runs on this Mac; nothing it reads leaves it.")
+                         ?? "Tab names. Runs on this Mac; nothing it reads leaves it.")
                 }
                 .toggleStyle(PointingSwitch())
                 .accessibilityIdentifier("settings-apple-intelligence")

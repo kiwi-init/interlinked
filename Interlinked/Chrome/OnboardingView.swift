@@ -111,7 +111,6 @@ struct OnboardingView: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: scene.id)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: pagePart.step)
-        .animation(reduceMotion ? nil : Metrics.morph, value: workspace.usesSiteMenu)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .onChange(of: guide.progress.scene.id) { old, _ in
             shown = OnboardingScene.all.first { $0.id == old }

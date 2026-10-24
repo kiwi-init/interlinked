@@ -2,7 +2,7 @@ import XCTest
 
 final class IntelligencePromptTests: XCTestCase {
     func testEveryFeatureHasAVisibleDefaultAndCorrectProvider() {
-        XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 2)
+        XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 1)
         XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 2)
         for feature in IntelligencePromptFeature.allCases {
             XCTAssertFalse(feature.title.isEmpty)
