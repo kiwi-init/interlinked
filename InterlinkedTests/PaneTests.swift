@@ -774,9 +774,12 @@ final class ThemeTests: XCTestCase {
 }
 
 final class BrowserMigrationTests: XCTestCase {
-    func testSplitPagesBecomeTabsAndKeepTheirURLsAndSelection() {
+    func testOldLayoutPagesBecomeTabsAndKeepTheirURLsAndSelection() {
+        // A layout from before split view: three panes, one of them a terminal.
         var split = Tab(id: TabID(5), pane: PaneID(10))
-        _ = split.split(PaneID(10), axis: .columns, new: PaneID(11), id: SplitID(1))
+        split.root = .split(id: SplitID(1), axis: .columns, first: .leaf(PaneID(10)),
+                            second: .split(id: SplitID(2), axis: .rows, first: .leaf(PaneID(11)), second: .leaf(PaneID(13))))
+        split.active = PaneID(11)
         split.name = "Reference"
         var old = Session(version: 1, tabs: [split, Tab(id: TabID(6), pane: PaneID(12))], active: 0,
             next_tab: 7, next_pane: 14, next_split: 2,
@@ -798,6 +801,22 @@ final class BrowserMigrationTests: XCTestCase {
         XCTAssertEqual(again.tabs, old.tabs)
         XCTAssertEqual(again.active, old.active)
         XCTAssertEqual(again.next_tab, old.next_tab)
+    }
+
+    func testASplitViewOfPagesComesBackAsASplit() {
+        var split = Tab(id: TabID(1), pane: PaneID(10))
+        _ = split.split(PaneID(10), axis: .columns, new: PaneID(11), id: SplitID(3))
+        split.ratio = 0.3
+        split.name = "Compare"
+        let saved = Session(version: 2, tabs: [split, Tab(id: TabID(2), pane: PaneID(12))], active: 0,
+            next_tab: 3, next_pane: 13, next_split: 1,
+            surfaces: [10, 11, 12].map { SurfacePair(pane: PaneID($0), surface: Surface(kind: .browser, line: "https://\($0).test/")) },
+            tint: .ink, sidebar: 216, sidebar_last: 216)
+        let restored = saved.browserOnly()
+        XCTAssertEqual(restored.tabs, saved.tabs)
+        XCTAssertEqual(restored.active, 0)
+        XCTAssertEqual(restored.surfaces.map(\.surface.line), ["https://10.test/", "https://11.test/", "https://12.test/"])
+        XCTAssertGreaterThan(restored.next_split, 3, "a new split never reuses a restored split's id")
     }
 
     func testLegacyTerminalFieldsDecodeWithoutRestoringAShell() throws {
