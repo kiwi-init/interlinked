@@ -252,15 +252,6 @@ actor BrowserIntelligence {
         }
     }
 
-    func relatedPageGroups(pages: [ResearchPage]) async throws -> IntelligenceDecision<[ResearchGroup]>? {
-        let described = pages.filter { !$0.about.isEmpty }
-        guard described.count >= 2 else { return nil }
-        let response = try await observed(source: .jev, action: "Related pages") {
-            try await jev.decide(ResearchRelations.request(described))
-        }
-        return IntelligenceDecision(value: ResearchRelations.groups(described, response: response), source: .jev)
-    }
-
     func navigationAdvice(_ review: NavigationReview, timeout: Duration = .milliseconds(1_500)) async -> String? {
         guard review.needsAdvisory else { return nil }
         let race = NavigationAdviceRace()

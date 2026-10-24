@@ -138,36 +138,6 @@ final class BrowserHistoryControlTests: XCTestCase {
         XCTAssertEqual((written?["visits"] as? [Any])?.count, 1)
         XCTAssertEqual(store().visits, history.visits)
     }
-
-    func testResearchRequestFromOpenPagesHasNoHistoryOnlyEntries() throws {
-        let history = store()
-        history.record(URL(string: "https://history-only.test/secret-trip"), title: "Secret trip itinerary")
-        history.record(URL(string: "https://open.test/camera"), title: "Sony A7 review")
-        history.save()
-
-        let tabs = [Tab(id: TabID(1), pane: PaneID(1)), Tab(id: TabID(2), pane: PaneID(2))]
-        func page(_ url: String, _ title: String) -> PageMetadata {
-            PageMetadata(document: "d", url: url, title: title, heading: "", summary: "", breadcrumbs: [])
-        }
-        let metadata = [
-            PaneID(1): page("https://open.test/camera", "Sony A7 review"),
-            PaneID(2): page("https://shop.test/camera", "Sony A7 shop"),
-        ]
-        let portraits = [
-            PaneID(1): PagePortrait(label: "Review", about: "A review of the Sony A7"),
-            PaneID(2): PagePortrait(label: "Shop", about: "A store listing for the Sony A7"),
-        ]
-        let pages = ResearchRelations.pages(tabs: tabs, metadata: metadata, portraits: portraits)
-        XCTAssertEqual(pages.map(\.id), ["1", "2"])
-
-        let request = String(decoding: try ResearchRelations.request(pages).encoded(), as: UTF8.self)
-        XCTAssertFalse(history.visits.isEmpty)
-        for visit in history.visits where !metadata.values.contains(where: { $0.url == visit.url }) {
-            XCTAssertFalse(request.contains(visit.host), "history-only host \(visit.host) reached Jev")
-            XCTAssertFalse(request.contains(visit.title), "history-only title \(visit.title) reached Jev")
-        }
-        XCTAssertTrue(request.contains("A review of the Sony A7"))
-    }
 }
 
 final class SessionStateTests: XCTestCase {

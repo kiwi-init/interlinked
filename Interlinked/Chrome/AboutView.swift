@@ -45,7 +45,7 @@ struct AboutView: View {
 
     private var safetyAndPrivacy: some View {
         aboutSection("Safety and privacy") {
-            statement("What AI receives", "Meaning search sends your query and extracted page text to Jev. Optional label refinement gives Apple Intelligence page titles, headings, site, host, summary, and breadcrumbs; it returns one label and a short description, cached on this Mac. Related tabs send those local descriptions to Jev. Models return supplied candidate IDs, not executable page code.")
+            statement("What AI receives", "Meaning search sends your query and extracted page text to Jev. Optional label refinement gives Apple Intelligence page titles, headings, site, host, summary, and breadcrumbs; it returns one label and a short description, cached on this Mac. Models return supplied candidate IDs, not executable page code.")
 
             statement("What stays out", "Interlinked excludes forms and form values, password fields, editable pages, cookies, and local pages from AI reading tools. It does not try to detect whether you are signed in: sharing a signed-in page sends what that page shows. Ordinary browsing, exact find, and deterministic page labels do not use an AI model.")
 

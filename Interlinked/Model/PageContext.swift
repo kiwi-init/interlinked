@@ -465,7 +465,4 @@ enum PassageDecisions {
             return a == b ? $0.offset < $1.offset : a > b
         }.map(\.element)
     }
-    static func words(_ text: String) -> Set<String> {
-        Set(text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 })
-    }
 }

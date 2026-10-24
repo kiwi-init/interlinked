@@ -170,7 +170,6 @@ final class Workspace {
             downloads.closePanel()
             hosts.capturePreviews()
             assistance.closePanel()
-            assistance.related()
         }
         overviewOpen = open
         if !open {
