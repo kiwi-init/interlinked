@@ -108,12 +108,20 @@ final class BrowserHistoryStore {
         }
         guard let data = try? Data(contentsOf: self.file) else { return }
         let decoder = JSONDecoder()
-        if let saved = try? decoder.decode(BrowserHistoryFile.self, from: data) {
+        if let saved = try? decoder.decode(BrowserHistoryFile.self, from: data),
+           saved.version <= BrowserHistoryFile.version {
             visits = retention.kept(saved.visits, now: now())
             if visits.count != saved.visits.count { save() }
         } else if let legacy = try? decoder.decode([BrowserHistoryVisit].self, from: data) {
             visits = retention.kept(legacy, now: now())
             save()
+        } else {
+            // A file this build can't read, or one a newer build wrote, is kept
+            // aside the way an unreadable session is, not overwritten.
+            let stamp = Int((now().timeIntervalSince1970 * 1_000).rounded())
+            let aside = self.file.deletingLastPathComponent()
+                .appendingPathComponent("\(self.file.lastPathComponent).corrupt-\(stamp)")
+            try? FileManager.default.moveItem(at: self.file, to: aside)
         }
     }
 
