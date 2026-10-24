@@ -15,9 +15,9 @@ final class DailyDriverUITests: XCTestCase {
         XCTAssertTrue(origin.waitForExistence(timeout: 20))
         XCTAssertTrue(origin.label.contains("127.0.0.1") || origin.label.contains("Not Secure"))
         XCTAssertFalse(origin.label.localizedCaseInsensitiveContains("gmail"))
-        let address = app.buttons["page-address"]
+        let address = app.textFields["line-editor"]
         XCTAssertTrue(address.exists)
-        openIdentity(in: app)
+        origin.click()
         let inspector = app.groups["identity-inspector"]
         XCTAssertTrue(inspector.waitForExistence(timeout: 5) || app.staticTexts["Connection"].waitForExistence(timeout: 5))
         let notSecure = inspector.staticTexts.matching(NSPredicate(format: "value BEGINSWITH[c] 'not secure'")).firstMatch
@@ -30,7 +30,7 @@ final class DailyDriverUITests: XCTestCase {
         let app = launch(opening: "\(base)/identity/lookalike")
         let origin = app.buttons["page-origin"]
         XCTAssertTrue(origin.waitForExistence(timeout: 20))
-        openIdentity(in: app)
+        origin.click()
         XCTAssertTrue(app.buttons["close-identity"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["identity-edit-address"].exists)
         app.buttons["close-identity"].click()
@@ -39,7 +39,7 @@ final class DailyDriverUITests: XCTestCase {
 
     func testCapabilityIndexLoadsReleaseBlockerFixtures() throws {
         let app = launch(opening: base)
-        let address = app.buttons["page-address"]
+        let address = app.textFields["line-editor"]
         XCTAssertTrue(address.waitForExistence(timeout: 20))
         let origin = app.buttons["page-origin"]
         XCTAssertTrue(origin.waitForExistence(timeout: 20))
@@ -79,16 +79,6 @@ final class DailyDriverUITests: XCTestCase {
         expectReport("Removeparam: keep=1", in: app)
     }
 
-    /// Pointing at the origin opens the page handle. A click that lands while
-    /// the handle is still opening is lost, so rest on the origin until the
-    /// handle is open, the way a person would, and then click it.
-    private func openIdentity(in app: XCUIApplication) {
-        let origin = app.buttons["page-origin"]
-        origin.hover()
-        XCTAssertTrue(app.buttons["share-page-button"].waitForExistence(timeout: 5), "the handle opens under the pointer")
-        origin.click()
-    }
-
     private func launch(opening url: String, filters: Bool = false, blocking: Bool? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         // Every flag takes a value: a bare one would swallow the next flag as
@@ -109,12 +99,6 @@ final class DailyDriverUITests: XCTestCase {
             app.launchArguments += ["-builtins.blocking", blocking ? "YES" : "NO"]
         }
         app.launch()
-        // The pointer stays where the last test left it. Over the page handle it
-        // expands the handle, so start each test with the pointer on the page.
-        let window = app.windows.firstMatch
-        if window.waitForExistence(timeout: 10) {
-            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).hover()
-        }
         return app
     }
 
