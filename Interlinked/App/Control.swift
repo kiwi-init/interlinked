@@ -17,13 +17,10 @@ enum Control {
         "prev-tab",
         "move-tab tab slot",
         "clear [pane]",
-        "listen [command|stop]",
-        "dictate sentence",
         "edit [pane]",
         "type text",
         "commit",
         "discard",
-        "hear sentence",
         "name-tab [index] name",
         "clear-tab [index]",
         "tint [name]",
@@ -338,39 +335,6 @@ enum Control {
                 return ok()
             }
 
-        case "listen":
-            switch words.first {
-            case nil:
-                _ = workspace.startListening(.write)
-                return ok()
-            case "command":
-                _ = workspace.startListening(.command)
-                return ok()
-            case "stop":
-                workspace.stopListening()
-                return ok()
-            case let other?:
-                return error("listen takes nothing, command, or stop, not '\(other)'")
-            }
-
-        case "dictate":
-            let said = String(trimmed.drop(while: { !$0.isWhitespace }).dropFirst()).trimmingCharacters(in: .whitespaces)
-            workspace.dictate(said)
-            return ok()
-
-        case "hear":
-            let said = String(trimmed.drop(while: { !$0.isWhitespace }).dropFirst()).trimmingCharacters(in: .whitespaces)
-            switch workspace.act(said) {
-            case .ran(let command):
-                return json(["ran": command])
-            case .refused(let why):
-                return error(why)
-            case .notACommand:
-                return error("'\(said)' is not a command")
-            case .written:
-                return error("that was written, not run")
-            }
-
         case "edit":
             return withPane(workspace, words.first) { pane in
                 workspace.editLine(pane) ? ok() : error("no pane with that id")
@@ -620,7 +584,6 @@ enum Control {
             ]
         }
         return [
-            "voice": voiceState(workspace.voice),
             "web": true,
             "tint": workspace.tint.name,
             "sidebar": Double(workspace.sidebar),
@@ -703,32 +666,6 @@ enum Control {
                     tree(second, root: root, workspace: workspace),
                 ],
             ]
-        }
-    }
-
-    @MainActor
-    private static func voiceState(_ voice: Voice) -> [String: Any] {
-        let mode = voice.mode.rawValue
-        switch voice.state {
-        case .idle:
-            return ["state": "idle"]
-        case .starting:
-            return ["state": "starting", "mode": mode]
-        case .listening(let heard, _):
-            return ["state": "listening", "mode": mode, "heard": heard, "level": Double(voice.currentLevel)]
-        case .finishing(let heard):
-            return ["state": "finishing", "heard": heard]
-        case .heard(let said, let outcome):
-            let mapped: Any
-            switch outcome {
-            case .ran(let command): mapped = ["ran": command]
-            case .refused(let why): mapped = ["refused": why]
-            case .notACommand: mapped = "not a command"
-            case .written: mapped = "written"
-            }
-            return ["state": "heard", "said": said, "outcome": mapped]
-        case .failed(let why):
-            return ["state": "failed", "why": why]
         }
     }
 
@@ -907,7 +844,7 @@ final class ControlServer {
         Self.setNoSigPipe(client)
         Self.setTimeout(client, seconds: Control.receiveTimeoutSeconds)
 
-        // Only our own uid may drive the browser (type/dictate carry keystrokes).
+        // Only our own uid may drive the browser (type carries keystrokes).
         var peerUID: uid_t = 0
         var peerGID: gid_t = 0
         guard getpeereid(client, &peerUID, &peerGID) == 0, peerUID == getuid() else {

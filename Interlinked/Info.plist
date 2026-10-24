@@ -51,9 +51,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Interlinked lets websites use your location only after you approve their request.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Interlinked uses the microphone for voice navigation and for websites you authorize.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Interlinked uses on-device speech recognition for voice navigation and browser commands.</string>
+	<string>Interlinked lets websites use the microphone only after you approve their request.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

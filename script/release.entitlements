@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <!-- The hardened runtime blocks these unless declared. Websites ask for
-         them only after the person approves, and voice commands use the mic. -->
+         them only after the person approves. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
     <key>com.apple.security.device.camera</key>

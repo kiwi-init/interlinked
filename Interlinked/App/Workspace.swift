@@ -64,7 +64,6 @@ final class Workspace {
     @ObservationIgnored private lazy var remoteSuggestions = RemoteSuggestions(settings: search)
     var sidebar: CGFloat = Metrics.sidebarWidth
     var sidebarLast: CGFloat = Metrics.sidebarWidth
-    var voice = Voice()
     let hosts = PaneHosts()
     let assistance = BrowserAssistance()
     let downloads = DownloadCenter()
@@ -197,7 +196,6 @@ final class Workspace {
 
     func beginEmptyPageEditingIfNeeded() {
         guard isEmptyActivePage, !overviewOpen, !identityOpen, editing == nil else { return }
-        guard case .idle = voice.state else { return }
         editActiveLine()
     }
 
@@ -269,7 +267,6 @@ final class Workspace {
             beginEmptyPageEditingIfNeeded()
         }
         else if overviewOpen { setOverviewOpen(false) }
-        else { cancelListening() }
     }
 
     /// Something Escape puts back. The page itself may hold focus, so the
@@ -1189,104 +1186,11 @@ final class Workspace {
         }
     }
 
-    // MARK: - Voice
-
-    func fnKey(held: Bool, command: Bool) {
-        if held == voice.fnHeld {
-            if held, command, voice.mode == .write, quietlyListening {
-                cancelListening()
-                startListening(.command)
-            }
-            return
-        }
-        voice.fnHeld = held
-        if held {
-            if command {
-                toggleListening(.command)
-            } else {
-                startListening(.write)
-            }
-        } else if voice.mode == .write {
-            stopListening()
-        }
-    }
-
-    func toggleListening(_ mode: VoiceMode) {
-        if voice.state.isListening {
-            cancelListening()
-        } else {
-            startListening(mode)
-        }
-    }
-
-    func cancelListening() {
-        voice.cancel()
-    }
-
-    @discardableResult
-    func startListening(_ mode: VoiceMode) -> Bool {
-        voice.start(mode: mode, target: activePane) { [weak self] said, mode, _ in
-            guard let self else { return }
-            switch mode {
-            case .command:
-                _ = self.act(said)
-            case .write:
-                self.dictate(said)
-            }
-        }
-        return true
-    }
-
-    func stopListening() {
-        voice.stop()
-    }
-
-    func dictate(_ said: String) {
-        guard let pane = DictationTarget.pane(started: voice.target, active: activePane, in: tabs) else {
-            voice.markHeard(said: said, outcome: .refused("The page closed before dictation finished."))
-            return
-        }
-        if said.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "clear" {
-            clearPane(pane)
-        } else {
-            surfaces.setLine(pane, said)
-            if surfaces.kind(pane) == .browser {
-                navigate(pane, said)
-            }
-        }
-        voice.markHeard(said: said, outcome: .written)
-        keep()
-    }
-
-    @discardableResult
-    func act(_ said: String) -> VoiceOutcome {
-        guard let command = Intent.command(said) else {
-            let outcome = VoiceOutcome.notACommand
-            voice.markHeard(said: said, outcome: outcome)
-            return outcome
-        }
-        let reply = Control.dispatch(command, workspace: self)
-        let outcome: VoiceOutcome
-        if reply.hasPrefix("error ") {
-            outcome = .refused(String(reply.dropFirst(6)))
-        } else {
-            outcome = .ran(command)
-        }
-        voice.markHeard(said: said, outcome: outcome)
-        return outcome
-    }
-
     func quit() {
         NSApp.terminate(nil)
     }
 
     // MARK: - Private
-
-    private var quietlyListening: Bool {
-        if case .listening(let heard, _) = voice.state { return heard.isEmpty }
-        if case .starting = voice.state { return true }
-        return false
-    }
 
     private func canReuseForExternalURL(_ pane: PaneID) -> Bool {
         guard !onboarding.contains(pane) else { return false }
@@ -1366,8 +1270,6 @@ final class Workspace {
         }
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self else { return event }
-            let fn = event.modifierFlags.contains(.function)
-            let command = event.modifierFlags.contains(.command)
             let previous = CommandKeyState(left: self.leftCommandKeyHeld, right: self.rightCommandKeyHeld)
             let keys = CommandKeyState.updating(
                 previous,
@@ -1375,7 +1277,6 @@ final class Workspace {
                 rawModifierFlags: event.modifierFlags.rawValue
             )
             self.setCommandKeyState(keys)
-            self.fnKey(held: fn, command: command)
             return event
         }
 

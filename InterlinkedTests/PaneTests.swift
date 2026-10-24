@@ -121,19 +121,16 @@ final class NewTabPageTests: XCTestCase {
 
     func testNewTabHandleStaysExpandedWithoutHover() {
         XCTAssertTrue(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true
         ))
         XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: true, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: false
+            overviewOpen: true, panelOpen: false, hovering: false, editing: false, isNewTab: true
         ))
         XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: false, voiceActive: false
+            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: false
         ))
         XCTAssertTrue(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: true, editing: false, isNewTab: false, voiceActive: false
-        ))
-        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true, voiceActive: true
+            overviewOpen: false, panelOpen: false, hovering: true, editing: false, isNewTab: false
         ))
     }
 }
@@ -318,27 +315,6 @@ final class SplitViewTests: XCTestCase {
         XCTAssertEqual(tab.panes, [PaneID(1)])
         XCTAssertEqual(tab.active, PaneID(1))
         XCTAssertNil(tab.otherPane)
-    }
-}
-
-final class IntentTests: XCTestCase {
-    func testBrowserCommands() {
-        XCTAssertEqual(Intent.command("new tab"), "new-tab")
-        XCTAssertEqual(Intent.command("open a new page"), "new-tab")
-        XCTAssertEqual(Intent.command("next tab"), "next-tab")
-        XCTAssertEqual(Intent.command("go back a tab"), "prev-tab")
-        XCTAssertEqual(Intent.command("go to tab three"), "focus-tab 2")
-        XCTAssertEqual(Intent.command("close this page"), "close-tab")
-        XCTAssertNil(Intent.command("close tab two"))
-    }
-
-    func testRemovedWorkspaceCommandsAreNotExecutable() {
-        for said in ["open terminal", "new terminal tab", "show shell", "split this pane down",
-                     "divide", "swap pane one with pane two", "make this a file browser", "open agent"] {
-            XCTAssertNil(Intent.command(said), said)
-        }
-        XCTAssertNil(Intent.command("what is the weather like"))
-        XCTAssertNil(Intent.command("tab zero"))
     }
 }
 
@@ -974,29 +950,5 @@ final class ClearedPaneTests: XCTestCase {
         surfaces.erase(pane)
         XCTAssertFalse(surfaces.holdsPage(pane))
         XCTAssertEqual(surfaces.kind(pane), .browser, "A cleared pane is still a browser pane")
-    }
-}
-
-final class DictationTargetTests: XCTestCase {
-    func testDictationWritesToThePaneItStartedIn() {
-        var tab = Tab(id: TabID(1), pane: PaneID(1))
-        XCTAssertTrue(tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1)))
-        XCTAssertEqual(DictationTarget.pane(started: PaneID(1), active: PaneID(2), in: [tab]), PaneID(1))
-    }
-
-    func testDictationWithNoSessionWritesToTheActivePane() {
-        let tab = Tab(id: TabID(1), pane: PaneID(1))
-        XCTAssertEqual(DictationTarget.pane(started: nil, active: PaneID(1), in: [tab]), PaneID(1))
-        XCTAssertNil(DictationTarget.pane(started: nil, active: nil, in: [tab]))
-    }
-
-    func testDictationNeverWritesToAClosedPane() {
-        var tab = Tab(id: TabID(1), pane: PaneID(1))
-        XCTAssertTrue(tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1)))
-        XCTAssertTrue(tab.close(PaneID(2)))
-
-        XCTAssertNil(DictationTarget.pane(started: PaneID(2), active: PaneID(1), in: [tab]))
-        XCTAssertNil(DictationTarget.pane(started: nil, active: PaneID(2), in: [tab]))
-        XCTAssertNil(DictationTarget.pane(started: PaneID(1), active: PaneID(1), in: []))
     }
 }

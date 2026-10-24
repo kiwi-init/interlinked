@@ -78,12 +78,8 @@ Choose **Interlinked → About Interlinked** for a plain-language account of wha
 | `cmd-]` / `cmd-[` | Next / previous tab |
 | hold `cmd`, then `1`–`9` | Show other tabs and open the numbered tab |
 | `ctrl-cmd-s` | All tabs |
-| hold `fn` | Speak an address or search |
-| `cmd-fn` | Speak a browser command, such as "new tab" |
 | `escape` | Cancel editing or return to the page |
 | `cmd-q` | Quit |
-
-Voice needs microphone and speech-recognition permission, which macOS asks for the first time.
 
 ## Passkeys
 
