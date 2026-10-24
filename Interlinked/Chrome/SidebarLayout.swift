@@ -29,7 +29,10 @@ struct SidebarLayout<Page: View>: View {
             }
             ZStack(alignment: .top) {
                 page()
+                    .clipShape(RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous))
                     .padding(.top, SidebarMetrics.toolbar)
+                    .padding([.trailing, .bottom], 8)
+                    .padding(.leading, workspace.sidebarCollapsed ? 8 : 0)
                 // The toolbar row stands in for a titlebar.
                 Color.clear
                     .frame(height: SidebarMetrics.toolbar)
@@ -82,6 +85,8 @@ enum SidebarMetrics {
     static let row: CGFloat = 30
     static let icon: CGFloat = 20
     static let control: CGFloat = 32
+    /// The sidebar's and the page's corners.
+    static let radius: CGFloat = 16
 }
 
 // MARK: - Sidebar
@@ -127,7 +132,7 @@ private struct TabSidebar: View {
         .font(.system(size: 12))
         .foregroundStyle(palette.text)
         .frame(maxHeight: .infinity, alignment: .top)
-        .modifier(PageGlass(radius: 16))
+        .modifier(PageGlass(radius: SidebarMetrics.radius))
         .animation(reduceMotion ? nil : Metrics.morph, value: historyOpen)
         .animation(reduceMotion ? nil : Metrics.morph, value: downloadsOpen)
     }
