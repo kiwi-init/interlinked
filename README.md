@@ -1,6 +1,6 @@
 # Interlinked
 
-A minimal macOS browser. Laid out like a terminal multiplexer: your tabs run down a Liquid Glass sidebar, and each page is its own card, standing off the frosted window, with a header of its own for navigation, the address and its tools. Nothing floats over the page. Settings > General > Tint colors the glass, or lets it follow your Mac's accent color. Built with SwiftUI and WebKit.
+A minimal macOS browser. Laid out like a terminal multiplexer: your tabs run down a sidebar set into the frosted window, and each page is its own card, raised above it, with a header of its own for navigation, the address and its tools. Nothing floats over the page. Settings > General > Tint colors the glass, or lets it follow your Mac's accent color. Built with SwiftUI and WebKit.
 
 ## Run
 

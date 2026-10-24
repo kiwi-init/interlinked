@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Laid out like a terminal multiplexer: open pages down a glass sidebar, and
-/// each page a card of its own, lifted off the frosted window, with its own
+/// Laid out like a terminal multiplexer: open pages down a sidebar set flush in
+/// the frosted window, and each page a card of its own, lifted off it, with its own
 /// header in place of a toolbar across the window. Each group morphs in
 /// place: the sidebar into History or Downloads, the address field into
 /// results or the site's connection, and a header's tools into Find.
@@ -237,7 +237,8 @@ private struct TabSidebar: View {
         .font(.system(size: 12))
         .foregroundStyle(palette.text)
         .frame(maxHeight: .infinity, alignment: .top)
-        .modifier(PageGlass(radius: SidebarMetrics.radius))
+        // No card of its own: docked, the sidebar sits flush on the frosted
+        // window, below the pages, which are the only raised layer.
         .animation(reduceMotion ? nil : Metrics.morph, value: historyOpen)
         .animation(reduceMotion ? nil : Metrics.morph, value: downloadsOpen)
     }
@@ -655,9 +656,9 @@ private struct ToolbarIcon: View {
     }
 }
 
-/// The peeked sidebar, whose own glass card is raised over the page on a
-/// shadow, with the page dimmed underneath so its rows stay readable over
-/// anything.
+/// The peeked sidebar: unlike the docked one, it floats over the page, so it
+/// gets a glass card raised on a shadow, with the page dimmed underneath so
+/// its rows stay readable over anything.
 private struct PeekSurface: ViewModifier {
     @Environment(\.colorSchemeContrast) private var contrast
     var palette: Palette
@@ -665,6 +666,7 @@ private struct PeekSurface: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
         content
+            .modifier(PageGlass(radius: SidebarMetrics.radius))
             .overlay {
                 shape.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
                     .allowsHitTesting(false)
