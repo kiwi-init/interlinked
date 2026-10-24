@@ -135,7 +135,7 @@ final class BrowserAssistance {
         matches = []
         labelEffect = nil
         labels = Dictionary(uniqueKeysWithValues: metadata.map { pane, page in
-            (pane, (automaticLabels ? portraits[pane]?.label : nil) ?? PageLabels.fallback(page))
+            (pane, (automaticLabels && appleEnabled ? portraits[pane]?.label : nil) ?? PageLabels.fallback(page))
         })
         Task { await intelligence.reset() }
         status = enabled ? "Share this page to use Jev." : JevError.disabled.errorDescription!
