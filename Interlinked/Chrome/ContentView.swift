@@ -22,7 +22,7 @@ struct ContentView: View {
                     .offset(y: 120)
             }
         }
-        .background(palette.chrome)
+        .background(WindowBackdrop(fallback: palette.pane))
         .background(WindowChrome())
         .frame(minWidth: 640, minHeight: 400)
         .toolbarBackground(.hidden, for: .windowToolbar)

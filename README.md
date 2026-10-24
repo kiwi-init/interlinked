@@ -1,6 +1,6 @@
 # Interlinked
 
-A minimal macOS browser. Your tabs run down a sidebar, and a toolbar above the page holds navigation and the address. Both sit flush on the window in your tint color. The page is the only card, and nothing floats over it. Built with SwiftUI and WebKit.
+A minimal macOS browser. Your tabs run down a Liquid Glass sidebar, glass groups above the page hold navigation and the address, and nothing floats over the page. Built with SwiftUI and WebKit.
 
 ## Run
 

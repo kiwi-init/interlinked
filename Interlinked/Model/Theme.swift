@@ -73,12 +73,6 @@ enum Tint: String, Codable, CaseIterable, Equatable {
         return ((hue / 6).truncatingRemainder(dividingBy: 1), saturation, lightness)
     }
 
-    /// The window around the page, where the sidebar and toolbar sit.
-    var chrome: Color {
-        let (r, g, b) = rgb
-        return Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
-    }
-
     var accent: Color {
         let (hue, saturation, _) = hsl
         let wrapped = hue < 0 ? hue + 1 : hue
@@ -111,7 +105,7 @@ struct Palette {
         return Palette(
             panel: .page,
             specular: Color(hsla: 0, 0, 1, 0.10),
-            chrome: tint.chrome,
+            chrome: .page,
             pane: .page,
             hover: Color(hsla: 0, 0, 1, 0.08),
             hairline: Color(hsla: 0, 0, 1, 0.08),
