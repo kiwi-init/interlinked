@@ -117,11 +117,18 @@ final class WebKitPage: NSObject {
     private var committedURL: URL?
     /// The last main-frame address the navigation policy allowed.
     private var allowedURL: URL?
-    /// Where the provisional navigation began, and whether a server has
+    /// How that address was reached.
+    private var allowedKind: NavigationKind?
+    /// Where the provisional navigation began, how, and whether a server has
     /// redirected it since.
     private var chainStart: URL?
+    private var chainKind: NavigationKind?
     private var provisional = false
     private var redirected = false
+    /// Only a chain a page started is reviewed as a redirect. An address
+    /// typed or opened from another app often bounces through a tracker on
+    /// another site, and the person chose it.
+    private var chainFromPage: Bool { [.link, .form, .redirect].contains(chainKind) }
     /// A navigation restarted without its tracking parameters, which keeps
     /// the kind and source it was reviewed with.
     private var restarted: (url: URL, kind: NavigationKind, source: URL?)?
@@ -482,7 +489,7 @@ extension WebKitPage: WKNavigationDelegate {
             if frame.isMainFrame {
                 // A redirect restarted at its clean address is still reviewed
                 // as one.
-                restarted = provisional ? (clean, .redirect, chainStart) : (clean, kind, source)
+                restarted = provisional && chainFromPage ? (clean, .redirect, chainStart) : (clean, kind, source)
                 nativeView.load(URLRequest(url: clean))
             } else {
                 let literal = String(decoding: (try? JSONSerialization.data(withJSONObject: clean.absoluteString,
@@ -493,6 +500,7 @@ extension WebKitPage: WKNavigationDelegate {
         }
         guard frame.isMainFrame else { return decisionHandler(.allow) }
 
+        let reviewedKind = kind
         let proceed: () -> Void = { [weak self] in
             guard let self else { return decisionHandler(.cancel) }
             // Mail, phone, and app links belong to the app that handles them;
@@ -503,6 +511,7 @@ extension WebKitPage: WKNavigationDelegate {
                 return
             }
             self.allowedURL = destination
+            self.allowedKind = reviewedKind
             self.certificateErrorReported = false
             self.prepareDocument(for: destination)
             decisionHandler(.allow)
@@ -523,7 +532,7 @@ extension WebKitPage: WKNavigationDelegate {
         if !response.canShowMIMEType || attachment { return decisionHandler(.download) }
         // WebKit asks about each redirect before it reports one, so the chain
         // as a whole is reviewed here, from where it began.
-        guard response.isForMainFrame, redirected, let start = chainStart,
+        guard response.isForMainFrame, redirected, chainFromPage, let start = chainStart,
               let destination = response.response.url, Self.isWeb(destination) else { return decisionHandler(.allow) }
         let chain: [NavigationReview.Reason] = [.crossSiteRedirect, .insecureDowngrade]
         let review = NavigationSafety.review(destination: destination, source: start, kind: .redirect)
@@ -536,6 +545,7 @@ extension WebKitPage: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         chainStart = allowedURL
+        chainKind = allowedKind
         provisional = true
         redirected = false
     }

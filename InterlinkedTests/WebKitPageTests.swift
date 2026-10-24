@@ -38,7 +38,7 @@ final class WebKitPageTests: XCTestCase {
     func testCrossSiteRedirectIsReviewedFromWhereTheChainStarted() async throws {
         server.route("/hop", .redirect(to: server.url("/page", host: "localhost")))
         let (page, delegate) = makePage()
-        page.load(server.url("/hop"))
+        try await followLink(to: "/hop", in: page, delegate)
         try await waitFor { delegate.finished.contains(self.server.url("/page", host: "localhost")) }
         let redirects = delegate.reviews.filter { $0.kind == .redirect }
         XCTAssertEqual(redirects, [.init(destination: server.url("/page", host: "localhost"), source: server.url("/hop"), kind: .redirect)])
@@ -47,7 +47,7 @@ final class WebKitPageTests: XCTestCase {
     func testSameSiteRedirectIsNotReviewedAsARedirect() async throws {
         server.route("/hop", .redirect(to: server.url("/page")))
         let (page, delegate) = makePage()
-        page.load(server.url("/hop"))
+        try await followLink(to: "/hop", in: page, delegate)
         try await waitFor { delegate.finished.contains(self.server.url("/page")) }
         XCTAssertFalse(delegate.reviews.contains { $0.kind == .redirect }, "\(delegate.reviews)")
     }
@@ -55,20 +55,28 @@ final class WebKitPageTests: XCTestCase {
     func testDeclinedRedirectLeavesThePageWhereItWas() async throws {
         server.route("/hop", .redirect(to: server.url("/page", host: "localhost")))
         let (page, delegate) = makePage()
-        page.load(server.url("/page"))
-        try await waitFor { delegate.finished.contains(self.server.url("/page")) }
         delegate.allows = { $0.kind != .redirect }
-        page.load(server.url("/hop"))
+        try await followLink(to: "/hop", in: page, delegate)
         try await waitFor { delegate.reviews.contains { $0.kind == .redirect } }
         try await Task.sleep(for: .milliseconds(500))
-        XCTAssertEqual(page.url, server.url("/page"))
+        XCTAssertEqual(page.url, server.url("/links"))
         XCTAssertFalse(delegate.finished.contains(server.url("/page", host: "localhost")))
+    }
+
+    func testOpenedAddressThatRedirectsToAnotherSiteIsNotReviewedAsARedirect() async throws {
+        // Typed, or opened from another app: the person chose the address,
+        // and links from mail often bounce through a tracker on another site.
+        server.route("/hop", .redirect(to: server.url("/page?utm_source=mail&id=3", host: "localhost")))
+        let (page, delegate) = makePage()
+        page.load(server.url("/hop"))
+        try await waitFor { delegate.finished.contains(self.server.url("/page?id=3", host: "localhost")) }
+        XCTAssertFalse(delegate.reviews.contains { $0.kind == .redirect }, "\(delegate.reviews)")
     }
 
     func testRedirectRestartedWithoutTrackingParametersIsStillReviewedAsARedirect() async throws {
         server.route("/hop", .redirect(to: server.url("/page?utm_source=mail&id=7", host: "localhost")))
         let (page, delegate) = makePage()
-        page.load(server.url("/hop"))
+        try await followLink(to: "/hop", in: page, delegate)
         let clean = server.url("/page?id=7", host: "localhost")
         try await waitFor { delegate.finished.contains(clean) }
         XCTAssertTrue(delegate.reviews.contains(.init(destination: clean, source: server.url("/hop"), kind: .redirect)),
@@ -254,6 +262,14 @@ final class WebKitPageTests: XCTestCase {
         await withCheckedContinuation { continuation in
             page.evaluateDiscardProbe { continuation.resume(returning: $0) }
         }
+    }
+
+    /// Starts a navigation the way a page does: from a link it shows.
+    private func followLink(to path: String, in page: WebKitPage, _ delegate: RecordingPageDelegate) async throws {
+        server.route("/links", .html("<a id=go href='\(path)'>Go</a>"))
+        page.load(server.url("/links"))
+        try await waitFor { delegate.finished.contains(self.server.url("/links")) }
+        _ = try await page.evaluateJavaScript("document.getElementById('go').click()")
     }
 
     private func makePage() -> (WebKitPage, RecordingPageDelegate) {
