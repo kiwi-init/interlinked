@@ -96,7 +96,6 @@ struct InterlinkedApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var appearanceObservation: NSKeyValueObservation?
     private var pendingWebURLs: [URL] = []
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -109,9 +108,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
-            self?.updateApplicationIcon(for: app.effectiveAppearance)
-        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -127,11 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func takePendingWebURLs() -> [URL] {
         defer { pendingWebURLs.removeAll() }
         return pendingWebURLs
-    }
-
-    private func updateApplicationIcon(for appearance: NSAppearance) {
-        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        NSApp.applicationIconImage = isDark ? NSImage(named: "AppIconDark") : nil
     }
 
     func applicationWillTerminate(_ notification: Notification) {
