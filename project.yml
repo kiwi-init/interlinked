@@ -56,7 +56,10 @@ targets:
               - public.data
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked
+        # script/run-isolated sets a suffix so its build keeps its own settings
+        # and website data, apart from the Interlinked you use.
+        INTERLINKED_BUNDLE_ID_SUFFIX: ""
+        PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked$(INTERLINKED_BUNDLE_ID_SUFFIX)
         PRODUCT_NAME: Interlinked
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: Apple Development

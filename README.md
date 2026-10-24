@@ -106,6 +106,13 @@ build/Build/Products/Debug/interlinked type paper.design
 build/Build/Products/Debug/interlinked commit
 ```
 
+`script/run-isolated [--fresh] [DATA]` opens a second Debug copy beside the Interlinked you use, for measuring or testing without touching yours. It has its own bundle ID (`computer.interlinked.isolated`), so its settings and website data are separate. Its session, history, caches, and downloads list live under `DATA`, `$TMPDIR/interlinked-isolated` by default. `--fresh` starts it from nothing. Drive it through its own socket:
+
+```sh
+INTERLINKED_SOCKET=/tmp/interlinked-isolated-$(id -u)/control.sock \
+  build-isolated/Build/Products/Debug/interlinked state
+```
+
 The native app is in `Interlinked/`, its control client in `InterlinkedControl/`, unit tests in `InterlinkedTests/`, and UI tests in `InterlinkedUITests/`. Project, target, tool, storage, and Keychain identifiers use the Interlinked name. Legacy pane types remain for session compatibility.
 
 Run the tests with:
