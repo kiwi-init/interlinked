@@ -596,6 +596,24 @@ final class BrowserMigrationTests: XCTestCase {
         XCTAssertGreaterThan(restored.next_split, 3, "a new split never reuses a restored split's id")
     }
 
+    func testATintFromANewerBuildFallsBackToInkAndKeepsTheTabs() throws {
+        let saved = Session(version: 2, tabs: [Tab(id: TabID(4), pane: PaneID(4))], active: 0,
+            next_tab: 5, next_pane: 5, next_split: 1, surfaces: [], tint: .pine, sidebar: 216, sidebar_last: 216)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
+        json["tint"] = "neon"
+        let session = try JSONDecoder().decode(Session.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(session.tint, .ink)
+        XCTAssertEqual(session.tabs, saved.tabs)
+    }
+
+    func testTintsCanBePickedByNameAndInkKeepsTheGlassClear() {
+        XCTAssertEqual(Tint.parse("Accent"), .accent)
+        XCTAssertEqual(Tint.accent.title, "Accent Color")
+        XCTAssertEqual(Tint.pine.title, "Pine")
+        XCTAssertNil(Tint.ink.glass)
+        XCTAssertTrue(Tint.allCases.filter { $0 != .ink }.allSatisfy { $0.glass != nil })
+    }
+
     func testLegacyTerminalFieldsDecodeWithoutRestoringAShell() throws {
         let json = #"{"version":1,"tabs":[],"active":0,"next_tab":1,"next_pane":2,"next_split":1,"surfaces":[],"terminal_open":true,"terminal_height":220,"terminal_pane":1}"#
         let session = try JSONDecoder().decode(Session.self, from: Data(json.utf8)).browserOnly()

@@ -1,6 +1,6 @@
 # Interlinked
 
-A minimal macOS browser. Your tabs run down a Liquid Glass sidebar, glass groups above the page hold navigation and the address, and nothing floats over the page. Built with SwiftUI and WebKit.
+A minimal macOS browser. Your tabs run down a Liquid Glass sidebar, glass groups above the page hold navigation and the address, and the page stands off the frosted window with nothing floating over it. Settings > General > Tint colors the glass, or lets it follow your Mac's accent color. Built with SwiftUI and WebKit.
 
 ## Run
 
