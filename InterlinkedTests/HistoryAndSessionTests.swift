@@ -288,6 +288,16 @@ final class SessionStateTests: XCTestCase {
             .fits(url: URL(string: "https://docs.test/guide"), title: "Guide"))
     }
 
+    func testOnlyARealScrollPositionIsKept() throws {
+        let url = try XCTUnwrap(URL(string: "https://docs.test/guide"))
+        XCTAssertEqual(ScrollMark.sampled(pane: PaneID(1), url: url, title: "Guide", y: 640)?.y, 640)
+        XCTAssertNil(ScrollMark.sampled(pane: PaneID(1), url: url, title: "Guide", y: 0))
+        // A page can set its own scrollY. JSONEncoder refuses these, which
+        // would stop every later session save.
+        XCTAssertNil(ScrollMark.sampled(pane: PaneID(1), url: url, title: "Guide", y: .infinity))
+        XCTAssertNil(ScrollMark.sampled(pane: PaneID(1), url: url, title: "Guide", y: .nan))
+    }
+
     func testSessionSchemaHoldsNoFormPasswordOrPrivateWindowState() throws {
         let data = try XCTUnwrap(Session.data(session(active: 0, order: [1])))
         let keys = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any]).keys

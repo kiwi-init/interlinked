@@ -713,7 +713,7 @@ final class Workspace {
             let value = try? await page.evaluateJavaScript("window.scrollY")
             guard paneAlive(pane), hosts.existingBrowser(pane) === page, page.url == url,
                   let y = (value as? NSNumber)?.doubleValue else { continue }
-            let mark = y > 0 ? ScrollMark(pane: pane, url: url.absoluteString, title: page.title ?? "", y: y) : nil
+            let mark = ScrollMark.sampled(pane: pane, url: url, title: page.title ?? "", y: y)
             if scrollMarks[pane] != mark {
                 scrollMarks[pane] = mark
                 changed = true
@@ -922,7 +922,7 @@ final class Workspace {
 
     /// Sets the first page's share of the width for the active tab's split.
     func setSplitRatio(_ ratio: Double) {
-        guard activeTab?.isSplit == true else { return }
+        guard activeTab?.isSplit == true, ratio.isFinite else { return }
         tabs[active].ratio = ratio.clamped(to: Tab.ratioRange)
         keep()
     }

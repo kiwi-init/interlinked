@@ -524,7 +524,7 @@ enum Control {
             case "off": workspace.unsplit()
             case "other": workspace.focusOtherPane()
             case "ratio":
-                guard words.count == 2, let value = Double(words[1]) else { return error("split-view ratio takes a number") }
+                guard words.count == 2, let value = Double(words[1]), value.isFinite else { return error("split-view ratio takes a number") }
                 workspace.setSplitRatio(value)
             case "drop":
                 guard words.count == 3, let raw = UInt64(words[1]), ["left", "right"].contains(words[2]) else {

@@ -74,6 +74,12 @@ struct ScrollMark: Codable, Equatable {
     func fits(url: URL?, title: String?) -> Bool {
         y > 0 && url?.absoluteString == self.url && (title ?? "") == self.title
     }
+
+    /// The page reports its own scrollY and may set it to anything. A value
+    /// JSON can't hold would stop every later session save.
+    static func sampled(pane: PaneID, url: URL, title: String, y: Double) -> ScrollMark? {
+        y > 0 && y.isFinite ? ScrollMark(pane: pane, url: url.absoluteString, title: title, y: y) : nil
+    }
 }
 
 /// What reopens at launch. Form values, passwords, and back and forward
