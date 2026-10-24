@@ -22,7 +22,7 @@ final class IntelligencePromptTests: XCTestCase {
             feature.defaultText
         )
         XCTAssertFalse(IntelligencePromptPreferences.isCustomized(feature, defaults: defaults))
-        XCTAssertTrue(feature.defaultText.contains("one-or-two-sentence description"))
+        XCTAssertFalse(feature.defaultText.contains("description"))
     }
 
     func testRuntimeVariablesRenderInsideTheShippedPrompt() {

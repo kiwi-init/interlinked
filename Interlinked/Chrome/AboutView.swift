@@ -45,7 +45,7 @@ struct AboutView: View {
 
     private var safetyAndPrivacy: some View {
         aboutSection("Safety and privacy") {
-            statement("What AI receives", "Meaning search sends your query and extracted page text to Jev. Optional label refinement gives Apple Intelligence page titles, headings, site, host, summary, and breadcrumbs; it returns one label and a short description, cached on this Mac. Models return supplied candidate IDs, not executable page code.")
+            statement("What AI receives", "Meaning search sends your query and extracted page text to Jev. Optional label refinement gives Apple Intelligence page titles, headings, site, host, summary, and breadcrumbs; it returns one label, cached on this Mac. Models return supplied candidate IDs, not executable page code.")
 
             statement("What stays out", "Interlinked excludes forms and form values, password fields, editable pages, cookies, and local pages from AI reading tools. It does not try to detect whether you are signed in: sharing a signed-in page sends what that page shows. Ordinary browsing, exact find, and deterministic page labels do not use an AI model.")
 
@@ -55,7 +55,7 @@ struct AboutView: View {
 
             statement("Safer navigation", "Deterministic checks can block active-content URLs or warn about credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, and misleading link text. Warnings show the destination and source origins only: URL paths, queries, fragments, and credentials are omitted.")
 
-            statement("Five-day AI cache", "Interlinked stores a hash of each exact Jev request and its response on this Mac for up to five days. It also caches Apple-generated labels and page descriptions keyed by host, path, and the metadata Apple saw. Neither cache stores page text, queries, credentials, or raw URLs as lookup keys. Changed page text and model versions produce a different key.")
+            statement("Five-day AI cache", "Interlinked stores a hash of each exact Jev request and its response on this Mac for up to five days. It also caches Apple-generated labels keyed by host, path, and the metadata Apple saw. Neither cache stores page text, queries, credentials, or raw URLs as lookup keys. Changed page text and model versions produce a different key.")
 
             statement("Data on this Mac", (JevRuntime.includesJev ? "This build does not need or store an OpenRouter key." : "Your OpenRouter key is stored in macOS Keychain.") + " Browser history stays for \(HistoryRetention.standard.days) days in a local file readable only by your macOS account, and you can turn it off in Settings.")
 
