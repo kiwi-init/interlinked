@@ -11,3 +11,7 @@ DerivedData/
 .env
 .env.*
 !.env.example
+
+# Kiwi Channels signing keys can sit in the checkout; never commit them.
+channels-release.key
+channels-release.pub
