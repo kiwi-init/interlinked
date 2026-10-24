@@ -198,6 +198,44 @@ final class WebKitPageTests: XCTestCase {
         XCTAssertNil(StoredRuleList("someone-else-1-0-1"))
     }
 
+    func testDiscardProbeCountsOnlyFieldsAPersonChanged() async throws {
+        server.route("/form", .html("""
+        <input id=name><input type=radio name=r id=a checked><input type=radio name=r id=b>
+        <select id=s><option>a<option>b</select>
+        <script>
+        document.getElementById('b').checked = true;
+        document.getElementById('s').selectedIndex = 1;
+        const name = document.getElementById('name');
+        name.value = 'set by the page';
+        name.dispatchEvent(new Event('input', {bubbles: true}));
+        </script>
+        """))
+        let (page, delegate) = makePage()
+        page.load(server.url("/form"))
+        try await waitFor { delegate.finished.contains(self.server.url("/form")) }
+        let untouched = try await discardProbe(page)
+        XCTAssertEqual(untouched?.safe, true, "Values the page set itself are nobody's unsaved work")
+        let visible = try await page.evaluateJavaScript("typeof globalThis.__interlinkedEdited") as? String
+        XCTAssertEqual(visible, "undefined", "The page can neither read nor fake the record")
+
+        // A person's edit, as the recorder would have seen it.
+        _ = try await page.nativeView.callAsyncJavaScript(
+            "const name = document.getElementById('name'); globalThis.__interlinkedEdited.add(name); name.value = 'typed'",
+            contentWorld: WebKitPage.editsWorld)
+        let edited = try await discardProbe(page)
+        XCTAssertEqual(edited?.safe, false)
+    }
+
+    private func discardProbe(_ page: WebKitPage) async throws -> BrowserDiscardProbe? {
+        try await withCheckedThrowingContinuation { continuation in
+            page.evaluateDiscardProbe { value, error in
+                if let error { continuation.resume(throwing: error) } else {
+                    continuation.resume(returning: BrowserDiscardProbe.decode(value))
+                }
+            }
+        }
+    }
+
     private func makePage() -> (WebKitPage, RecordingPageDelegate) {
         let page = WebKitPage(initialURL: URL(string: "about:blank")!)
         let delegate = RecordingPageDelegate()
