@@ -26,36 +26,17 @@ private actor FixtureJev: JevProvider {
 private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
     let label: String?
     let about: String?
-    let advice: String?
-    let adviceDelay: Duration
-    let adviceUnavailable: Bool
     private(set) var portraitCalls = 0
-    private(set) var adviceCalls = 0
 
-    init(
-        label: String? = nil,
-        about: String? = nil,
-        advice: String? = nil,
-        adviceDelay: Duration = .zero,
-        adviceUnavailable: Bool = false
-    ) {
+    init(label: String? = nil, about: String? = nil) {
         self.label = label
         self.about = about
-        self.advice = advice
-        self.adviceDelay = adviceDelay
-        self.adviceUnavailable = adviceUnavailable
     }
 
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait? {
         portraitCalls += 1
         guard let label, let clean = PageLabels.generated(label) else { return nil }
         return PagePortrait(label: clean, about: about ?? "About \(clean)")
-    }
-    func navigationAdvice(_ review: NavigationReview) async throws -> String? {
-        adviceCalls += 1
-        if adviceDelay != .zero { try? await Task.sleep(for: adviceDelay) }
-        if adviceUnavailable { throw CancellationError() }
-        return advice
     }
     func shouldReplaceSiteMenu(host: String, labels: String) async throws -> Bool? { true }
 }
@@ -458,63 +439,6 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(calls, 4 + 1)
     }
 
-    func testNavigationAdviceRetainsTheWarningWhenAppleIntelligenceIsUnavailable() async throws {
-        let local = FixtureLocalIntelligence(adviceUnavailable: true)
-        let intelligence = BrowserIntelligence(
-            jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: local,
-            portraits: PagePortraitCache(file: nil)
-        )
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://person:secret@example.test")),
-            source: nil,
-            kind: .link
-        )
-        let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(50))
-        XCTAssertNil(advice)
-        XCTAssertEqual(review.disposition, .warn)
-        XCTAssertTrue(review.needsAdvisory)
-    }
-
-    func testNavigationAdviceSkipsRoutineWarnings() async throws {
-        let local = FixtureLocalIntelligence(advice: "Should not run")
-        let intelligence = BrowserIntelligence(
-            jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: local,
-            portraits: PagePortraitCache(file: nil)
-        )
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://github.com:8443/")),
-            source: try XCTUnwrap(URL(string: "https://example.com/")),
-            kind: .link
-        )
-        let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(50))
-        let calls = await local.adviceCalls
-        XCTAssertTrue(review.reasons.contains(.unusualPort))
-        XCTAssertFalse(review.needsAdvisory)
-        XCTAssertNil(advice)
-        XCTAssertEqual(calls, 0)
-    }
-
-    func testNavigationAdviceDeadlineDoesNotWaitForTheModel() async throws {
-        let local = FixtureLocalIntelligence(advice: "Too late", adviceDelay: .seconds(2))
-        let intelligence = BrowserIntelligence(
-            jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: local,
-            portraits: PagePortraitCache(file: nil)
-        )
-        let review = NavigationSafety.review(
-            destination: try XCTUnwrap(URL(string: "https://person:secret@example.test")),
-            source: nil,
-            kind: .link
-        )
-        let clock = ContinuousClock()
-        let start = clock.now
-        let advice = await intelligence.navigationAdvice(review, timeout: .milliseconds(40))
-        XCTAssertNil(advice)
-        XCTAssertLessThan(start.duration(to: clock.now), .milliseconds(500))
-        XCTAssertEqual(review.disposition, .warn)
-    }
 }
 
 @MainActor final class ContextFeatureTests: XCTestCase {

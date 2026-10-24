@@ -37,7 +37,7 @@ struct AboutView: View {
                     Text(version).foregroundStyle(.primary)
                 }
             }
-            Text("A browser that uses AI for useful page labels, search, and safer decisions. You stay in control of when those tools run and what they can read.")
+            Text("A browser that uses AI for useful page labels and search. You stay in control of when those tools run and what they can read.")
                 .font(.callout)
                 .foregroundStyle(.primary)
         }
@@ -53,7 +53,7 @@ struct AboutView: View {
                 ? "Apple Intelligence requests use Apple's on-device Foundation Models framework and do not go through Interlinked's relay. Jev requests go to the relay, which verifies the App Store-signed copy of the app before forwarding cache misses to OpenRouter for TypeSafe's Jev 1.13 model. Interlinked does not put its OpenRouter key in the app."
                 : "Apple Intelligence requests use Apple's on-device Foundation Models framework. Jev requests go directly to OpenRouter for TypeSafe's Jev 1.13 model using the key you supplied. Every Jev request sets OpenRouter's data_collection field to deny.")
 
-            statement("Safer navigation", "Deterministic checks can block active-content URLs or warn about credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, and misleading link text. For misleading link text, mixed-script or encoded hostnames, and embedded credentials, Apple Intelligence may paraphrase those facts in one sentence. It cannot name a new threat or override an allow, warning, or block decision. URL paths, queries, fragments, and credentials are omitted.")
+            statement("Safer navigation", "Deterministic checks can block active-content URLs or warn about credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, and misleading link text. Warnings show the destination and source origins only: URL paths, queries, fragments, and credentials are omitted.")
 
             statement("Five-day AI cache", "Interlinked stores a hash of each exact Jev request and its response on this Mac for up to five days. It also caches Apple-generated labels and page descriptions keyed by host, path, and the metadata Apple saw. Neither cache stores page text, queries, credentials, or raw URLs as lookup keys. Changed page text and model versions produce a different key.")
 

@@ -477,12 +477,8 @@ final class BrowserCoordinator: WebKitPageDelegate {
 
     private func allow(_ review: NavigationReview, page: WebKitPage, workspace: Workspace) async -> Bool {
         if review.disposition == .allow || workspace.navigationExceptions.contains(review) { return true }
-        let advice = review.disposition == .warn
-            ? await workspace.assistance.navigationAdvice(review)
-            : nil
         return await BrowserPrompts.confirmNavigation(
             review,
-            advice: advice,
             store: workspace.navigationExceptions,
             window: page.window
         )

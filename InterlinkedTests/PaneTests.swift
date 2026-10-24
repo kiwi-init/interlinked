@@ -379,7 +379,7 @@ final class NavigationSafetyTests: XCTestCase {
         }
     }
 
-    func testCredentialsAndPrivateURLPartsNeverReachAdvisoryEvidence() throws {
+    func testCredentialsAndPrivateURLPartsStayOutOfTheWarning() throws {
         let review = NavigationSafety.review(
             destination: try XCTUnwrap(URL(string: "https://person:secret@example.com/private?token=hidden#account")),
             source: try XCTUnwrap(URL(string: "https://source.test/start?private=yes")),
@@ -387,9 +387,11 @@ final class NavigationSafetyTests: XCTestCase {
         )
         XCTAssertEqual(review.disposition, .warn)
         XCTAssertTrue(review.reasons.contains(.embeddedCredentials))
-        XCTAssertTrue(review.advisoryEvidence.contains("https://example.com"))
+        XCTAssertEqual(review.destinationOrigin, "https://example.com")
+        XCTAssertEqual(review.sourceOrigin, "https://source.test")
+        let shown = ([review.destinationOrigin, review.sourceOrigin ?? ""] + review.reasons.map(\.rawValue)).joined(separator: "\n")
         for privateValue in ["person", "secret", "private", "token", "hidden", "account"] {
-            XCTAssertFalse(review.advisoryEvidence.contains(privateValue))
+            XCTAssertFalse(shown.contains(privateValue))
         }
     }
 

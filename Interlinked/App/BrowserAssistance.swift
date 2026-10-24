@@ -28,8 +28,8 @@ final class BrowserAssistance {
     private(set) var grants: [PaneID: String] = [:]
     var enabled = JevPreferences.enabled()
     var automaticLabels = UserDefaults.standard.object(forKey: "jev.labels") as? Bool ?? true
-    /// Every on-device model call: tab names and descriptions, link warnings,
-    /// and the site menu check. Off, the browser uses its own rules for each.
+    /// Every on-device model call: tab names and descriptions, and the site
+    /// menu check. Off, the browser uses its own rules for each.
     var appleEnabled = UserDefaults.standard.object(forKey: "apple.enabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(appleEnabled, forKey: "apple.enabled") }
     }
@@ -212,11 +212,6 @@ final class BrowserAssistance {
                 self.lastDecisionStatus = "\(decision.source.rawValue) label decision received"
             } catch { if self.accepts(key, revision) { self.lastDecisionStatus = self.errorMessage(error) } }
         }
-    }
-
-    func navigationAdvice(_ review: NavigationReview) async -> String? {
-        guard appleEnabled else { return nil }
-        return await intelligence.navigationAdvice(review)
     }
 
     func openFind() {
