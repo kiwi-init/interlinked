@@ -19,7 +19,7 @@ Version 1 files load with an empty `closed` and `scroll` and are written back as
 
 ## Writes, quit, and crashes
 
-`SessionWriter` writes on a background queue no more than 150 ms after the first change it sees. Selecting, reordering, opening, closing, or renaming a tab changes the session, so the file on disk trails the window by at most 150 ms. Quitting calls `Workspace.stop()`, which flushes any pending write before Chromium shuts down. A crash loses at most the last 150 ms of changes. Otherwise the previous launch's tabs, order, and selection come back.
+`SessionWriter` writes on a background queue no more than 150 ms after the first change it sees. Selecting, reordering, opening, closing, or renaming a tab changes the session, so the file on disk trails the window by at most 150 ms. Quitting calls `Workspace.stop()`, which flushes any pending write before the app exits. A crash loses at most the last 150 ms of changes. Otherwise the previous launch's tabs, order, and selection come back.
 
 Every successful write also writes `session.json.backup`. If `session.json` cannot be decoded at launch, it is moved to `session.json.corrupt-<milliseconds since 1970>` and the backup opens instead. The unreadable file is never overwritten. If `session.json` is missing entirely, Interlinked starts fresh and does not fall back to the backup.
 
@@ -31,7 +31,7 @@ Interlinked samples how far the visible pages are scrolled one second after you 
 
 Not restored. After a relaunch, each tab starts a new back and forward list at its saved address.
 
-Chromium keeps each browser's navigation entries in the browser process. CEF can read them (`CefBrowserHost::GetNavigationEntries`) and move through them (`CefBrowser::GoBack`, `GoForward`), but it has no public API to create a browser with an existing entry list. Replaying the saved addresses one by one would re-run requests, including form posts, and would still not reproduce the per-entry page state Chromium keeps. So Interlinked does not fake it. No part of the UI claims the list survives: Back is simply unavailable on a freshly restored tab, as it is on any new tab.
+WebKit keeps each page's back and forward list in its own processes. `WKWebView.interactionState` can save and restore that list as an opaque blob, but Interlinked does not write it to the session yet. Replaying the saved addresses one by one instead would re-run requests, including form posts, and would still not reproduce the per-entry page state WebKit keeps. So Interlinked does not fake it. No part of the UI claims the list survives: Back is simply unavailable on a freshly restored tab, as it is on any new tab.
 
 ## Never saved
 

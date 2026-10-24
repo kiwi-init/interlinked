@@ -2,11 +2,11 @@ import AppKit
 import Dispatch
 import Observation
 
-/// Retains Chromium pages and their state while background tabs leave the window.
+/// Retains pages and their state while background tabs leave the window.
 @MainActor
 @Observable
 final class PaneHosts {
-    @ObservationIgnored private var browsers: [PaneID: ChromiumPage] = [:]
+    @ObservationIgnored private var browsers: [PaneID: WebKitPage] = [:]
     @ObservationIgnored private var coordinators: [PaneID: BrowserCoordinator] = [:]
     @ObservationIgnored private var uploadPanes: Set<PaneID> = []
     @ObservationIgnored private var pendingScroll: [PaneID: Double] = [:]
@@ -28,14 +28,14 @@ final class PaneHosts {
     private(set) var canGoForward: [PaneID: Bool] = [:]
     private(set) var lifecycle = TabLifecycleLedger()
 
-    func browser(for pane: PaneID, workspace: Workspace) -> ChromiumPage {
+    func browser(for pane: PaneID, workspace: Workspace) -> WebKitPage {
         if let existing = browsers[pane] {
             lifecycle.touch(pane)
             return existing
         }
         let coordinator = BrowserCoordinator(pane: pane, workspace: workspace)
         let initialURL = address(from: workspace.surfaces.line(pane))
-        let page = ChromiumPage(initialURL: initialURL)
+        let page = WebKitPage(initialURL: initialURL)
         page.forcedDarkMode = workspace.builtIns.darkens(initialURL)
         page.sharingScreenShield = workspace.sharingScreenMode
         page.delegate = coordinator
@@ -63,9 +63,9 @@ final class PaneHosts {
         }
     }
 
-    func existingBrowser(_ pane: PaneID) -> ChromiumPage? { browsers[pane] }
-    func forEachBrowser(_ body: (ChromiumPage) -> Void) { browsers.values.forEach(body) }
-    func pane(of page: ChromiumPage) -> PaneID? { browsers.first { $0.value === page }?.key }
+    func existingBrowser(_ pane: PaneID) -> WebKitPage? { browsers[pane] }
+    func forEachBrowser(_ body: (WebKitPage) -> Void) { browsers.values.forEach(body) }
+    func pane(of page: WebKitPage) -> PaneID? { browsers.first { $0.value === page }?.key }
     func touch(_ pane: PaneID) { lifecycle.touch(pane) }
     func recovery(for pane: PaneID) -> BrowserRecovery? { lifecycle.recoveries[pane] }
 
@@ -85,7 +85,7 @@ final class PaneHosts {
         return true
     }
 
-    func updatePage(_ page: ChromiumPage, pane: PaneID) {
+    func updatePage(_ page: WebKitPage, pane: PaneID) {
         guard browsers[pane] === page else { return }
         if pageURLs[pane] != page.url {
             pageURLs[pane] = page.url
@@ -102,15 +102,15 @@ final class PaneHosts {
         for (pane, page) in browsers where page.window != nil { capture(page, pane: pane) }
     }
 
-    func capture(_ page: ChromiumPage, pane: PaneID) {
+    func capture(_ page: WebKitPage, pane: PaneID) {
         guard !capturing.contains(pane) else { return }
         capturing.insert(pane)
         let url = page.url
-        DispatchQueue.main.async { [weak self, weak page] in
+        Task { [weak self, weak page] in
+            let image = await page?.snapshot()
             guard let self else { return }
             self.capturing.remove(pane)
-            guard let page, self.browsers[pane] === page, page.url == url,
-                  let image = page.snapshot() else { return }
+            guard let page, self.browsers[pane] === page, page.url == url, let image else { return }
             self.previews[pane] = image
         }
     }
@@ -140,7 +140,7 @@ final class PaneHosts {
         if images != favicons { favicons = images }
     }
 
-    func loadFavicon(_ page: ChromiumPage, pane: PaneID, workspace: Workspace? = nil) {
+    func loadFavicon(_ page: WebKitPage, pane: PaneID, workspace: Workspace? = nil) {
         guard let pageURL = page.url, let domain = DomainIconCache<NSImage>.domain(pageURL),
               let token = iconCache.begin(domain) else { return }
         iconTasks[domain] = Task { [weak self, weak page, weak workspace] in
@@ -196,7 +196,7 @@ final class PaneHosts {
         memorySource = nil
     }
 
-    func handleWebContentTermination(_ page: ChromiumPage, pane: PaneID, workspace: Workspace) {
+    func handleWebContentTermination(_ page: WebKitPage, pane: PaneID, workspace: Workspace) {
         guard browsers[pane] === page else { return }
         let url = page.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
         lifecycle.suspend(pane, recovery: BrowserRecovery(
@@ -215,7 +215,7 @@ final class PaneHosts {
         savedScroll[mark.pane] = mark
     }
 
-    func restoreScrollIfNeeded(_ page: ChromiumPage, pane: PaneID) {
+    func restoreScrollIfNeeded(_ page: WebKitPage, pane: PaneID) {
         let saved = savedScroll.removeValue(forKey: pane).flatMap { $0.fits(url: page.url, title: page.title) ? $0.y : nil }
         guard let y = pendingScroll.removeValue(forKey: pane) ?? saved, y > 0 else { return }
         page.evaluateJavaScript("window.scrollTo(0, \(y))")
@@ -265,9 +265,9 @@ final class PaneHosts {
         }
     }
 
-    /// A page stuck in a script never answers, and Chromium only fails the
+    /// A page stuck in a script never answers, and WebKit only fails the
     /// request when the page closes, so an unanswered probe counts as unsafe.
-    private func discardProbe(_ page: ChromiumPage) async -> BrowserDiscardProbe? {
+    private func discardProbe(_ page: WebKitPage) async -> BrowserDiscardProbe? {
         let answer = DiscardProbeAnswer()
         return await withCheckedContinuation { continuation in
             answer.continuation = continuation
@@ -286,8 +286,8 @@ final class PaneHosts {
             coordinators.removeValue(forKey: pane)
             return
         }
-        // Cancel first while the client is still attached; the completion
-        // callback can no longer reach DownloadCenter once we detach below.
+        // Cancel first while the delegate is still attached; the cancellation
+        // can no longer reach DownloadCenter once we detach below.
         downloads.interruptDownloads(for: page)
         page.delegate = nil
         page.close()
@@ -307,7 +307,7 @@ private final class DiscardProbeAnswer {
 }
 
 @MainActor
-final class BrowserCoordinator: ChromiumPageDelegate {
+final class BrowserCoordinator: WebKitPageDelegate {
     let pane: PaneID
     weak var workspace: Workspace?
     private var navigation = PageNavigationTracker()
@@ -317,14 +317,13 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         self.workspace = workspace
     }
 
-    private func update(_ page: ChromiumPage) {
+    private func update(_ page: WebKitPage) {
         apply(navigation.addressChanged(to: page.url), page: page)
     }
 
-    private func apply(_ effects: PageNavigationEffects, page: ChromiumPage) {
+    private func apply(_ effects: PageNavigationEffects, page: WebKitPage) {
         guard let workspace else { return }
         if effects.contains(.newDocument) {
-            workspace.builtIns.navigated(pane)
             workspace.assistance.committed(pane)
             workspace.usefulInfo.committed(pane)
             workspace.noteSiteMenuDocumentChanged(pane)
@@ -341,14 +340,13 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         }
     }
 
-    func chromiumPageDidCreate(_ page: ChromiumPage) { update(page) }
-    func chromiumPageDidChange(_ page: ChromiumPage) { update(page) }
+    func pageDidChange(_ page: WebKitPage) { update(page) }
 
-    func chromiumPageDidCommit(_ page: ChromiumPage) {
+    func pageDidCommit(_ page: WebKitPage) {
         apply(navigation.committed(to: page.url), page: page)
     }
 
-    func chromiumPageDidFinish(_ page: ChromiumPage) {
+    func pageDidFinish(_ page: WebKitPage) {
         update(page)
         workspace?.hosts.loadFavicon(page, pane: pane, workspace: workspace)
         workspace?.hosts.restoreScrollIfNeeded(page, pane: pane)
@@ -358,10 +356,10 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         workspace?.captureSiteMenu(pane)
     }
 
-    func chromiumPage(_ page: ChromiumPage, didFail message: String) { update(page) }
+    func page(_ page: WebKitPage, didFail message: String) { update(page) }
 
-    func chromiumPage(
-        _ page: ChromiumPage,
+    func page(
+        _ page: WebKitPage,
         decideNavigationTo destination: URL,
         source: URL?,
         kind: NavigationKind,
@@ -391,8 +389,8 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         return true
     }
 
-    func chromiumPage(
-        _ page: ChromiumPage,
+    func page(
+        _ page: WebKitPage,
         decidePermissionFor originValue: String,
         kind: WebsitePermissionKind,
         completion: @escaping (Bool) -> Void
@@ -417,8 +415,8 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         }
     }
 
-    func chromiumPage(
-        _ page: ChromiumPage,
+    func page(
+        _ page: WebKitPage,
         decideDownloadFrom source: URL?,
         to destination: URL,
         completion: @escaping (Bool) -> Void
@@ -441,22 +439,22 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         }
     }
 
-    func chromiumPage(_ page: ChromiumPage, didRejectCertificateAt url: URL, error: String) {
+    func page(_ page: WebKitPage, didRejectCertificateAt url: URL, error: String) {
         Task { @MainActor [weak page] in
             await BrowserPrompts.showCertificateError(url: url, error: error, window: page?.window)
         }
     }
 
-    func chromiumPageWebContentProcessDidTerminate(_ page: ChromiumPage) {
+    func pageWebContentProcessDidTerminate(_ page: WebKitPage) {
         DispatchQueue.main.async { [weak self, weak page] in
             guard let self, let page, let workspace = self.workspace else { return }
             workspace.hosts.handleWebContentTermination(page, pane: self.pane, workspace: workspace)
         }
     }
 
-    func chromiumPage(_ page: ChromiumPage, requestedPopup url: URL, userGesture: Bool) {
+    func page(_ page: WebKitPage, requestedPopup url: URL) {
         // Pages must not open file:, data:, or custom-scheme tabs on their own.
-        guard userGesture, let destination = ExternalURLRouting.webURL(url), workspace != nil else { return }
+        guard let destination = ExternalURLRouting.webURL(url), workspace != nil else { return }
         let review = NavigationSafety.review(destination: destination, source: page.url, kind: .popup)
         Task { @MainActor [weak self, weak page] in
             guard let self, let page, let workspace = self.workspace,
@@ -466,21 +464,18 @@ final class BrowserCoordinator: ChromiumPageDelegate {
         }
     }
 
-    func chromiumPage(_ page: ChromiumPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String) {
+    func page(_ page: WebKitPage, didStartDownload identifier: UInt32, url: URL, suggestedFilename: String) {
         workspace?.downloads.begin(page: page, identifier: identifier, url: url, suggestedFilename: suggestedFilename)
     }
 
-    func chromiumPage(_ page: ChromiumPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool) {
+    func page(_ page: WebKitPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64, totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool) {
         workspace?.downloads.update(page: page, identifier: identifier, fullPath: fullPath, receivedBytes: receivedBytes, totalBytes: totalBytes, percent: percent, complete: complete, cancelled: cancelled, interrupted: interrupted)
     }
 
-    func chromiumPage(_ page: ChromiumPage, didBlockRequests count: Int) {
-        workspace?.builtIns.blocked(count, pane: pane)
-    }
+    func pageWillChooseFiles(_ page: WebKitPage) { workspace?.hosts.beginUpload(pane) }
+    func pageDidChooseFiles(_ page: WebKitPage) { workspace?.hosts.endUpload(pane) }
 
-    func chromiumPageDidClose(_ page: ChromiumPage) {}
-
-    private func allow(_ review: NavigationReview, page: ChromiumPage, workspace: Workspace) async -> Bool {
+    private func allow(_ review: NavigationReview, page: WebKitPage, workspace: Workspace) async -> Bool {
         if review.disposition == .allow || workspace.navigationExceptions.contains(review) { return true }
         let advice = review.disposition == .warn
             ? await workspace.assistance.navigationAdvice(review)

@@ -201,8 +201,8 @@ enum Control {
 
         case "engine-state":
             return json([
-                "engine": ILChromiumRuntime.engineVersion,
-                "running": ILChromiumRuntime.isRunning,
+                "engine": WebKitPage.engineVersion,
+                "running": true,
                 "application_class": NSStringFromClass(type(of: NSApp)),
                 "active_pages": workspace.tabs.filter { workspace.hosts.existingBrowser($0.active) != nil }.count,
             ])
@@ -587,8 +587,6 @@ enum Control {
                 return json([
                     "blocking": builtIns.blockingEnabled,
                     "engine_ready": builtIns.engineReady,
-                    "blocked_on_page": workspace.activePane.flatMap { builtIns.blockedCounts[$0] } ?? 0,
-                    "blocked_total": builtIns.blockedTotal,
                     "dark_mode": builtIns.darkMode.rawValue,
                     "page_darkened": builtIns.darkens(workspace.currentPageURL),
                     "status": builtIns.status,

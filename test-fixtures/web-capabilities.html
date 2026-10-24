@@ -104,13 +104,13 @@
     );
   };
   document.querySelector('#notifications').onclick = async () => {
-    if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this Chromium build.'; return; }
+    if (!('Notification' in window)) { permissions.textContent = 'Notifications unavailable in this WebKit build.'; return; }
     try { permissions.textContent = `Notification permission: ${await Notification.requestPermission()}`; }
     catch (error) { permissions.textContent = `Notifications failed: ${error.name}: ${error.message}`; }
   };
   document.querySelector('#passkey-probe').onclick = async () => {
     const passkeys = document.querySelector('#passkeys');
-    if (!('PublicKeyCredential' in window)) { passkeys.textContent = 'WebAuthn unavailable in this Chromium build.'; return; }
+    if (!('PublicKeyCredential' in window)) { passkeys.textContent = 'WebAuthn unavailable in this WebKit build.'; return; }
     try {
       const [platform, conditional] = await Promise.all([
         PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.() ?? 'unknown',

@@ -155,7 +155,7 @@ struct PageNavigationEffects: OptionSet, Equatable {
     static let newAddress = Self(rawValue: 1 << 1)
 }
 
-/// Chromium reports pushState and #fragment navigations as an address change
+/// WebKit reports pushState and #fragment navigations as an address change
 /// with no commit and no finished load. Only a commit replaces the document,
 /// so only a commit may reset the page's state.
 struct PageNavigationTracker {

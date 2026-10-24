@@ -2,8 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
-    /// A tab dragged out of the open pages list. Private, so web pages and
-    /// Chromium never accept it and the drop reaches Interlinked.
+    /// A tab dragged out of the open pages list. Private, so web pages never
+    /// accept it and the drop reaches Interlinked.
     static let interlinkedTab = UTType(exportedAs: "computer.interlinked.tab")
 }
 
@@ -180,7 +180,7 @@ struct BrowserPage: View {
             } else if let recovery = workspace.hosts.recovery(for: pane) {
                 BrowserRecoveryView(pane: pane, recovery: recovery, palette: palette)
             } else if !workspace.surfaces.holdsPage(pane) {
-                // Chromium reports its own clicks; a new tab page is SwiftUI.
+                // A web page reports its own clicks; a new tab page is SwiftUI.
                 EmptyPaneView(palette: palette)
                     .contentShape(Rectangle())
                     .simultaneousGesture(TapGesture().onEnded { workspace.clickPane(pane) })

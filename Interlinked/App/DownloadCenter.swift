@@ -2,16 +2,16 @@ import AppKit
 import Observation
 @preconcurrency import UserNotifications
 
-private struct ChromiumDownloadKey: Hashable {
+private struct PageDownloadKey: Hashable {
     let page: ObjectIdentifier
     let identifier: UInt32
 }
 
-private final class ActiveChromiumDownload {
-    weak var page: ChromiumPage?
+private final class ActivePageDownload {
+    weak var page: WebKitPage?
     let identifier: UInt32
 
-    init(page: ChromiumPage, identifier: UInt32) {
+    init(page: WebKitPage, identifier: UInt32) {
         self.page = page
         self.identifier = identifier
     }
@@ -25,8 +25,8 @@ final class DownloadCenter {
     private(set) var unreadCount = 0
     private(set) var notificationStatus = "Checking…"
 
-    @ObservationIgnored private var active: [UUID: ActiveChromiumDownload] = [:]
-    @ObservationIgnored private var recordIDs: [ChromiumDownloadKey: UUID] = [:]
+    @ObservationIgnored private var active: [UUID: ActivePageDownload] = [:]
+    @ObservationIgnored private var recordIDs: [PageDownloadKey: UUID] = [:]
     @ObservationIgnored private let storageURL: URL
 
     init() {
@@ -53,16 +53,16 @@ final class DownloadCenter {
 
     var activeCount: Int { records.count(where: { $0.state.isActive }) }
 
-    func hasActiveDownload(for page: ChromiumPage) -> Bool {
+    func hasActiveDownload(for page: WebKitPage) -> Bool {
         active.values.contains { $0.page === page }
     }
 
-    func begin(page: ChromiumPage, identifier: UInt32, url: URL, suggestedFilename: String) {
-        let key = ChromiumDownloadKey(page: ObjectIdentifier(page), identifier: identifier)
+    func begin(page: WebKitPage, identifier: UInt32, url: URL, suggestedFilename: String) {
+        let key = PageDownloadKey(page: ObjectIdentifier(page), identifier: identifier)
         guard recordIDs[key] == nil else { return }
         let id = UUID()
         recordIDs[key] = id
-        active[id] = ActiveChromiumDownload(page: page, identifier: identifier)
+        active[id] = ActivePageDownload(page: page, identifier: identifier)
         records.insert(DownloadRecord(
             id: id, filename: DownloadNaming.sanitized(suggestedFilename),
             origin: Self.origin(url) ?? "Unknown origin", destination: nil,
@@ -73,9 +73,9 @@ final class DownloadCenter {
         persist()
     }
 
-    func update(page: ChromiumPage, identifier: UInt32, fullPath: String, receivedBytes: Int64,
+    func update(page: WebKitPage, identifier: UInt32, fullPath: String, receivedBytes: Int64,
                 totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool) {
-        let key = ChromiumDownloadKey(page: ObjectIdentifier(page), identifier: identifier)
+        let key = PageDownloadKey(page: ObjectIdentifier(page), identifier: identifier)
         guard let id = recordIDs[key] else { return }
         update(id, persist: complete || cancelled || interrupted) {
             if !fullPath.isEmpty {
@@ -111,14 +111,14 @@ final class DownloadCenter {
     }
 
     /// Marks every active download owned by `page` as interrupted and asks
-    /// Chromium to stop it. Must run before the page's delegate is cleared
-    /// and its browser is closed; afterwards no `OnDownloadUpdated` reaches
-    /// us, so without this the record would stay stuck as downloading.
-    func interruptDownloads(for page: ChromiumPage) {
+    /// WebKit to stop it. Must run before the page's delegate is cleared and
+    /// the page is closed; afterwards no progress reaches us, so without this
+    /// the record would stay stuck as downloading.
+    func interruptDownloads(for page: WebKitPage) {
         let targets = active.filter { $0.value.page === page }
         guard !targets.isEmpty else { return }
         for (id, download) in targets {
-            let key = ChromiumDownloadKey(page: ObjectIdentifier(page), identifier: download.identifier)
+            let key = PageDownloadKey(page: ObjectIdentifier(page), identifier: download.identifier)
             download.page?.cancelDownload(download.identifier)
             update(id) {
                 $0.state = .interrupted

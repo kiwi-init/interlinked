@@ -17,8 +17,6 @@ final class PageBuiltIns {
     private(set) var listsUpdatedAt: Date?
     private(set) var updating = false
     private(set) var status = ""
-    private(set) var blockedCounts: [PaneID: Int] = [:]
-    private(set) var blockedTotal: Int
     private(set) var systemIsDark = false
 
     @ObservationIgnored private weak var workspace: Workspace?
@@ -34,7 +32,6 @@ final class PageBuiltIns {
         darkMode = defaults.string(forKey: PageDarkMode.defaultsKey).flatMap(PageDarkMode.init) ?? .system
         unblockedSites = Set(defaults.stringArray(forKey: "builtins.unblockedSites") ?? [])
         lightSites = Set(defaults.stringArray(forKey: "builtins.lightSites") ?? [])
-        blockedTotal = defaults.integer(forKey: "builtins.blockedTotal")
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Interlinked", isDirectory: true)
         // blocker-engine.dat was built before the engine parsed procedural
@@ -61,7 +58,6 @@ final class PageBuiltIns {
         appearanceObservation = nil
         refreshTask?.cancel()
         refreshTask = nil
-        defaults.set(blockedTotal, forKey: "builtins.blockedTotal")
         workspace = nil
     }
 
@@ -84,17 +80,6 @@ final class PageBuiltIns {
         unblockedSites.remove(site)
         save()
         publishRules()
-    }
-
-    func blocked(_ count: Int, pane: PaneID) {
-        blockedCounts[pane, default: 0] += count
-        blockedTotal += count
-    }
-
-    func navigated(_ pane: PaneID) { blockedCounts[pane] = nil }
-
-    func forget(keep: (PaneID) -> Bool) {
-        blockedCounts = blockedCounts.filter { keep($0.key) }
     }
 
     func updateLists() async {
@@ -131,13 +116,14 @@ final class PageBuiltIns {
             await BlockerResources.refresh(from: remote, cache: resourcesCacheURL)
         }
         let resources = resourcesJSON
-        let serialized = await Task.detached(priority: .utility) {
-            ILChromiumRuntime.buildBlocker(withLists: texts, trustedLists: trusted as IndexSet, resourcesJSON: resources)
+        let built = await Task.detached(priority: .utility) {
+            BlockerEngine.build(lists: texts, trusted: trusted as IndexSet, resourcesJSON: resources)
         }.value
-        guard let serialized else {
+        guard let built, await ContentBlocker.shared.compile(built.ruleLists) else {
             status = "The block lists could not be read. Using the saved copy."
             return
         }
+        ContentBlocker.shared.install(built.engine)
         engineReady = true
         if let first = missing.first {
             status = "Could not download \(first). Blocking with the other lists until it downloads."
@@ -146,7 +132,7 @@ final class PageBuiltIns {
             defaults.set(listsUpdatedAt, forKey: "builtins.listsUpdatedAt")
             status = ""
         }
-        let url = cacheURL
+        let url = cacheURL, serialized = built.serialized
         Task.detached(priority: .utility) {
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? serialized.write(to: url, options: .atomic)
@@ -166,9 +152,15 @@ final class PageBuiltIns {
         #if DEBUG
         if let list = Self.uiTestFilters {
             // UI tests load test-fixtures/blocker-filters.txt instead of the
-            // standard lists, before the first page asks for rules.
-            engineReady = ILChromiumRuntime.buildBlocker(withLists: [list], trustedLists: IndexSet(),
-                                                         resourcesJSON: resourcesJSON) != nil
+            // standard lists.
+            let resources = resourcesJSON
+            Task {
+                guard let built = BlockerEngine.build(lists: [list], trusted: IndexSet(), resourcesJSON: resources),
+                      await ContentBlocker.shared.compile(built.ruleLists) else { return }
+                ContentBlocker.shared.install(built.engine)
+                engineReady = true
+                publishRules()
+            }
             return
         }
         #endif
@@ -176,12 +168,16 @@ final class PageBuiltIns {
         let resources = resourcesJSON
         let updatedAt = defaults.object(forKey: "builtins.listsUpdatedAt") as? Date
         Task {
-            let restored = await Task.detached(priority: .userInitiated) {
-                (try? Data(contentsOf: url)).map { ILChromiumRuntime.restoreBlocker(from: $0, resourcesJSON: resources) } ?? false
+            let engine = await Task.detached(priority: .userInitiated) {
+                (try? Data(contentsOf: url)).flatMap { BlockerEngine.restore($0, resourcesJSON: resources) }
             }.value
-            if restored {
+            // WebKit keeps the compiled network rules; the engine keeps the rest.
+            let restored = await ContentBlocker.shared.restoreRuleLists() && engine != nil
+            if restored, let engine {
+                ContentBlocker.shared.install(engine)
                 engineReady = true
                 listsUpdatedAt = updatedAt
+                publishRules()
             }
             if !restored || updatedAt.map({ Date().timeIntervalSince($0) > Self.refreshInterval }) ?? true {
                 await updateLists()
@@ -214,7 +210,8 @@ final class PageBuiltIns {
     #endif
 
     private func publishRules() {
-        ILChromiumRuntime.setContentBlockingEnabled(blockingEnabled, disabledSites: Array(unblockedSites))
+        ContentBlocker.shared.setEnabled(blockingEnabled, disabledSites: Array(unblockedSites))
+        workspace?.hosts.forEachBrowser { $0.refreshContentBlocking() }
     }
 
     // MARK: - Dark mode
@@ -251,7 +248,7 @@ final class PageBuiltIns {
         applyDarkMode()
     }
 
-    func apply(to page: ChromiumPage) {
+    func apply(to page: WebKitPage) {
         let dark = darkens(page.url)
         guard page.forcedDarkMode != dark else { return }
         page.forcedDarkMode = dark

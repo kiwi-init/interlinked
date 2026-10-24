@@ -30,9 +30,11 @@ extension PageJavaScriptEvaluating {
       let siteMenuNode, siteMenuPrevious, siteMenuSpacer;
       let siteMenuExtras=[];
       // Dark pages, whether darkened by Interlinked or dark by design, get a
-      // deep amber mark with cream text. Chromium's auto dark mode leaves
-      // colors like these alone, so the text never turns white on yellow.
+      // deep amber mark with cream text, so the text never turns white on
+      // yellow. A page Interlinked inverts turns the light mark into that
+      // same amber, so it keeps the light one.
       let darkened=false;
+      const inverted = () => /invert/.test(getComputedStyle(document.documentElement).filter);
       const darkSurface = node => {
         for (let el=node; el; el=el.parentElement) {
           const m=getComputedStyle(el).backgroundColor.match(/[\d.]+/g);
@@ -40,7 +42,7 @@ extension PageJavaScriptEvaluating {
         }
         return matchMedia('(prefers-color-scheme: dark)').matches;
       };
-      const markColors = dark => dark
+      const markColors = dark => dark && !inverted()
         ? {mark:'#6b5200',current:'#8f6c00',text:'#fff4cc'}
         : {mark:'#ffe66a',current:'#ffcc32',text:'#151515'};
       const clean = value => (value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();

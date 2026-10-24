@@ -519,7 +519,7 @@ final class Workspace {
             guard let self, let pane = expectedPane,
                   self.activePane == pane, !self.overviewOpen, !self.identityOpen, self.editing == nil else { return }
             if self.hosts.focus(pane) { return }
-            // SwiftUI may attach the retained Chromium view one run-loop turn
+            // SwiftUI may attach the retained page view one run-loop turn
             // after the selected tab changes.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.activePane == pane,
@@ -767,7 +767,6 @@ final class Workspace {
     /// sound ends and its next address change can't refill the line.
     private func releasePage(_ pane: PaneID) {
         hosts.forget(keep: holdsPage, downloads: downloads)
-        builtIns.navigated(pane)
         assistance.committed(pane)
         usefulInfo.committed(pane)
         siteMenus.removeValue(forKey: pane)
@@ -1521,7 +1520,6 @@ final class Workspace {
 
     private func forgetClosed() {
         hosts.forget(keep: holdsPage, downloads: downloads)
-        builtIns.forget(keep: paneAlive)
         usefulInfo.prune(keep: paneAlive)
         surfaces.forget(keep: paneAlive)
         siteMenus = siteMenus.filter { paneAlive($0.key) }

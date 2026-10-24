@@ -724,7 +724,7 @@ private struct PointingCursorRegion: NSViewRepresentable {
     }
 }
 
-/// AppKit's hit test can see Chromium below SwiftUI controls before SwiftUI routes
+/// AppKit's hit test can see the page below SwiftUI controls before SwiftUI routes
 /// the event. Track the actual panel bounds before deciding a click is outside.
 struct PageControlRegion: NSViewRepresentable {
     var radius: CGFloat
@@ -758,11 +758,10 @@ struct PageControlRegion: NSViewRepresentable {
     }
 }
 
-/// The glass floats over Chromium, which repaints the cursor for whatever
-/// page content sits underneath. Over Interlinked's own controls the page
-/// gives the cursor up: clickable controls show the pointing hand, the rest
-/// of the glass the arrow, and the page's cursor returns when the mouse
-/// leaves.
+/// The glass floats over the page, which repaints the cursor for whatever
+/// content sits underneath. Over Interlinked's own controls the page gives the
+/// cursor up: clickable controls show the pointing hand, the rest of the glass
+/// the arrow, and the page's cursor returns when the mouse moves on it again.
 @MainActor
 enum ChromeCursor {
     private static var monitor: Any?
@@ -770,13 +769,13 @@ enum ChromeCursor {
 
     static func install() {
         guard monitor == nil else { return }
-        ILChromiumView.setChromeOwnsCursor {
+        PageWebView.chromeOwnsCursor = {
             MainActor.assumeIsolated { cursorUnderMouse() != nil }
         }
         monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.mouseMoved, .mouseEntered, .mouseExited, .leftMouseUp, .leftMouseDragged, .scrollWheel]
         ) { event in
-            // After the event is delivered, so Chromium's own handling
+            // After the event is delivered, so the page's own handling
             // cannot repaint the cursor over ours.
             DispatchQueue.main.async { update() }
             return event
@@ -789,7 +788,7 @@ enum ChromeCursor {
             owning = true
         } else if owning {
             owning = false
-            ILChromiumView.restorePageCursor()
+            NSCursor.arrow.set()
         }
     }
 

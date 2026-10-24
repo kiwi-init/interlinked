@@ -47,7 +47,7 @@ struct ContentView: View {
     @ViewBuilder
     private func detail(palette: Palette) -> some View {
         // PaneHosts retains native views and their state. Only visible pages belong
-        // in the window; opacity alone leaves Chromium's child view visible.
+        // in the window; opacity alone leaves a background page's view visible.
         Group {
             if let tab = workspace.activeTab {
                 SplitLayout(tab: tab, palette: palette)

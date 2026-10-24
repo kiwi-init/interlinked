@@ -118,7 +118,7 @@ final class BrowserAssistance {
             closePanel()
         }
     }
-    func loaded(_ pane: PaneID, page view: ChromiumPage) {
+    func loaded(_ pane: PaneID, page view: WebKitPage) {
         let key = "metadata-\(pane.rawValue)", revision = token("metadata-\(pane.rawValue)"), url = view.url
         tasks[key] = Task { [weak self, weak view] in
             do {
@@ -359,7 +359,7 @@ final class BrowserAssistance {
               let view = workspace?.hosts.existingBrowser(pane) else { return }
         startAutomaticReading(pane: pane, page: page, view: view)
     }
-    private func startAutomaticReading(pane: PaneID, page: PageMetadata, view: ChromiumPage) {
+    private func startAutomaticReading(pane: PaneID, page: PageMetadata, view: WebKitPage) {
         guard enabled, hasJevAccess, automaticReadingEnabled, page.publicWebPage,
               workspace?.activePane == pane, workspace?.hosts.existingBrowser(pane) === view,
               panel == nil || panel == .reading || panel == .permission else { return }

@@ -10,7 +10,7 @@
 # identity the DMG is built unsigned and named so, for testing the pipeline;
 # signed without the key, it is named unnotarized, since Gatekeeper refuses it.
 #
-# Apple silicon only: the pinned Chromium SDK and the blocker are arm64.
+# Apple silicon only: the blocker is built for arm64.
 #
 # Direct downloads have no App Store receipt, so they cannot use the Jev relay:
 # Jev runs with the tester's own OpenRouter key from Settings.
@@ -31,7 +31,6 @@ rm -rf "$out"
 mkdir -p "$out"
 
 xcodegen generate
-script/bootstrap-chromium
 
 # The identity has spaces, so the signing settings travel as positional arguments.
 if [ -n "$identity" ]; then
@@ -56,22 +55,11 @@ xcodebuild \
 
 app="$out/Interlinked.app"
 ditto "$archive/Products/Applications/Interlinked.app" "$app"
-frameworks="$app/Contents/Frameworks"
 
 if [ -n "$identity" ]; then
-  # Notarization needs every Mach-O signed with the hardened runtime and a
-  # secure timestamp. The build signs Chromium without timestamps to keep
-  # local builds fast, so re-sign inside-out: libraries, framework, helpers,
-  # then the app that seals them.
-  sign() { codesign --force --options runtime --timestamp --sign "$identity" "$@"; }
-  for library in "$frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries/"*.dylib; do
-    sign "$library"
-  done
-  sign "$frameworks/Chromium Embedded Framework.framework"
-  for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
-    sign --entitlements script/chromium-helper.entitlements "$frameworks/Interlinked Helper${suffix}.app"
-  done
-  sign --entitlements script/release.entitlements "$app"
+  # Notarization needs the hardened runtime and a secure timestamp.
+  codesign --force --options runtime --timestamp --entitlements script/release.entitlements \
+    --sign "$identity" "$app"
   codesign --verify --deep --strict --verbose=2 "$app"
 fi
 

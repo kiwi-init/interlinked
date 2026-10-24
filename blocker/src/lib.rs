@@ -1,7 +1,11 @@
 //! C interface to Brave's adblock engine for Interlinked's built-in blocker.
 //! Every function is safe to call from any thread; an engine is immutable once
-//! built, so Chromium's network thread and the main thread share it freely.
+//! built, so a background build and the main thread share it freely.
+//!
+//! WebKit decides network requests itself, from compiled content rule lists,
+//! so the engine answers only for documents, cosmetics, and scriptlets.
 
+use adblock::content_blocking::{CbRule, CbType};
 use adblock::lists::{FilterSet, ParseOptions};
 use adblock::request::Request;
 use adblock::resources::{PermissionMask, Resource};
@@ -40,9 +44,11 @@ fn resources(json: &str) -> Vec<Resource> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
+/// `debug` keeps the text of every rule. Only `il_filters_content_rules`
+/// needs it, and an engine is smaller without it.
 #[no_mangle]
-pub extern "C" fn il_filters_new() -> *mut FilterSet {
-    Box::into_raw(Box::new(FilterSet::new(false)))
+pub extern "C" fn il_filters_new(debug: bool) -> *mut FilterSet {
+    Box::into_raw(Box::new(FilterSet::new(debug)))
 }
 
 /// # Safety
@@ -64,6 +70,36 @@ pub unsafe extern "C" fn il_blocker_new(filters: *mut FilterSet, resources_json:
     let mut engine = Engine::new_with_filter_set(*Box::from_raw(filters));
     engine.use_resources(resources(text(resources_json)));
     Box::into_raw(Box::new(Blocker { engine }))
+}
+
+/// Block rules in one WebKit content rule list, before its exceptions.
+const RULES_PER_LIST: usize = 50_000;
+
+/// The network rules as WebKit content rule lists, one compact JSON array per
+/// line. An exception overrides only the rules before it in its own list, so
+/// every list ends with all of them. Element hiding is left to the cosmetics
+/// script, which also handles procedural rules and their exceptions.
+fn content_rule_lists(filters: FilterSet) -> Vec<String> {
+    let Ok((rules, _)) = filters.into_content_blocking() else {
+        return Vec::new();
+    };
+    let (exceptions, blocks): (Vec<CbRule>, Vec<CbRule>) = rules
+        .into_iter()
+        .filter(|rule| rule.action.typ != CbType::CssDisplayNone)
+        .partition(|rule| rule.action.typ == CbType::IgnorePreviousRules);
+    blocks
+        .chunks(RULES_PER_LIST)
+        .filter_map(|chunk| serde_json::to_string(&chunk.iter().chain(&exceptions).collect::<Vec<_>>()).ok())
+        .collect()
+}
+
+/// Consumes `filters`, which must come from `il_filters_new(true)`. Returns
+/// one JSON array per line; release it with `il_string_free`.
+/// # Safety
+/// `filters` comes from `il_filters_new` and is not used again.
+#[no_mangle]
+pub unsafe extern "C" fn il_filters_content_rules(filters: *mut FilterSet) -> *mut c_char {
+    give(content_rule_lists(*Box::from_raw(filters)).join("\n"))
 }
 
 /// # Safety
@@ -215,7 +251,7 @@ mod tests {
     #[test]
     fn check_answers_a_tracking_parameter_with_the_cleaned_url() {
         unsafe {
-            let filters = il_filters_new();
+            let filters = il_filters_new(false);
             il_filters_add(filters, c"$removeparam=gclid".as_ptr(), false);
             let blocker = il_blocker_new(filters, c"[]".as_ptr());
             let url = c"https://shop.example/item?gclid=x&id=5";
@@ -235,7 +271,7 @@ mod tests {
         let url = CString::new(url).unwrap();
         let source = CString::new(source).unwrap();
         unsafe {
-            let filters = il_filters_new();
+            let filters = il_filters_new(false);
             il_filters_add(filters, rules.as_ptr(), false);
             let blocker = il_blocker_new(filters, resources.as_ptr());
             let mut detail = ptr::null_mut();
@@ -261,5 +297,54 @@ mod tests {
     #[test]
     fn blocked_request_without_a_stand_in_is_blocked() {
         assert_eq!(check("||ads.example^", "https://ads.example/lib.js", "https://news.example/"), IL_BLOCK);
+    }
+
+    fn rule_lists(rules: &str) -> Vec<serde_json::Value> {
+        let rules = CString::new(rules).unwrap();
+        unsafe {
+            let filters = il_filters_new(true);
+            il_filters_add(filters, rules.as_ptr(), false);
+            let lists = il_filters_content_rules(filters);
+            let text = CStr::from_ptr(lists).to_str().unwrap().to_owned();
+            il_string_free(lists);
+            text.lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+        }
+    }
+
+    fn action(rule: &serde_json::Value) -> &str {
+        rule["action"]["type"].as_str().unwrap()
+    }
+
+    #[test]
+    fn content_rules_keep_network_rules_and_leave_hiding_to_the_script() {
+        let lists = rule_lists("||ads.example^\n##.banner\n@@||ads.example/ok.js$domain=news.example");
+        assert_eq!(lists.len(), 1);
+        let rules = lists[0].as_array().unwrap();
+        assert_eq!(action(&rules[0]), "block");
+        assert!(rules.iter().all(|rule| action(rule) != "css-display-none"), "{rules:?}");
+        assert!(rules[1..].iter().all(|rule| action(rule) == "ignore-previous-rules"), "{rules:?}");
+    }
+
+    #[test]
+    fn every_content_rule_list_ends_with_the_exceptions() {
+        let mut rules: Vec<String> = (0..RULES_PER_LIST + 1).map(|n| format!("||ads{n}.example^")).collect();
+        rules.push("@@||ads0.example^$domain=news.example".into());
+        let lists = rule_lists(&rules.join("\n"));
+        assert_eq!(lists.len(), 2);
+        for list in &lists {
+            let last = list.as_array().unwrap().iter().rev().take(2).collect::<Vec<_>>();
+            assert!(last.iter().all(|rule| action(rule) == "ignore-previous-rules"), "{last:?}");
+        }
+    }
+
+    #[test]
+    fn content_rules_need_a_debug_filter_set() {
+        unsafe {
+            let filters = il_filters_new(false);
+            il_filters_add(filters, c"||ads.example^".as_ptr(), false);
+            let lists = il_filters_content_rules(filters);
+            assert_eq!(CStr::from_ptr(lists).to_str(), Ok(""));
+            il_string_free(lists);
+        }
     }
 }

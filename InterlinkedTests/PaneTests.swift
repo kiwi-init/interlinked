@@ -23,7 +23,7 @@ final class CommandKeyStateTests: XCTestCase {
         )
     }
 
-    func testRightCommandUsesItsPhysicalKeyCodeWhenChromiumStripsDeviceBits() {
+    func testRightCommandUsesItsPhysicalKeyCodeWhenDeviceBitsAreStripped() {
         let pressed = CommandKeyState.updating(
             CommandKeyState(left: false, right: false),
             eventKeyCode: CommandKeyState.rightKeyCode,

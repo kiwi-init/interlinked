@@ -47,13 +47,7 @@ jobs:
           esac
 
       - name: Install build tools
-        run: brew install xcodegen ninja
-
-      - name: Cache the Chromium SDK
-        uses: actions/cache@v4
-        with:
-          path: build/cef
-          key: cef-${{ runner.os }}-${{ hashFiles('script/bootstrap-chromium') }}
+        run: brew install xcodegen
 
       - name: Import the signing certificate
         id: signing

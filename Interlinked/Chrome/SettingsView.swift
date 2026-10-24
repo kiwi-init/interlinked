@@ -283,10 +283,6 @@ private struct PagesSettingsPane: View {
                     Text("Requests are blocked before they load, leftover ad slots are hidden, and video ads are removed.")
                 }
                 .toggleStyle(PointingSwitch())
-                LabeledContent("Blocked so far") {
-                    Text(builtIns.blockedTotal.formatted())
-                        .monospacedDigit()
-                }
                 LabeledContent {
                     HStack(spacing: 10) {
                         if builtIns.updating { ProgressView().controlSize(.small) }

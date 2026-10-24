@@ -1,8 +1,8 @@
 # Daily-driver compatibility matrix
 
-Record Chromium (`interlinked engine-state`) and the macOS version with every pass. Failed login, upload, download, or popup on a local fixture is a release blocker. Real-account rows need a person signed in to that service; do not put credentials in this repository.
+Record WebKit (`interlinked engine-state`) and the macOS version with every pass. Failed login, upload, download, or popup on a local fixture is a release blocker. Real-account rows need a person signed in to that service; do not put credentials in this repository.
 
-| Surface | Login | Upload | Download | Popup / OAuth | Last Chromium | Last macOS | Notes |
+| Surface | Login | Upload | Download | Popup / OAuth | Last WebKit | Last macOS | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Local capability index `http://127.0.0.1:8765` | Basic/Digest fixture | File chooser | Known, unknown, slow, failure | Target-blank GET/POST, script popup, delayed block | | | Automated UI tests cover chrome around these pages. Failure here blocks release. |
 | Local signed-in inbox `/inbox` | Session cookie, no password field | n/a | n/a | n/a | | | Must not count as a public page for AI. |

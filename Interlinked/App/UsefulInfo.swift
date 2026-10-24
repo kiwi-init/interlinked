@@ -44,7 +44,7 @@ final class UsefulInfo {
         contacts.removeValue(forKey: pane)
     }
 
-    func loaded(_ pane: PaneID, page: ChromiumPage) {
+    func loaded(_ pane: PaneID, page: WebKitPage) {
         guard enabled else { return }
         let url = page.url
         tasks[pane]?.cancel()

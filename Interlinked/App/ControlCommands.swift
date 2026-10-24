@@ -384,7 +384,6 @@ extension Control {
             "automatic_reading_consented": assistant.automaticReadingConsented,
             "ai_cache": assistant.cacheStatus,
             "notifications": workspace.downloads.notificationStatus,
-            "blocked_total": builtIns.blockedTotal,
             "lists_ready": builtIns.engineReady,
             "lists_updating": builtIns.updating,
             "lists_updated": builtIns.listsUpdatedAt.map(timestamp) ?? NSNull(),

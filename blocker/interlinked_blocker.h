@@ -15,8 +15,12 @@ typedef struct ILBlocker ILBlocker;
 
 enum { IL_ALLOW = 0, IL_BLOCK = 1, IL_REDIRECT = 2, IL_REWRITE = 3 };
 
-ILFilters *il_filters_new(void);
+/// |debug| keeps each rule's text, which only il_filters_content_rules needs.
+ILFilters *il_filters_new(bool debug);
 void il_filters_add(ILFilters *filters, const char *list, bool trusted);
+/// Consumes |filters|, which must be debug. The network rules as WebKit
+/// content rule lists, one JSON array per line. Release with il_string_free.
+char *il_filters_content_rules(ILFilters *filters);
 /// Consumes |filters|.
 ILBlocker *il_blocker_new(ILFilters *filters, const char *resources_json);
 ILBlocker *il_blocker_restore(const uint8_t *data, size_t length, const char *resources_json);

@@ -1,6 +1,6 @@
 # Interlinked
 
-A minimal macOS browser with pages that fill the window. A small Liquid Glass control holds your tabs, address, search results, and navigation. Built with SwiftUI and Chromium Embedded Framework (CEF).
+A minimal macOS browser with pages that fill the window. A small Liquid Glass control holds your tabs, address, search results, and navigation. Built with SwiftUI and WebKit.
 
 ## Run
 
@@ -16,7 +16,7 @@ Type an address or search words. Three Google suggestions appear above the input
 
 Click a page icon to switch directly. Click the current page's favicon for a searchable overview with previews. Right-click a preview to rename or close its tab.
 
-The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current Chromium page is mounted in the window. Background pages retain their state, while detached Chromium views stop compositing and lose focus. When macOS reports memory pressure, Interlinked pauses the oldest eligible background pages. It skips the active page and any page with playing media, an open file picker, an active download, or unsaved form work. Returning to a paused page restores its URL and scroll position.
+The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state, while WebKit throttles their detached views and they lose focus. When macOS reports memory pressure, Interlinked pauses the oldest eligible background pages. It skips the active page and any page with playing media, an open file picker, an active download, or unsaved form work. Returning to a paused page restores its URL and scroll position.
 
 Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
@@ -24,11 +24,11 @@ Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Olde
 
 Browsing history stays in `history.json` for 90 days, up to 5,000 visits. The History panel removes one visit, every visit to a site, or the last hour, today, or everything. Settings > Privacy turns history off, which also deletes it. History never goes to Jev.
 
-Links and scripts that request a new browser window become a new Interlinked tab when Chromium reports a user gesture. Unsolicited popups are discarded.
+Links and scripts that request a new browser window become a new Interlinked tab. WebKit offers only windows a person opened with a click; unsolicited popups are discarded. Command-click and middle-click open a link in a new tab. Mail, phone, and other non-web links open in the app that handles them after the usual warning.
 
 HTTP and HTTPS links sent by macOS open in delivery order. A cold launch reuses the untouched blank page for the first link. Every remaining link opens once in a new tab, with the last delivered link active. Interlinked ignores non-web and malformed URLs.
 
-Downloads use Chromium's macOS save dialog and appear in the top-right page actions with their origin, destination, byte progress, cancel, failure details, and Reveal in Finder. They keep running after their tab closes. Interlinked never opens a downloaded file automatically. It records an interrupted state if the app quits during a transfer.
+Downloads ask where to save with the macOS save panel and appear in the top-right page actions with their origin, destination, byte progress, cancel, failure details, and Reveal in Finder. They keep running after their tab closes. Interlinked never opens a downloaded file automatically. It records an interrupted state if the app quits during a transfer.
 
 Download completion and failure mark the top-right page actions and can use macOS notifications when enabled in Settings.
 
@@ -38,16 +38,16 @@ Interlinked does not load browser extensions. The features people install extens
 
 **Ad and tracker blocking.** Interlinked embeds Brave's `adblock` engine (`blocker/`, Rust, MPL-2.0) and feeds it uBlock Origin's filter lists, EasyList, EasyPrivacy, and Peter Lowe's list, refreshed daily and cached as a serialized engine in Application Support. It acts in four places:
 
-- *Requests.* Chromium asks before every request; the engine decides with full rule syntax (paths, resource types, third-party, exceptions). The page you navigate to always loads.
-- *Stand-ins.* Scripts that pages depend on, such as Google's ad and analytics libraries, are answered locally with harmless replacements instead of failing, so sites keep working.
-- *Tracking parameters.* `$removeparam` rules strip further parameters the lists name from any request.
+- *Requests.* The engine converts the lists' network rules (paths, resource types, third-party, exceptions) into WebKit content rule lists, which WebKit compiles once per refresh, keeps between launches, and applies to every request itself. The page you navigate to always loads.
+- *Stand-ins.* WebKit cannot answer a request with a replacement, so rules that would swap a script for a harmless stand-in are left out instead of becoming blocks, and the scripts pages depend on keep loading.
+- *Tracking parameters.* `$removeparam` rules strip further parameters the lists name from page and frame addresses. WebKit cannot rewrite other requests.
 - *In the page.* Before a document's own scripts run, Interlinked registers that site's scriptlets in the page's world (this is what removes video ads) and its element-hiding rules in an isolated world the page cannot see. Procedural rules (`:has-text()`, `:upward()`, `:matches-css()`, `:min-text-length()`, `:xpath()`, and the `:remove()`, `:style()`, `:remove-attr()`, `:remove-class()` actions) run in that world too, and run again as the page changes, at most every 250 ms. The page's class names and ids are matched against generic hiding rules as the DOM changes.
 
-**Tracking parameters.** Every page and frame address loses its tracking parameters before Chromium sends the request, including the destination of a server redirect, even with blocking off. That covers `utm_*`, ad click identifiers (`gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `ttclid`, `twclid`, `yclid`, and others), and email and marketing tags (Mailchimp, HubSpot, Marketo, Klaviyo, Matomo, and others). YouTube and Spotify lose `si`, and X loses its share parameters. Other parameters keep their exact order and encoding. The list lives in `blocker/src/tracking.rs`.
+**Tracking parameters.** Every page and frame address loses its tracking parameters before WebKit loads it, including the destination of a server redirect, which restarts at the clean address, even with blocking off. That covers `utm_*`, ad click identifiers (`gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `ttclid`, `twclid`, `yclid`, and others), and email and marketing tags (Mailchimp, HubSpot, Marketo, Klaviyo, Matomo, and others). YouTube and Spotify lose `si`, and X loses its share parameters. Other parameters keep their exact order and encoding. The list lives in `blocker/src/tracking.rs`.
 
 `script/build-blocker-resources` converts uBlock Origin's scriptlets and redirect resources (GPL-3.0) into `Interlinked/Resources/blocker-resources.json`; rerun it to pick up new scriptlets. A build can also name an HTTPS copy of that file with `INTERLINKED_BLOCKER_RESOURCES_URL`. It is downloaded with the daily list refresh and used once it is well-formed JSON of the expected shape and under 8 MB; otherwise the bundled copy stays. The setting is empty by default and stays opt-in until the license question for serving uBlock Origin's resources is settled.
 
-**Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`, and Chromium's Auto Dark Mode recolors the rest while leaving images alone. Settings → Built-ins chooses Off, Match macOS appearance, or Always.
+**Dark pages.** Sites with their own dark theme are asked for it through `prefers-color-scheme`. A page whose own background stays light is inverted instead, with images and video turned back, and checked again as it changes. Settings → Built-ins chooses Off, Match macOS appearance, or Always.
 
 ## Find
 
@@ -89,10 +89,10 @@ Voice needs microphone and speech-recognition permission, which macOS asks for t
 
 ## Passkeys
 
-Pages render with Chromium (CEF Alloy runtime), so WebAuthn runs inside Chromium's credential UI. Full passkey support has one remaining gate:
+Pages render with WebKit, so WebAuthn goes through the system's passkey UI. Full passkey support has one remaining gate:
 
 - **Apple approval (requested, pending).** iCloud Keychain passkeys for arbitrary sites need the managed `com.apple.developer.web-browser.public-key-credential` entitlement. Until Apple enables it for this team, signed builds cannot create or use iCloud Keychain passkeys, and `script/testflight` stops with instructions instead of shipping without them (`INTERLINKED_ALLOW_MISSING_PASSKEY_ENTITLEMENT=1` bypasses the gate for emergency releases only).
-- **What works without it.** Ordinary `script/run` builds stay ad-hoc signed and entitlement-free on purpose; local Chromium-profile credentials and USB security keys are expected to keep working there.
+- **What works without it.** Ordinary `script/run` builds stay entitlement-free on purpose. WebKit limits WebAuthn in those builds; the fixture's Passkeys probe shows what is available.
 
 To check any bundle: `script/assert-passkey-entitlement /path/to/Interlinked.app`. To build the provisioned variant once Apple approves: `script/run-passkeys` (signs with `Interlinked/InterlinkedPasskeys.entitlements`); while approval is pending, its signing failure is the status check.
 
@@ -121,7 +121,7 @@ xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests -configuratio
   -derivedDataPath build -destination 'platform=macOS,arch=arm64' test
 ```
 
-UI tests launch the app against the local fixture server. They need Chromium staged the same way as `script/run`. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Quit any other Interlinked instance first: a second app using the same Chromium profile keeps CEF from starting.
+UI tests launch the app against the local fixture server. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Quit any other Interlinked instance first: a second app would share its session and control socket.
 
 ```sh
 xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \

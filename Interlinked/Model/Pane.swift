@@ -22,7 +22,7 @@ struct CommandKeyState: Equatable {
     /// Reduces a `flagsChanged` event into physical Command-key state.
     ///
     /// AppKit normally includes the device-specific left/right bits in the
-    /// event. Some Chromium-hosted responder paths strip those bits while
+    /// event. Some responder paths, such as a web view's, strip those bits while
     /// preserving the generic Command flag, so the physical key code is the
     /// authoritative fallback. A modifier key emits one `flagsChanged` event
     /// for each transition, making a side-specific toggle reliable even while
