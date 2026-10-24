@@ -81,7 +81,9 @@ final class DailyDriverUITests: XCTestCase {
 
     private func launch(opening url: String, filters: Bool = false, blocking: Bool? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-interlinked-ui-testing", "-ApplePersistenceIgnoreState", "YES"]
+        // Every flag takes a value: a bare one would swallow the next flag as
+        // its value, which left window restoration on and no window open.
+        app.launchArguments = ["-interlinked-ui-testing", "YES", "-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["INTERLINKED_UI_TEST_URL"] = url
         // A home and control socket of its own, so a test run never writes the
         // session, history, caches, or socket of an Interlinked in use.

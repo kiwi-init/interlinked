@@ -117,12 +117,12 @@ xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests -configuratio
   -derivedDataPath build -destination 'platform=macOS,arch=arm64' test
 ```
 
-UI tests launch the app against the local fixture server. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Each launch gets its own home folder and control socket under `/tmp/interlinked-uitests-<uid>`, so the Interlinked you use keeps its session, history, and socket. Build with a bundle ID suffix as below so it keeps its settings too. UI tests drive the real pointer and keyboard while they run.
+UI tests launch the app against the local fixture server. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Each launch gets its own home folder and control socket under `/tmp/interlinked-uitests-<uid>`, so the Interlinked you use keeps its session, history, and socket. Build with a bundle ID suffix as below so it keeps its settings too. Keep the team's signing: Xcode's test runner won't load an ad-hoc signed test bundle. UI tests drive the real pointer and keyboard while they run.
 
 ```sh
 xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
   -derivedDataPath build-uitests -destination 'platform=macOS,arch=arm64' \
-  INTERLINKED_BUNDLE_ID_SUFFIX=.testing CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+  -allowProvisioningUpdates INTERLINKED_BUNDLE_ID_SUFFIX=.testing \
   -only-testing:InterlinkedUITests test
 ```
 
