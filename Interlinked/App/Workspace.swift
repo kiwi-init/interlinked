@@ -1061,7 +1061,7 @@ final class Workspace {
     @discardableResult
     func editTab(_ tab: TabID) -> Bool {
         guard let open = tabs.first(where: { $0.id == tab }) else { return false }
-        startWriting(.tab(tab), surfaces.tabTitle(open))
+        startWriting(.tab(tab), title(open))
         return true
     }
 
@@ -1073,8 +1073,7 @@ final class Workspace {
         identityOpen = false
         pageHistoryOpen = false
         downloads.closePanel()
-        editing = LineEdit(target: target, text: text,
-                           original: target.pane == nil ? nil : text)
+        editing = LineEdit(target: target, text: text, original: text)
     }
 
     private func refreshSearch() {
@@ -1155,7 +1154,10 @@ final class Workspace {
                 navigate(pane, written)
             }
         case .tab(let tab):
-            nameTab(tab, written)
+            // Return on the title the tab already shows keeps it following
+            // its page instead of pinning that title as a name.
+            let named = tabs.first { $0.id == tab }?.name != nil
+            if named || written != editing.original { nameTab(tab, written) }
         }
         keep()
         restoreFocus()
