@@ -114,6 +114,9 @@ targets:
       - path: InterlinkedTests
       - path: Interlinked/Model
       - path: Interlinked/App/PageTextBridge.swift
+      # The WebKit layer, with the blocker it links, so page policies are tested.
+      - path: Interlinked/WebKit
+      - path: Interlinked/App/BrowserPrompts.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: computer.interlinked.tests
@@ -124,6 +127,14 @@ targets:
         DEVELOPMENT_TEAM: ""
         TEST_HOST: ""
         BUNDLE_LOADER: ""
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/blocker"
+        LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/blocker/target/release"
+        OTHER_LDFLAGS: "$(inherited) -linterlinked_blocker"
+        SWIFT_OBJC_BRIDGING_HEADER: Interlinked/WebKit/Interlinked-Bridging-Header.h
+    preBuildScripts:
+      - name: Build Content Blocker
+        script: '"$SRCROOT/script/build-blocker"'
+        basedOnDependencyAnalysis: false
   InterlinkedUITests:
     type: bundle.ui-testing
     platform: macOS
