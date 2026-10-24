@@ -31,14 +31,14 @@ struct SidebarLayout<Page: View>: View {
             if !workspace.sidebarCollapsed {
                 TabSidebar(palette: palette)
                     .frame(width: width)
-                    .padding([.top, .leading, .bottom], 8)
+                    .padding([.top, .leading, .bottom], SidebarMetrics.inset)
                     .overlay(alignment: .trailing) { resizer }
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
             // The pages, each its own card (`SplitLayout`), with a gap that
             // shows the sidebar's edge and the window around them.
             page()
-                .padding(8)
+                .padding(SidebarMetrics.inset)
         }
         .overlay(alignment: .topLeading) {
             if workspace.sidebarCollapsed { peek }
@@ -128,11 +128,20 @@ extension View {
 }
 
 enum SidebarMetrics {
+    /// The one spacing step: the window's margin around the sidebar and the
+    /// pages, a header's padding, and the gap between its groups.
+    static let inset: CGFloat = 8
     /// The sidebar's top row and each page's header, centered on the window
     /// buttons, which sit in one or the other.
     static let header: CGFloat = 30
-    /// A header's buttons and address field.
+    /// A header's buttons and address field, all on the header's centre line.
     static let headerControl: CGFloat = 26
+    /// The origin inside the address field, the same distance from its top,
+    /// bottom and leading edge.
+    static let originChip: CGFloat = 18
+    /// The room a header row keeps for the window buttons: up to the end of
+    /// their slot, less the card's margin and the row's padding.
+    static var windowButtonsRoom: CGFloat { WindowButtonPlacement.slot.maxX - 2 * inset }
     static let row: CGFloat = 30
     static let icon: CGFloat = 20
     static let control: CGFloat = 32
@@ -192,10 +201,10 @@ private struct TabSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 2) {
+            HStack(spacing: 0) {
                 // The window buttons sit here, drawn by AppKit.
                 Color.clear
-                    .frame(width: WindowButtonPlacement.slot.width - 6)
+                    .frame(width: SidebarMetrics.windowButtonsRoom)
                     .allowsHitTesting(false)
                 SidebarToggle(palette: palette)
                 Spacer(minLength: 0)
@@ -207,7 +216,7 @@ private struct TabSidebar: View {
                 .accessibilityIdentifier("sidebar-new-page")
             }
             .buttonStyle(.pointing)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, SidebarMetrics.inset)
             .frame(height: SidebarMetrics.header)
             .background { Color.clear.windowDragArea() }
 
@@ -326,11 +335,12 @@ private struct TabSidebar: View {
                 .accessibilityLabel("Settings")
                 .accessibilityIdentifier("sidebar-settings")
             }
+            .padding(.horizontal, 2)
             .padding(.top, 4)
         }
         .buttonStyle(.pointing)
         .padding(.horizontal, 6)
-        .padding(.bottom, 6)
+        .padding(.bottom, SidebarMetrics.inset)
     }
 }
 
@@ -508,21 +518,27 @@ struct PageHeader: View {
     private var focused: Bool { workspace.activePane == pane }
     private var finding: Bool { workspace.assistance.panel == .find }
 
+    /// Every group sits one `inset` from the next and from the card's edges,
+    /// on one centre line, and the close button always holds the last spot,
+    /// so nothing moves when a page splits or Find opens.
     var body: some View {
-        HStack(alignment: .top, spacing: 2) {
+        HStack(spacing: SidebarMetrics.inset) {
             if holdsWindowButtons {
-                // The window buttons sit here, drawn by AppKit.
-                Color.clear
-                    .frame(width: WindowButtonPlacement.slot.width - 6, height: SidebarMetrics.headerControl)
-                    .allowsHitTesting(false)
-                SidebarToggle(palette: palette)
+                HStack(spacing: 0) {
+                    // The window buttons sit here, drawn by AppKit.
+                    Color.clear
+                        .frame(width: SidebarMetrics.windowButtonsRoom, height: SidebarMetrics.headerControl)
+                        .allowsHitTesting(false)
+                    SidebarToggle(palette: palette)
+                }
             }
             if focused {
                 navigation
-                // Results and the site's connection open downward, over the page.
+                // Reports one row's height, so results and the site's
+                // connection open downward over the page without moving the row.
                 AddressField(palette: palette)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
+                    .frame(height: SidebarMetrics.headerControl, alignment: .top)
                 tools
             } else {
                 Button { workspace.clickPane(pane) } label: {
@@ -534,26 +550,22 @@ struct PageHeader: View {
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
-                    .padding(.leading, 6)
+                    .padding(.leading, (SidebarMetrics.headerControl - 16) / 2)
                     .frame(height: SidebarMetrics.headerControl)
                     .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Switch to \(workspace.title(pane))")
             }
-            if workspace.isSplit {
-                control("Close this side", symbol: "xmark", id: "page-close-\(pane.rawValue)") {
-                    workspace.closePane(pane)
-                }
-                .help("Close this side · ⌘W")
+            control(workspace.isSplit ? "Close this side" : "Close page", symbol: "xmark",
+                    id: "page-close-\(pane.rawValue)") {
+                workspace.closePane(pane)
             }
+            .help("\(workspace.isSplit ? "Close this side" : "Close page") · ⌘W")
         }
         .buttonStyle(.pointing)
         .foregroundStyle(palette.text)
-        .padding(.horizontal, 6)
-        .padding(.top, (SidebarMetrics.header - SidebarMetrics.headerControl) / 2)
-        // A fixed height, so an open address field spills over the page
-        // instead of pushing it down.
-        .frame(height: SidebarMetrics.header, alignment: .top)
+        .padding(.horizontal, SidebarMetrics.inset)
+        .frame(height: SidebarMetrics.header)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { Color.clear.windowDragArea() }
         .animation(reduceMotion ? nil : Metrics.morph, value: finding)
@@ -687,7 +699,7 @@ private struct AddressField: View {
                         }
                         .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
                         .padding(.horizontal, 6)
-                        .frame(height: 20)
+                        .frame(height: SidebarMetrics.originChip)
                         .background(palette.text.opacity(0.07), in: Capsule())
                         .contentShape(Capsule())
                     }
@@ -699,7 +711,7 @@ private struct AddressField: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(palette.textDim)
-                        .frame(width: 22)
+                        .frame(width: SidebarMetrics.originChip, height: SidebarMetrics.originChip)
                 }
                 LineEditor(palette: palette)
                 if workspace.currentPageURL != nil, workspace.editing == nil {
@@ -707,11 +719,14 @@ private struct AddressField: View {
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(palette.textDim)
+                        // Mirrors the origin's own padding on the other side.
+                        .padding(.trailing, 6)
                         .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
                 }
             }
-            .padding(.leading, 4)
-            .padding(.trailing, 10)
+            // The origin sits as far from the leading edge as from the top
+            // and bottom, and the trailing side mirrors it.
+            .padding(.horizontal, (SidebarMetrics.headerControl - SidebarMetrics.originChip) / 2)
             .frame(height: SidebarMetrics.headerControl)
 
             if identityOpen {
