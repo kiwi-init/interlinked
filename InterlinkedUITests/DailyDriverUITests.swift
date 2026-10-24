@@ -17,7 +17,7 @@ final class DailyDriverUITests: XCTestCase {
         XCTAssertFalse(origin.label.localizedCaseInsensitiveContains("gmail"))
         let address = app.buttons["page-address"]
         XCTAssertTrue(address.exists)
-        origin.click()
+        openIdentity(in: app)
         let inspector = app.groups["identity-inspector"]
         XCTAssertTrue(inspector.waitForExistence(timeout: 5) || app.staticTexts["Connection"].waitForExistence(timeout: 5))
         let notSecure = inspector.staticTexts.matching(NSPredicate(format: "value BEGINSWITH[c] 'not secure'")).firstMatch
@@ -30,7 +30,7 @@ final class DailyDriverUITests: XCTestCase {
         let app = launch(opening: "\(base)/identity/lookalike")
         let origin = app.buttons["page-origin"]
         XCTAssertTrue(origin.waitForExistence(timeout: 20))
-        origin.click()
+        openIdentity(in: app)
         XCTAssertTrue(app.buttons["close-identity"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["identity-edit-address"].exists)
         app.buttons["close-identity"].click()
@@ -77,6 +77,16 @@ final class DailyDriverUITests: XCTestCase {
     func testTrackingParametersAreRemovedFromARedirect() throws {
         let app = launch(opening: "\(base)/tracking/redirect", blocking: false)
         expectReport("Removeparam: keep=1", in: app)
+    }
+
+    /// Pointing at the origin opens the page handle. A click that lands while
+    /// the handle is still opening is lost, so rest on the origin until the
+    /// handle is open, the way a person would, and then click it.
+    private func openIdentity(in app: XCUIApplication) {
+        let origin = app.buttons["page-origin"]
+        origin.hover()
+        XCTAssertTrue(app.buttons["share-page-button"].waitForExistence(timeout: 5), "the handle opens under the pointer")
+        origin.click()
     }
 
     private func launch(opening url: String, filters: Bool = false, blocking: Bool? = nil) -> XCUIApplication {
