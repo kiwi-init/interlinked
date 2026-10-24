@@ -138,6 +138,24 @@ final class BrowserHistoryControlTests: XCTestCase {
         XCTAssertEqual((written?["visits"] as? [Any])?.count, 1)
         XCTAssertEqual(store().visits, history.visits)
     }
+
+    func testVisitsReachDiskInTheBackgroundAndADeletionAfterThemWins() async throws {
+        let history = store()
+        history.record(URL(string: "https://one.test/"), title: "One")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while store().visits.isEmpty {
+            guard ContinuousClock.now < deadline else { return XCTFail("The visit never reached disk") }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(store().visits.map(\.title), ["One"])
+
+        // A deletion right after a visit lands after the visit's pending save.
+        history.record(URL(string: "https://two.test/"), title: "Two")
+        history.remove(.everything)
+        XCTAssertTrue(store().visits.isEmpty)
+        try await Task.sleep(for: .milliseconds(1_500))
+        XCTAssertTrue(store().visits.isEmpty)
+    }
 }
 
 final class SessionStateTests: XCTestCase {
