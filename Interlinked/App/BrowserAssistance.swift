@@ -151,6 +151,8 @@ final class BrowserAssistance {
 
     func requestSharing(for destination: Panel? = nil) {
         workspace?.discardLine(); workspace?.setOverviewOpen(false)
+        // The prompt replaces Find. A search still running would land on it.
+        if panel == .find { closePanel() }
         nextPanel = destination; panel = .permission
         status = ""
     }
@@ -220,7 +222,7 @@ final class BrowserAssistance {
         }
         let wasFinding = panel == .find
         cancel("find"); cancel("exact"); panel = nil; nextPanel = nil
-        busy = false; matches = []; status = ""
+        busy = false; matches = []; exactMatched = false; status = ""
         if let pane = workspace?.activePane, let view = workspace?.hosts.existingBrowser(pane) {
             if wasFinding { view.stopFinding() }
             PageTextBridge.clear(view)
@@ -254,6 +256,12 @@ final class BrowserAssistance {
         }
     }
     func moveMatch(_ step: Int) {
+        // Find Next with Find closed opens it again on the last query, so the
+        // match it selects has a panel that closes it.
+        guard panel == .find else {
+            if !query.isEmpty { openFind() }
+            return
+        }
         if !byMeaning || matches.isEmpty { exactFind(backwards: step < 0); return }
         guard !matches.isEmpty else { return }
         matchIndex = (matchIndex + step + matches.count) % matches.count
