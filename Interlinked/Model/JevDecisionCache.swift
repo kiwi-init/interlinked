@@ -61,9 +61,7 @@ struct JevDecisionCache {
     }
 
     private static var defaultFile: URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Interlinked", isDirectory: true)
-            .appendingPathComponent("JevDecisionCache.json")
+        AppData.url("JevDecisionCache.json")
     }
 
     private static func load(_ file: URL) -> [String: Entry]? {

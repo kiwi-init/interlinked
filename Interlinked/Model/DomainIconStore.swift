@@ -6,8 +6,7 @@ struct DomainIconStore {
     let directory: URL
 
     init(directory: URL? = nil) {
-        self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Interlinked/Favicons", isDirectory: true)
+        self.directory = directory ?? AppData.directory.appendingPathComponent("Favicons", isDirectory: true)
     }
 
     func data(for domain: String) -> Data? {

@@ -164,12 +164,7 @@ final class IntelligenceAuditStore {
     }
 
     private static func defaultFile() -> URL? {
-        guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return directory
-            .appendingPathComponent("Interlinked", isDirectory: true)
-            .appendingPathComponent("IntelligenceActivity.json")
+        AppData.url("IntelligenceActivity.json")
     }
 }
 
