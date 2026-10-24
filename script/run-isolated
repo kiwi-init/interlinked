@@ -7,13 +7,19 @@
 #   script/run-isolated [--fresh] [DATA]
 #
 # DATA defaults to $TMPDIR/interlinked-isolated. --fresh deletes DATA and the
-# isolated build's settings first. Drive it with:
-#   INTERLINKED_SOCKET=/tmp/interlinked-isolated-$(id -u)/control.sock \
-#     build-isolated/Build/Products/Debug/interlinked state
+# copy's settings first. Each DATA gets its own control socket, printed at the
+# end. Copies that run at the same time should use different DATA and, to keep
+# settings and website data apart too, different INTERLINKED_BUNDLE_ID_SUFFIX
+# values (default .isolated).
 set -eu
 cd "$(dirname "$0")/.."
 
-bundle=computer.interlinked.isolated
+suffix=${INTERLINKED_BUNDLE_ID_SUFFIX:-.isolated}
+bundle=computer.interlinked$suffix
+products=build-isolated
+if [ "$suffix" != ".isolated" ]; then
+  products=build-isolated-$(printf %s "$suffix" | tr -c 'A-Za-z0-9\n' '-' | sed 's/^-*//')
+fi
 fresh=0
 if [ "${1:-}" = "--fresh" ]; then
   fresh=1
@@ -21,6 +27,19 @@ if [ "${1:-}" = "--fresh" ]; then
 fi
 tmp=${TMPDIR:-/tmp}
 data=${1:-${tmp%/}/interlinked-isolated}
+mkdir -p "$data"
+data=$(cd "$data" && pwd -P)
+
+# A control socket path must fit in 104 bytes, which DATA usually does not,
+# so sockets live in a short private directory, one per DATA.
+sockets=/tmp/interlinked-isolated-$(id -u)
+mkdir -p -m 700 "$sockets"
+if [ -L "$sockets" ] || [ ! -O "$sockets" ]; then
+  echo "run-isolated: $sockets is not a directory you own" >&2
+  exit 1
+fi
+chmod 700 "$sockets"
+socket=$sockets/$(printf %s "$data" | shasum | cut -c1-12).sock
 
 if [ ! -f Interlinked.xcodeproj/project.pbxproj ]; then
   xcodegen generate
@@ -32,41 +51,35 @@ xcodebuild \
   -project Interlinked.xcodeproj \
   -scheme Interlinked \
   -configuration Debug \
-  -derivedDataPath build-isolated \
+  -derivedDataPath "$products" \
   -destination 'platform=macOS' \
-  INTERLINKED_BUNDLE_ID_SUFFIX=.isolated \
+  INTERLINKED_BUNDLE_ID_SUFFIX="$suffix" \
   CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM= \
   build
 
-app=$PWD/build-isolated/Build/Products/Debug/Interlinked.app
+app=$PWD/$products/Build/Products/Debug/Interlinked.app
+binary=$app/Contents/MacOS/Interlinked
+control=$PWD/$products/Build/Products/Debug/interlinked
 
-# Only the isolated copy is ever quit here, never the Interlinked you use.
-if /usr/bin/pgrep -qf "$app/Contents/MacOS/Interlinked"; then
-  /usr/bin/osascript -e "tell application id \"$bundle\" to quit" >/dev/null 2>&1 || true
-  attempt=0
-  while /usr/bin/pgrep -qf "$app/Contents/MacOS/Interlinked" && [ "$attempt" -lt 50 ]; do
-    /bin/sleep 0.1
-    attempt=$((attempt + 1))
-  done
-  /usr/bin/pkill -f "$app/Contents/MacOS/Interlinked" >/dev/null 2>&1 || true
+# Quit the copy using this DATA through its own socket, then any copy of this
+# build. Nothing here can reach the Interlinked you use or another worktree's
+# copy.
+if [ -S "$socket" ]; then
+  INTERLINKED_SOCKET=$socket "$control" quit >/dev/null 2>&1 || true
 fi
+attempt=0
+while /usr/bin/pgrep -qf "$binary" && [ "$attempt" -lt 50 ]; do
+  [ "$attempt" -eq 20 ] && /usr/bin/pkill -TERM -f "$binary" >/dev/null 2>&1
+  /bin/sleep 0.1
+  attempt=$((attempt + 1))
+done
+/usr/bin/pkill -KILL -f "$binary" >/dev/null 2>&1 || true
 
 if [ "$fresh" -eq 1 ]; then
   rm -rf "$data"
+  mkdir -p "$data"
   /usr/bin/defaults delete "$bundle" >/dev/null 2>&1 || true
 fi
-mkdir -p "$data"
-
-# A control socket path must fit in 104 bytes, which DATA usually does not,
-# so the socket gets a short private directory of its own.
-sockets=/tmp/interlinked-isolated-$(id -u)
-mkdir -p -m 700 "$sockets"
-if [ -L "$sockets" ] || [ ! -O "$sockets" ]; then
-  echo "run-isolated: $sockets is not a directory you own" >&2
-  exit 1
-fi
-chmod 700 "$sockets"
-socket=$sockets/control.sock
 
 # -g keeps focus on whatever you're doing, often the Interlinked you use.
 open -n -g "$app" \
@@ -75,5 +88,6 @@ open -n -g "$app" \
   --args -ApplePersistenceIgnoreState YES
 
 echo "Isolated Interlinked ($bundle)"
-echo "  data:   $data"
-echo "  socket: $socket"
+echo "  data:    $data"
+echo "  socket:  $socket"
+echo "  control: INTERLINKED_SOCKET=$socket $control state"
