@@ -473,6 +473,16 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertTrue(PageTextBridge.install.contains("{mark:'#6b5200',current:'#8f6c00',text:'#fff4cc'}"))
         XCTAssertTrue(PageTextBridge.install.contains("appearance(dark)"))
     }
+    func testReadingTheSameDocumentAgainKeepsItsAILabel() {
+        let metadata = page(), fallback = PageLabels.fallback(page())
+        // describePage then finds the label unchanged: no flicker, no glow.
+        XCTAssertEqual(PageLabels.whileReading(metadata, current: "iPhone 18 Pro", sameDocument: true, refines: true), "iPhone 18 Pro")
+        XCTAssertEqual(PageLabels.whileReading(metadata, current: "iPhone 18 Pro", sameDocument: false, refines: true), fallback)
+        XCTAssertEqual(PageLabels.whileReading(metadata, current: "iPhone 18 Pro", sameDocument: true, refines: false), fallback,
+                       "no AI label is coming, so the page's own title shows")
+        XCTAssertEqual(PageLabels.whileReading(metadata, current: nil, sameDocument: true, refines: true), fallback)
+    }
+
     func testLabelsUseMetadataWithoutCandidatesOrURLSecrets() {
         XCTAssertEqual(PageLabels.fallback(page()), "Buy iPhone 18 Pro - Apple")
         let evidence = PageLabels.evidence(page("https://www.apple.com/buy?token=secret#private"))

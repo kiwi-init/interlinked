@@ -106,9 +106,13 @@ final class BrowserAssistance {
                 let page = try await PageTextBridge.metadata(view)
                 guard self.accepts(key, revision), view.url == url, self.workspace?.paneAlive(pane) == true,
                       page.url == view.url?.absoluteString else { return }
-                if self.metadata[pane]?.document != page.document { self.grants.removeValue(forKey: pane) }
+                let sameDocument = self.metadata[pane]?.document == page.document
+                if !sameDocument { self.grants.removeValue(forKey: pane) }
                 self.metadata[pane] = page
-                self.labels[pane] = PageLabels.fallback(page)
+                self.labels[pane] = PageLabels.whileReading(
+                    page, current: self.portraits[pane] == nil ? nil : self.labels[pane], sameDocument: sameDocument,
+                    refines: page.publicWebPage && self.appleEnabled && self.automaticLabels
+                )
                 if page.publicWebPage {
                     self.describePage(pane, page: page)
                 }

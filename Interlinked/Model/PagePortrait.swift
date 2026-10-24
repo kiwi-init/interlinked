@@ -111,4 +111,13 @@ extension PageLabels {
             .joined()
         return host + "\n" + path + "\n" + digest
     }
+
+    /// The label a pane shows while its page is read: the page's own, unless
+    /// the same document is read again and an AI label will be decided for it.
+    /// Then the AI label stays until a different one arrives, so a page that
+    /// moves its address as you scroll neither flickers nor glows again.
+    static func whileReading(_ page: PageMetadata, current: String?, sameDocument: Bool, refines: Bool) -> String {
+        if sameDocument, refines, let current { return current }
+        return fallback(page)
+    }
 }
