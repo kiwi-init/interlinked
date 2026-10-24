@@ -64,7 +64,7 @@ enum BrowserHistoryPreference {
 }
 
 /// The history file. Version 1 was a bare array of visits.
-private struct BrowserHistoryFile: Codable {
+private struct BrowserHistoryFile: Codable, Sendable {
     static let version = 2
 
     var version: Int
@@ -83,6 +83,7 @@ final class BrowserHistoryStore {
         }
     }
     @ObservationIgnored private let file: URL
+    @ObservationIgnored private let writer: BrowserHistoryWriter
     @ObservationIgnored private let retention: HistoryRetention
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let now: () -> Date
@@ -96,6 +97,7 @@ final class BrowserHistoryStore {
     ) {
         self.file = file ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Interlinked/history.json")
+        writer = BrowserHistoryWriter(file: self.file)
         self.retention = retention
         self.defaults = defaults
         self.now = now
@@ -157,22 +159,27 @@ final class BrowserHistoryStore {
         save()
     }
 
+    /// Writes now and waits, for deletions and quitting.
     func save() {
-        saveTask?.cancel()
-        let saved = BrowserHistoryFile(version: BrowserHistoryFile.version, visits: visits)
-        guard let data = try? JSONEncoder().encode(saved) else { return }
-        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: file, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        persist()
+        writer.flush()
     }
 
+    private func persist() {
+        saveTask?.cancel()
+        writer.write(BrowserHistoryFile(version: BrowserHistoryFile.version, visits: visits))
+    }
+
+    /// Visits are written a second after browsing settles, off the main
+    /// thread: a full history encodes to about a megabyte, which took 14 to
+    /// 17 ms there after every page load.
     private func scheduleSave() {
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(1))
                 try Task.checkCancellation()
-                self?.save()
+                self?.persist()
             } catch { }
         }
     }
@@ -186,5 +193,30 @@ final class BrowserHistoryStore {
               }) != true else { return nil }
         parts.fragment = nil
         return parts.url
+    }
+}
+
+/// Encodes and writes history snapshots on a background queue, in the order
+/// they were saved, so the last one asked for is the one on disk.
+private final class BrowserHistoryWriter: @unchecked Sendable {
+    private let file: URL
+    private let queue = DispatchQueue(label: "computer.interlinked.history-writer", qos: .utility)
+
+    init(file: URL) {
+        self.file = file
+    }
+
+    func write(_ saved: BrowserHistoryFile) {
+        queue.async { [file] in
+            guard let data = try? JSONEncoder().encode(saved) else { return }
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: file, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        }
+    }
+
+    /// Returns once every write asked for so far is on disk.
+    func flush() {
+        queue.sync {}
     }
 }
