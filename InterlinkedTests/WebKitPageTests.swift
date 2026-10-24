@@ -13,9 +13,12 @@ final class WebKitPageTests: XCTestCase {
         server = try await TestHTTPServer.start()
         server.route("/page", .html("<title>Page</title><p>Page"))
         ContentBlocker.shared.setEnabled(false, disabledSites: [])
-        // Pages in a visible window lay out and run animation frames.
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled],
+        // Pages in a visible window lay out and run animation frames. It is
+        // transparent, so running the tests shows nothing on screen.
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless],
                           backing: .buffered, defer: false)
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
         window.orderFront(nil)
     }
 
@@ -73,8 +76,29 @@ final class WebKitPageTests: XCTestCase {
         XCTAssertFalse(delegate.reviews.contains { $0.destination.query?.contains("utm_source") == true })
     }
 
+    func testSubframeLoadDuringARestartKeepsTheRestartedReview() async throws {
+        let (page, delegate) = makePage()
+        page.load(server.url("/page"))
+        try await waitFor { delegate.finished.contains(self.server.url("/page")) }
+        let tagged = server.url("/page?utm_source=mail&id=9"), clean = server.url("/page?id=9")
+        var decisions: [WKNavigationActionPolicy] = []
+        // A link with tracking parameters restarts at its clean address, and a
+        // subframe loads before WebKit asks about the restart.
+        page.webView(page.nativeView, decidePolicyFor: FakeAction(tagged, in: FakeFrame(main: true), type: .linkActivated)) {
+            decisions.append($0)
+        }
+        page.webView(page.nativeView, decidePolicyFor: FakeAction(server.url("/frame"), in: FakeFrame(main: false), type: .other)) {
+            decisions.append($0)
+        }
+        XCTAssertEqual(decisions, [.cancel, .allow])
+        try await waitFor { delegate.finished.contains(clean) }
+        XCTAssertTrue(delegate.reviews.contains(.init(destination: clean, source: server.url("/page"), kind: .link)),
+                      "\(delegate.reviews)")
+    }
+
     func testFailedLoadShowsAnErrorPageWithoutAnotherReview() async throws {
-        let closed = try await TestHTTPServer.closedURL()
+        server.route("/drop", .drop)
+        let closed = server.url("/drop")
         let (page, delegate) = makePage()
         page.load(closed)
         try await waitFor { page.title == "Can’t open this page" }
@@ -196,6 +220,48 @@ final class WebKitPageTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(25))
         }
     }
+}
+
+/// A navigation as WebKit would describe it, for orderings a live page
+/// cannot produce on demand. WebKit's `dealloc` for these classes frees
+/// storage only its own initializers set up, so fakes live as long as the
+/// test process.
+@MainActor
+private var fakes: [NSObject] = []
+
+private final class FakeAction: WKNavigationAction {
+    private let url: URL
+    private let frame: WKFrameInfo
+    private let type: WKNavigationType
+
+    @MainActor
+    init(_ url: URL, in frame: WKFrameInfo, type: WKNavigationType) {
+        self.url = url
+        self.frame = frame
+        self.type = type
+        super.init()
+        fakes.append(self)
+    }
+
+    override var request: URLRequest { URLRequest(url: url) }
+    override var targetFrame: WKFrameInfo? { frame }
+    override var navigationType: WKNavigationType { type }
+    override var shouldPerformDownload: Bool { false }
+    override var modifierFlags: NSEvent.ModifierFlags { [] }
+    override var buttonNumber: Int { 0 }
+}
+
+private final class FakeFrame: WKFrameInfo {
+    private let main: Bool
+
+    @MainActor
+    init(main: Bool) {
+        self.main = main
+        super.init()
+        fakes.append(self)
+    }
+
+    override var isMainFrame: Bool { main }
 }
 
 /// Records what a page asks of Interlinked and answers every review with
