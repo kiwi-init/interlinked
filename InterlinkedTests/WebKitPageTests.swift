@@ -213,7 +213,7 @@ final class WebKitPageTests: XCTestCase {
         let (page, delegate) = makePage()
         page.load(server.url("/form"))
         try await waitFor { delegate.finished.contains(self.server.url("/form")) }
-        let untouched = try await discardProbe(page)
+        let untouched = await discardProbe(page)
         XCTAssertEqual(untouched?.safe, true, "Values the page set itself are nobody's unsaved work")
         let visible = try await page.evaluateJavaScript("typeof globalThis.__interlinkedEdited") as? String
         XCTAssertEqual(visible, "undefined", "The page can neither read nor fake the record")
@@ -222,17 +222,37 @@ final class WebKitPageTests: XCTestCase {
         _ = try await page.nativeView.callAsyncJavaScript(
             "const name = document.getElementById('name'); globalThis.__interlinkedEdited.add(name); name.value = 'typed'",
             contentWorld: WebKitPage.editsWorld)
-        let edited = try await discardProbe(page)
+        let edited = await discardProbe(page)
         XCTAssertEqual(edited?.safe, false)
     }
 
-    private func discardProbe(_ page: WebKitPage) async throws -> BrowserDiscardProbe? {
-        try await withCheckedThrowingContinuation { continuation in
-            page.evaluateDiscardProbe { value, error in
-                if let error { continuation.resume(throwing: error) } else {
-                    continuation.resume(returning: BrowserDiscardProbe.decode(value))
-                }
-            }
+    func testAnEditInAFrameKeepsThePageAwakeUntilItNavigates() async throws {
+        server.route("/framed", .html("<iframe src='/inner'></iframe>"))
+        server.route("/inner", .html("<input id=field>"))
+        let (page, delegate) = makePage()
+        page.load(server.url("/framed"))
+        try await waitFor { delegate.finished.contains(self.server.url("/framed")) }
+        let untouched = await discardProbe(page)
+        XCTAssertEqual(untouched?.safe, true)
+
+        // What a frame's recorder reports after a person's first edit there.
+        page.noteFrameEdit()
+        let edited = await discardProbe(page)
+        XCTAssertEqual(edited?.safe, false)
+
+        page.load(server.url("/page"))
+        try await waitFor { delegate.finished.contains(self.server.url("/page")) }
+        let navigated = await discardProbe(page)
+        XCTAssertEqual(navigated?.safe, true)
+    }
+
+    func testTheRecorderReportsFrameEditsToItsOwnHandler() {
+        XCTAssertTrue(BrowserDiscardProbe.recordEdits.contains("messageHandlers?.\(BrowserDiscardProbe.frameEditHandler)?.postMessage"))
+    }
+
+    private func discardProbe(_ page: WebKitPage) async -> BrowserDiscardProbe? {
+        await withCheckedContinuation { continuation in
+            page.evaluateDiscardProbe { continuation.resume(returning: $0) }
         }
     }
 
