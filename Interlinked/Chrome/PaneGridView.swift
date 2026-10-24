@@ -165,7 +165,13 @@ struct BrowserPage: View {
                     .contentShape(Rectangle())
                     .simultaneousGesture(TapGesture().onEnded { workspace.clickPane(pane) })
             } else if let recovery = workspace.hosts.recovery(for: pane) {
-                BrowserRecoveryView(pane: pane, recovery: recovery, palette: palette)
+                if recovery.cause == .idle {
+                    // A tab that slept while left alone wakes as soon as it
+                    // is shown, where it was.
+                    Color.clear.onAppear { workspace.recoverPane(pane) }
+                } else {
+                    BrowserRecoveryView(pane: pane, recovery: recovery, palette: palette)
+                }
             } else if !workspace.surfaces.holdsPage(pane) {
                 // A web page reports its own clicks; a new tab page is SwiftUI.
                 EmptyPaneView(palette: palette)

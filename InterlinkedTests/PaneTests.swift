@@ -553,6 +553,19 @@ final class BrowserLifecycleTests: XCTestCase {
         XCTAssertEqual(TabMemoryPolicy.orderedDiscardCandidates(candidates), [PaneID(1), PaneID(7)])
     }
 
+    func testIdleTabsSleepAfterHalfAnHourUnlessProtected() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let candidates = [
+            TabMemoryCandidate(pane: PaneID(1), lastUsed: now.addingTimeInterval(-29 * 60)),
+            TabMemoryCandidate(pane: PaneID(2), lastUsed: now.addingTimeInterval(-30 * 60)),
+            TabMemoryCandidate(pane: PaneID(3), lastUsed: now.addingTimeInterval(-90 * 60), protections: .media),
+            TabMemoryCandidate(pane: PaneID(4), lastUsed: now.addingTimeInterval(-60 * 60)),
+            TabMemoryCandidate(pane: PaneID(5), lastUsed: now.addingTimeInterval(-120 * 60), protections: .active),
+        ]
+        XCTAssertEqual(TabMemoryPolicy.idleCandidates(candidates, now: now), [PaneID(4), PaneID(2)])
+        XCTAssertEqual(TabMemoryPolicy.idleCandidates(candidates, now: now, after: 0), [PaneID(4), PaneID(2), PaneID(1)])
+    }
+
     func testRapidLifecycleChangesKeepRecoveryBoundToTheRightPage() throws {
         var ledger = TabLifecycleLedger()
         let start = Date(timeIntervalSince1970: 2_000)

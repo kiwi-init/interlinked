@@ -16,6 +16,8 @@ final class PaneHosts {
     /// again afterwards, counting from the pages still live.
     @ObservationIgnored private var discarding = false
     @ObservationIgnored private var pendingPressure: TabMemoryPressure?
+    @ObservationIgnored private var idleTask: Task<Void, Never>?
+    @ObservationIgnored private var sleepingIdle = false
     @ObservationIgnored private var iconTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var iconCache = DomainIconCache<NSImage>()
     @ObservationIgnored private let iconStore = DomainIconStore()
@@ -239,7 +241,48 @@ final class PaneHosts {
     private func discardBackgroundTabs(pressure: TabMemoryPressure, workspace: Workspace) async {
         let goal = TabMemoryPolicy.discardCount(liveCount: browsers.count, pressure: pressure)
         guard goal > 0 else { return }
-        let candidates = browsers.map { pane, page in
+        var discarded = 0
+        for pane in TabMemoryPolicy.orderedDiscardCandidates(sleepCandidates(workspace: workspace)) where discarded < goal {
+            if await putToSleep(pane, cause: .memoryPressure, workspace: workspace) { discarded += 1 }
+        }
+    }
+
+    /// Every few minutes, background tabs left alone for half an hour go to
+    /// sleep, under the same protections as for memory pressure. They wake
+    /// when shown.
+    func startIdleSleep(workspace: Workspace) {
+        idleTask?.cancel()
+        idleTask = Task { @MainActor [weak self, weak workspace] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled, let self, let workspace else { return }
+                await self.sleepIdleTabs(workspace: workspace)
+            }
+        }
+    }
+
+    func stopIdleSleep() {
+        idleTask?.cancel()
+        idleTask = nil
+    }
+
+    func sleepIdleTabs(workspace: Workspace, after: TimeInterval = TabMemoryPolicy.idleSleepAfter) async {
+        // Its own flag, so memory pressure arriving meanwhile is still
+        // handled. A page both passes pick sleeps once: putToSleep checks
+        // it again after the probe.
+        guard !sleepingIdle else { return }
+        sleepingIdle = true
+        defer { sleepingIdle = false }
+        // A tab counts as left alone from when it was last on screen, not
+        // when it was opened.
+        for pane in workspace.activeTab?.panes ?? [] where browsers[pane] != nil { lifecycle.touch(pane) }
+        for pane in TabMemoryPolicy.idleCandidates(sleepCandidates(workspace: workspace), now: Date(), after: after) {
+            await putToSleep(pane, cause: .idle, workspace: workspace)
+        }
+    }
+
+    private func sleepCandidates(workspace: Workspace) -> [TabMemoryCandidate] {
+        browsers.map { pane, page in
             var protections: TabDiscardProtection = []
             // Both pages of a split are on screen.
             if workspace.activeTab?.contains(pane) == true { protections.insert(.active) }
@@ -248,21 +291,23 @@ final class PaneHosts {
             return TabMemoryCandidate(pane: pane, lastUsed: lifecycle.lastUsed[pane] ?? .distantPast,
                                       protections: protections)
         }
-        var discarded = 0
-        for pane in TabMemoryPolicy.orderedDiscardCandidates(candidates) where discarded < goal {
-            guard let page = browsers[pane], let probe = await discardProbe(page), probe.safe else { continue }
-            // The probe suspends, so the tab may have become active, started a
-            // transfer, or been replaced in the meantime. Both pages of a split
-            // are on screen.
-            guard browsers[pane] === page, workspace.activeTab?.contains(pane) != true, !uploadPanes.contains(pane),
-                  !workspace.downloads.hasActiveDownload(for: page) else { continue }
-            let url = page.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
-            lifecycle.suspend(pane, recovery: BrowserRecovery(cause: .memoryPressure, url: url,
-                                                               scrollY: probe.scrollY, occurredAt: Date()))
-            pageURLs[pane] = url
-            removeBrowser(pane, downloads: workspace.downloads)
-            discarded += 1
-        }
+    }
+
+    /// Frees `pane`'s page unless it plays media or holds unsaved form work.
+    @discardableResult
+    private func putToSleep(_ pane: PaneID, cause: BrowserRecoveryCause, workspace: Workspace) async -> Bool {
+        guard let page = browsers[pane], let probe = await discardProbe(page), probe.safe else { return false }
+        // The probe suspends, so the tab may have become active, started a
+        // transfer, or been replaced in the meantime. Both pages of a split
+        // are on screen.
+        guard browsers[pane] === page, workspace.activeTab?.contains(pane) != true, !uploadPanes.contains(pane),
+              !workspace.downloads.hasActiveDownload(for: page) else { return false }
+        let url = page.url ?? pageURLs[pane] ?? address(from: workspace.surfaces.line(pane))
+        lifecycle.suspend(pane, recovery: BrowserRecovery(cause: cause, url: url,
+                                                           scrollY: probe.scrollY, occurredAt: Date()))
+        pageURLs[pane] = url
+        removeBrowser(pane, downloads: workspace.downloads)
+        return true
     }
 
     /// A page stuck in a script never answers, and WebKit only fails the

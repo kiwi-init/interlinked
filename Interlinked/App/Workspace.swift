@@ -379,6 +379,7 @@ final class Workspace {
             if tabs.isEmpty { openTab() }
         }
         hosts.startMemoryPressureMonitoring(workspace: self)
+        hosts.startIdleSleep(workspace: self)
         if let appDelegate = NSApp.delegate as? AppDelegate {
             openExternalURLs(appDelegate.takePendingWebURLs())
         }
@@ -403,6 +404,7 @@ final class Workspace {
         browserHistory.save()
         intelligenceAudit.flush()
         hosts.stopMemoryPressureMonitoring()
+        hosts.stopIdleSleep()
         builtIns.stop()
         keyMonitor.map(NSEvent.removeMonitor)
         flagsMonitor.map(NSEvent.removeMonitor)
