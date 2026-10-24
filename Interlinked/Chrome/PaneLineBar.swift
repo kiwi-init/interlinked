@@ -10,7 +10,9 @@ struct LineEditor: View {
                 get: {
                     if let text = workspace.editing?.text { return text }
                     if workspace.isEmptyActivePage { return "" }
-                    return workspace.activePane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? ""
+                    guard let pane = workspace.activePane else { return "" }
+                    if workspace.onboarding.contains(pane) { return Workspace.onboardingTitle }
+                    return workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
                 },
                 set: {
                     if workspace.editing == nil { workspace.editActiveLine() }
