@@ -1,6 +1,6 @@
 # Interlinked
 
-A minimal macOS browser with pages that fill the window. A small Liquid Glass control holds your tabs, address, search results, and navigation. Built with SwiftUI and WebKit.
+A minimal macOS browser. Your tabs run down a Liquid Glass sidebar, a toolbar above the page holds navigation and the address, and nothing floats over the page. Built with SwiftUI and WebKit.
 
 ## Run
 
@@ -10,11 +10,11 @@ macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a t
 
 ## Browse
 
-The collapsed page handle keeps the page label and a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. The favicon expands on hover. Back, forward, +, and close sit above your tabs and an editable address. Tabs balance across rows of at most five. Addresses stay on one line and widen the control as needed. At the window edge, the field scrolls horizontally.
+The address field shows the page label beside a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. Click the label to edit the address. The sidebar lists every tab with its icon and label, and hovering one shows its close button. ⌘1 to ⌘9 pick tabs in sidebar order. ⌃⌘S or the toolbar's sidebar button tucks the sidebar away; drag its edge to resize it. History, Downloads, Sharing Screen Mode, and Settings sit at the bottom of the sidebar.
 
-Type an address or search words. Three Google suggestions appear above the input after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
+Type an address or search words. Three Google suggestions appear below the address after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
 
-Click a page icon to switch directly. Click the current page's favicon for a searchable overview with previews. Right-click a preview to rename or close its tab.
+Click a tab in the sidebar to switch to it. Right-click it to rename or close it. Drag it onto the page to open the two side by side.
 
 The page label stays visible while scrolling. Clicking the page dismisses open controls without swallowing the click or submitting an unfinished address. Only the current page is mounted in the window. Background pages retain their state, while WebKit throttles their detached views and they lose focus. When macOS reports memory pressure, Interlinked pauses the oldest eligible background pages. It skips the active page and any page with playing media, an open file picker, an active download, or unsaved form work. Returning to a paused page restores its URL and scroll position. Background pages you leave alone for 30 minutes go to sleep the same way, with the same exceptions, and reload where you left them as soon as you return.
 
@@ -24,7 +24,7 @@ Tabs restore from `~/Library/Application Support/Interlinked/session.json`, spli
 
 Browsing history stays in `history.json` for 90 days, up to 5,000 visits. A history file this build can't read is kept aside as `history.json.corrupt-<time>`. The History panel removes one visit, every visit to a site, or the last hour, today, or everything. Settings > Privacy turns history off, which also deletes it. History never goes to Jev.
 
-Links and scripts that request a new browser window become a new Interlinked tab. WebKit offers only windows a person opened with a click; unsolicited popups are discarded. Command-click and middle-click open a link in a new tab. Mail, phone, and other non-web links open in the app that handles them after the usual warning.
+Links and scripts that request a new browser window become a new Interlinked tab. WebKit offers only windows a person opened with a click; unsolicited popups are discarded. Command-click and middle-click open a link in a new tab. Mail, phone, and other non-web links open in the app that handles them after Interlinked asks.
 
 HTTP and HTTPS links sent by macOS open in delivery order. A cold launch reuses the untouched blank page for the first link. Every remaining link opens once in a new tab, with the last delivered link active. Interlinked ignores non-web and malformed URLs.
 
@@ -51,13 +51,13 @@ Interlinked does not load browser extensions. The features people install extens
 
 ## Find
 
-The bottom-right actions stay in fixed icon slots. Hovering an icon reveals only its label above it. **Find for me** expands horizontally into a single-row find field. Match navigation, a count, and close stay in that row. Right-click the search icon to switch between meaning search and exact text. Search status is available on hover without adding another row.
+**Find for me** sits in the toolbar and turns its tools into a single-row find field. Match navigation, a count, and close stay in that row. Right-click the search icon to switch between meaning search and exact text. Search status is available on hover without adding another row.
 
 Meaning search uses Jev to score a local shortlist of page elements by likely intent, including translations and synonyms, then pick a first result among the strongest scores. Extraction includes navigation links and headings so a useful destination can rank above an incidental word fragment in body text. Results highlight the original text in yellow. Hover over the count to check coverage or errors. Changed pages invalidate stale results.
 
 On supported Macs, Apple Intelligence generates one tab label from bounded title, heading, site, host, summary, and breadcrumb metadata. Labels are cached on this Mac for five days. Jev is responsible for meaning search. It is not used as a page-label fallback. Local development builds can use a personal OpenRouter key saved in macOS Keychain. TestFlight builds instead use Interlinked's relay and the App Store-signed app transaction, so testers never enter or receive an API key. The OpenRouter key remains on the relay. Interlinked does not try to detect whether you are signed in. The sharing prompt warns that a signed-in page's text is sent like any other. Form fields and editable text are never extracted. Meaning searches send page text to OpenRouter and TypeSafe. Exact Jev requests and their responses are cached on this Mac for five days; the cache stores a request hash rather than page text, queries, or URLs. A page-content, model, or instruction change produces a different key. Exact find and deterministic title/heading/host label fallbacks work without either model.
 
-When AI replaces the deterministic page label with its selected label, the page handle briefly picks up a spectrum glow. Deterministic labels and names you type yourself do not trigger it.
+When AI replaces the deterministic page label with its selected label, the tab's row in the sidebar briefly picks up a spectrum glow. Deterministic labels and names you type yourself do not trigger it.
 
 Links, redirects, forms, popups, and downloads open without a warning. Interlinked never opens a `javascript:` or `data:` address as a page, and asks before a page opens another app, as Safari does.
 
@@ -76,8 +76,8 @@ Choose **Interlinked → About Interlinked** for a plain-language account of wha
 | `cmd-j` | Downloads |
 | `ctrl-tab` / `ctrl-shift-tab` | Next / previous tab |
 | `cmd-]` / `cmd-[` | Next / previous tab |
-| hold `cmd`, then `1`–`9` | Show other tabs and open the numbered tab |
-| `ctrl-cmd-s` | All tabs |
+| `cmd-1`–`cmd-9` | Open the numbered tab in the sidebar |
+| `ctrl-cmd-s` | Show or hide the sidebar |
 | `escape` | Cancel editing or return to the page |
 | `cmd-q` | Quit |
 

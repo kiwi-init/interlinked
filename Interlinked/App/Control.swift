@@ -420,10 +420,10 @@ enum Control {
                 }
                 return json(["matches": matches.map { ["id": Int($0.id.rawValue), "title": workspace.title($0)] as [String: Any] }])
             case "hide", "collapse":
-                workspace.setOverviewOpen(false)
+                workspace.setSidebar(0)
                 return ok()
             case "show", "expand":
-                workspace.setOverviewOpen(true)
+                workspace.setSidebar(workspace.sidebarLast)
                 return ok()
             case "toggle":
                 workspace.toggleSidebar()
@@ -432,7 +432,7 @@ enum Control {
                 guard let width = Double(words[0]), width.isFinite else {
                     return error("sidebar wants a width, or collapse, expand, toggle. Said '\(words[0])'")
                 }
-                workspace.setOverviewOpen(width > 0)
+                workspace.setSidebar(CGFloat(width))
                 return ok()
             }
 

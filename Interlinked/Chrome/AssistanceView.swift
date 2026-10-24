@@ -88,87 +88,8 @@ struct AssistanceView: View {
     }
 }
 
-struct Toolbox: View {
-    @Environment(Workspace.self) private var workspace
-    @Environment(\.openSettings) private var openSettings
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hovering = false
-    var palette: Palette
-    private var assistant: BrowserAssistance { workspace.assistance }
-    private var expanded: Bool {
-        hovering || workspace.rightCommandKeyHeld || assistant.panel == .find
-    }
-    private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 250 }
-    private let menuRows: CGFloat = 2
-    private var collapsedWidth: CGFloat { workspace.sharingScreenMode ? 136 : 108 }
-    private var width: CGFloat { expanded ? menuWidth : collapsedWidth }
-    private var height: CGFloat { expanded ? 44 + menuRows * 40 : 44 }
-
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if expanded {
-                PageTools(palette: palette)
-                .frame(width: menuWidth)
-                .padding(.bottom, 44)
-                .transition(.opacity)
-            }
-
-            if expanded {
-                Button {
-                    workspace.settingsDestination = .general
-                    openSettings()
-                } label: {
-                    ToolboxRowLabel(
-                        title: "Settings",
-                        symbol: "gearshape",
-                        shortcut: workspace.toolboxShortcutLabel(.settings)
-                    )
-                    .frame(width: menuWidth, height: 44, alignment: .leading)
-                }
-                .buttonStyle(.pointing)
-                .font(.system(size: 12, weight: .medium))
-                .accessibilityIdentifier("toolbox-settings-button")
-            } else {
-                HStack(spacing: 0) {
-                    if workspace.sharingScreenMode {
-                        // Always visible while it is on, so it is never forgotten.
-                        Image(systemName: "eye.slash.fill")
-                            .foregroundStyle(palette.accent)
-                            .frame(width: 28, height: 44)
-                            .padding(.leading, 8)
-                            .help("Sharing Screen Mode is on · ⇧⌘S")
-                    }
-                    Image(systemName: "wrench.and.screwdriver")
-                        .frame(width: workspace.sharingScreenMode ? 28 : 44, height: 44)
-                    Text("Toolbox")
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.leading, workspace.sharingScreenMode ? 6 : 0)
-                        .padding(.trailing, 16)
-                }
-                .frame(width: collapsedWidth, height: 44, alignment: .trailing)
-                .contentShape(Rectangle())
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(workspace.sharingScreenMode ? "Toolbox, Sharing Screen Mode on" : "Toolbox")
-                .accessibilityHint("Hover or hold right Command to show page tools")
-            }
-        }
-        .frame(width: width, height: height, alignment: .bottomTrailing)
-        .foregroundStyle(palette.text)
-        .modifier(PageGlass(radius: 14))
-        .onHover { hovering = $0 }
-        .onExitCommand(perform: closeActivePanel)
-        .animation(reduceMotion ? nil : Metrics.morph, value: expanded)
-        .animation(reduceMotion ? nil : Metrics.morph, value: width)
-        .animation(reduceMotion ? nil : Metrics.morph, value: height)
-    }
-
-    private func closeActivePanel() {
-        if assistant.escapeCloses { assistant.closePanel() }
-    }
-}
-
-/// The page-sharing request appears top right. History and downloads open
-/// from the page handle and morph it instead.
+/// The page-sharing request appears top right, under the toolbar. History
+/// and downloads open in the sidebar instead.
 struct PageActions: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -200,7 +121,7 @@ struct PageHistoryPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if workspace.historyClearing {
-                ToolboxPanelHeader(title: "Clear History") { workspace.historyClearing = false }
+                PanelHeader(title: "Clear History") { workspace.historyClearing = false }
                 VStack(spacing: 4) {
                     ForEach(HistoryRange.allCases) { range in
                         clearRow(range)
@@ -409,7 +330,7 @@ private struct DownloadRow: View {
     }
 }
 
-private struct ToolboxPanelHeader: View {
+private struct PanelHeader: View {
     var title: String
     var close: () -> Void
 
@@ -421,150 +342,6 @@ private struct ToolboxPanelHeader: View {
                 Image(systemName: "xmark").frame(width: 24, height: 24)
             }
             .accessibilityLabel("Close \(title)")
-        }
-    }
-}
-
-struct PageTools: View {
-    @Environment(Workspace.self) private var workspace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var palette: Palette
-    private var assistant: BrowserAssistance { workspace.assistance }
-    private var open: Bool { assistant.panel == .find }
-    var body: some View {
-        @Bindable var assistant = assistant
-        VStack(spacing: 0) {
-            if open {
-                HStack(spacing: 8) {
-                    findButton
-                    WorkInput(text: $assistant.query, placeholder: "Find…", identifier: "page-find", fontSize: 12,
-                              palette: palette, submit: { assistant.moveMatch(1) }, cancel: assistant.closePanel,
-                              moveSelection: assistant.moveMatch)
-                        .frame(minWidth: 70, maxWidth: .infinity).frame(height: 24)
-                        .onChange(of: assistant.query) { _, _ in assistant.findChanged() }
-                    Group {
-                        if assistant.busy { ProgressView().controlSize(.mini) }
-                        else if !assistant.matches.isEmpty { Text("\(assistant.matchIndex + 1)/\(assistant.matches.count)").monospacedDigit() }
-                        else { Text(assistant.exactMatched ? "✓" : "0") }
-                    }.font(.system(size: 10)).foregroundStyle(palette.textDim).frame(minWidth: 26)
-                        .help(assistant.status).accessibilityLabel(assistant.status)
-                    Button { assistant.moveMatch(-1) } label: { Image(systemName: "chevron.up").frame(width: 22, height: 30) }
-                        .accessibilityLabel("Previous match")
-                    Button { assistant.moveMatch(1) } label: { Image(systemName: "chevron.down").frame(width: 22, height: 30) }
-                        .accessibilityLabel("Next match")
-                    Button(action: assistant.closePanel) { Image(systemName: "xmark").frame(width: 22, height: 30) }
-                        .accessibilityLabel("Close find")
-                }
-                .frame(height: 40)
-            } else {
-                findButton
-                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-            }
-
-            toolboxButton(workspace.sharingScreenMode ? "Sharing Screen Mode On" : "Sharing Screen Mode",
-                          symbol: workspace.sharingScreenMode ? "eye.slash.fill" : "eye.slash",
-                          shortcut: .sharingScreen) {
-                workspace.sharingScreenMode.toggle()
-            }
-            .foregroundStyle(workspace.sharingScreenMode ? palette.accent : palette.text)
-            .accessibilityLabel(workspace.sharingScreenMode ? "Turn off Sharing Screen Mode" : "Turn on Sharing Screen Mode")
-            .accessibilityIdentifier("toolbox-sharing-screen-button")
-            .help("Blur emails, phone numbers, card and document numbers, keys, and passwords on every page")
-        }
-        .buttonStyle(.pointing)
-        .font(.system(size: 12, weight: .medium))
-        .frame(maxWidth: .infinity)
-        .foregroundStyle(palette.text)
-        .onChange(of: assistant.byMeaning) { _, _ in assistant.findChanged() }
-        .animation(reduceMotion ? nil : Metrics.morph, value: open)
-    }
-
-    private var findButton: some View {
-        Button {
-            workspace.downloads.closePanel()
-            open ? assistant.closePanel() : assistant.openFind()
-        } label: {
-            if open {
-                Label("Find for me", systemImage: "magnifyingglass")
-                    .labelStyle(ToolboxLabelStyle())
-                    .padding(.leading, 12)
-                    .frame(width: 124, alignment: .leading)
-                    .frame(minHeight: 40)
-                    .contentShape(Rectangle())
-            } else {
-                ToolboxRowLabel(
-                    title: "Find for me",
-                    symbol: "magnifyingglass",
-                    shortcut: workspace.toolboxShortcutLabel(.find)
-                )
-            }
-        }
-        .accessibilityLabel("Find for me")
-        .help("Find in page · ⌘F")
-        .accessibilityIdentifier("page-search-button")
-        .contextMenu {
-            Toggle("Match by meaning with Jev", isOn: Binding(
-                get: { assistant.byMeaning },
-                set: { assistant.byMeaning = $0 }
-            ))
-            Button("Exact text only") { assistant.byMeaning = false; assistant.findChanged() }
-        }
-    }
-
-    private func toolboxButton(_ title: String, symbol: String, shortcut: ToolboxShortcut,
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            ToolboxRowLabel(
-                title: title,
-                symbol: symbol,
-                shortcut: workspace.toolboxShortcutLabel(shortcut)
-            )
-        }
-    }
-}
-
-private struct ToolboxRowLabel: View {
-    var title: String
-    var symbol: String
-    var shortcut: String
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Image(systemName: symbol)
-                .frame(width: 24)
-            Text(title)
-                .padding(.leading, 10)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            ToolboxShortcutLabel(shortcut)
-                .frame(width: 28, alignment: .trailing)
-        }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct ToolboxShortcutLabel: View {
-    var shortcut: String
-
-    init(_ shortcut: String) {
-        self.shortcut = shortcut
-    }
-
-    var body: some View {
-        Text(shortcut)
-            .font(.system(size: 10, weight: .medium, design: .rounded))
-            .monospacedDigit()
-    }
-}
-
-private struct ToolboxLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 10) {
-            configuration.icon.frame(width: 24)
-            configuration.title
         }
     }
 }

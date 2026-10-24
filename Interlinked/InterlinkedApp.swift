@@ -26,7 +26,7 @@ struct InterlinkedApp: App {
             CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .undoRedo) {}
             CommandGroup(replacing: .sidebar) {
-                Button("All Tabs") { workspace.toggleOverview() }
+                Button(workspace.sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar") { workspace.toggleSidebar() }
                     .keyboardShortcut("s", modifiers: [.command, .control])
             }
             CommandGroup(replacing: .help) {

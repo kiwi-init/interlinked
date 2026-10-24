@@ -118,21 +118,6 @@ final class NewTabPageTests: XCTestCase {
         XCTAssertFalse(NewTabPage.matches(line: "about:blank"))
         XCTAssertFalse(NewTabPage.matches(line: "https://example.com"))
     }
-
-    func testNewTabHandleStaysExpandedWithoutHover() {
-        XCTAssertTrue(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: true
-        ))
-        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: true, panelOpen: false, hovering: false, editing: false, isNewTab: true
-        ))
-        XCTAssertFalse(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: false, editing: false, isNewTab: false
-        ))
-        XCTAssertTrue(PageHandleExpansion.showsOpenWork(
-            overviewOpen: false, panelOpen: false, hovering: true, editing: false, isNewTab: false
-        ))
-    }
 }
 
 final class PageURLCopyShortcutTests: XCTestCase {
