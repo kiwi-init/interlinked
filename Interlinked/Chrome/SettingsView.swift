@@ -334,7 +334,7 @@ private struct IntelligenceSettingsPane: View {
                 )
                 ModelStatusRow(
                     symbol: "apple.intelligence", tint: .blue, title: "Apple Intelligence",
-                    detail: "On-device tab labels and page descriptions.",
+                    detail: "On-device tab labels.",
                     status: LocalIntelligenceRuntime.isAvailable
                         ? ("Available", .good) : ("Not on this Mac", .neutral)
                 )

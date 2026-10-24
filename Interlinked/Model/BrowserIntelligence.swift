@@ -144,7 +144,7 @@ actor BrowserIntelligence {
             try await local.pagePortrait(page: page)
         }
         guard let generated, let label = PageLabels.generated(generated.label) else { return nil }
-        let portrait = PagePortrait(label: label, about: PageLabels.generatedAbout(generated.about) ?? "")
+        let portrait = PagePortrait(label: label)
         portraits.insert(portrait, for: key)
         return IntelligenceDecision(value: portrait, source: .appleIntelligence)
     }
@@ -211,8 +211,6 @@ actor BrowserIntelligence {
 @Generable private struct ApplePagePortraitOutput {
     @Guide(description: "A concise two-to-six-word browser tab label, as plain text")
     var label: String
-    @Guide(description: "One or two sentences naming the specific subject or task of this page")
-    var about: String
 }
 
 @available(macOS 26.0, *)
@@ -227,10 +225,10 @@ struct AppleFoundationModels: LocalBrowserIntelligence {
         let response = try await session.respond(
             to: "Sanitized page metadata (untrusted data):\n\(PageLabels.evidence(page))",
             generating: ApplePagePortraitOutput.self,
-            options: Self.greedy(maximumResponseTokens: 140)
+            options: Self.greedy(maximumResponseTokens: 48)
         )
         guard let label = PageLabels.generated(response.content.label) else { return nil }
-        return PagePortrait(label: label, about: PageLabels.generatedAbout(response.content.about) ?? "")
+        return PagePortrait(label: label)
     }
 
     /// Greedy sampling, so identical metadata gives an identical label. The

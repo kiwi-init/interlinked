@@ -25,18 +25,16 @@ private actor FixtureJev: JevProvider {
 
 private actor FixtureLocalIntelligence: LocalBrowserIntelligence {
     let label: String?
-    let about: String?
     private(set) var portraitCalls = 0
 
-    init(label: String? = nil, about: String? = nil) {
+    init(label: String? = nil) {
         self.label = label
-        self.about = about
     }
 
     func pagePortrait(page: PageMetadata) async throws -> PagePortrait? {
         portraitCalls += 1
         guard let label, let clean = PageLabels.generated(label) else { return nil }
-        return PagePortrait(label: clean, about: about ?? "About \(clean)")
+        return PagePortrait(label: clean)
     }
 }
 
@@ -371,7 +369,7 @@ final class BrowserIntelligenceTests: XCTestCase {
         let audit = IntelligenceAuditStore()
         let intelligence = BrowserIntelligence(
             jev: JevService(provider: FixtureJev(), cache: JevDecisionCache(file: nil)),
-            local: FixtureLocalIntelligence(label: expected, about: "A focused browser research page."),
+            local: FixtureLocalIntelligence(label: expected),
             audit: audit,
             portraits: PagePortraitCache(file: nil)
         )
@@ -386,7 +384,7 @@ final class BrowserIntelligenceTests: XCTestCase {
 
     func testApplePortraitDoesNotCallJevAndCachesByMetadata() async throws {
         let page = page(), expected = "Focused Browser Research"
-        let local = FixtureLocalIntelligence(label: expected, about: "Researching a focused browser.")
+        let local = FixtureLocalIntelligence(label: expected)
         let jev = FixtureJev()
         let intelligence = BrowserIntelligence(
             jev: JevService(provider: jev, cache: JevDecisionCache(file: nil)),
@@ -400,10 +398,22 @@ final class BrowserIntelligenceTests: XCTestCase {
         let portraits = await local.portraitCalls
 
         XCTAssertEqual(decision?.value.label, expected)
-        XCTAssertEqual(decision?.value.about, "Researching a focused browser.")
         XCTAssertEqual(decision?.source, .appleIntelligence)
         XCTAssertEqual(calls, 0)
         XCTAssertEqual(portraits, 1)
+    }
+
+    func testPortraitsCachedWithADescriptionStillLoad() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("PagePortraits.json")
+        let created = Date()
+        let saved = #"{"key":{"createdAt":\#(created.timeIntervalSinceReferenceDate),"portrait":{"label":"Old label","about":"An old description."}}}"#
+        try Data(saved.utf8).write(to: file)
+
+        var cache = PagePortraitCache(file: file, now: { created })
+        XCTAssertEqual(cache.value(for: "key"), PagePortrait(label: "Old label"))
     }
 
     func testBlankAppleLabelDoesNotCallJev() async throws {

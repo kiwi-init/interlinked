@@ -1,12 +1,13 @@
 import Foundation
 import CryptoKit
 
+/// Entries cached before the page description was dropped still decode:
+/// their `about` key is ignored.
 struct PagePortrait: Codable, Equatable, Sendable {
     var label: String
-    var about: String
 }
 
-/// Five-day cache for on-device page labels and about paragraphs.
+/// Five-day cache for on-device page labels.
 /// Keyed by host, path, and a hash of the metadata Apple actually saw.
 struct PagePortraitCache {
     struct Entry: Codable {
@@ -96,8 +97,6 @@ struct PagePortraitCache {
 }
 
 extension PageLabels {
-    private static let maximumAboutLength = 280
-
     /// Host + path + hash of the metadata sent to Apple. Query strings stay out of the key.
     static func cacheIdentity(_ page: PageMetadata) -> String {
         let host = page.host.lowercased()
@@ -111,9 +110,5 @@ extension PageLabels {
             .map { String(format: "%02x", $0) }
             .joined()
         return host + "\n" + path + "\n" + digest
-    }
-
-    static func generatedAbout(_ value: String) -> String? {
-        bounded(value, limit: maximumAboutLength)
     }
 }
