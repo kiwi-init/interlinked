@@ -80,7 +80,6 @@ final class ContentBlocker {
     static let cosmeticsWorld = WKContentWorld.world(name: "interlinked-cosmetics")
     static let cosmeticsHandler = "interlinkedCosmetics"
     private static let cosmeticsBinding = "__interlinkedCosmetics"
-    private static let ruleListPrefix = "interlinked-blocker-"
 
     /// Runs in the cosmetics world at document start; blocker-cosmetics.js
     /// explains the `cfg` the caller defines first.
@@ -110,42 +109,54 @@ final class ContentBlocker {
     func ruleLists(for url: URL?) -> [WKContentRuleList] { blocks(url) ? ruleLists : [] }
 
     /// Compiles `lists` with WebKit, which keeps them for later launches.
+    /// Each compile is a new generation, so one that fails part way leaves
+    /// the previous lists whole.
     func compile(_ lists: [String]) async -> Bool {
         guard let store = WKContentRuleListStore.default() else { return false }
+        let generation = UInt64(Date().timeIntervalSince1970 * 1000)
         var compiled: [WKContentRuleList] = []
         for (index, list) in lists.enumerated() {
-            guard let ruleList = try? await store.compileContentRuleList(
-                forIdentifier: Self.ruleListPrefix + String(index), encodedContentRuleList: list) else { return false }
+            let identifier = StoredRuleList(generation: generation, index: index, count: lists.count).identifier
+            guard let ruleList = try? await store.compileContentRuleList(forIdentifier: identifier,
+                                                                         encodedContentRuleList: list) else {
+                await remove(from: store) { $0.generation == generation }
+                return false
+            }
             compiled.append(ruleList)
         }
-        for identifier in await storedIdentifiers(store).dropFirst(lists.count) {
-            try? await store.removeContentRuleList(forIdentifier: identifier)
-        }
+        await remove(from: store) { $0.generation != generation }
         ruleLists = compiled
         return true
     }
 
-    /// The lists compiled at an earlier launch.
+    /// The newest complete generation compiled at an earlier launch.
     func restoreRuleLists() async -> Bool {
         guard let store = WKContentRuleListStore.default() else { return false }
-        let identifiers = await storedIdentifiers(store)
-        var restored: [WKContentRuleList] = []
-        for identifier in identifiers {
-            guard let ruleList = try? await store.contentRuleList(forIdentifier: identifier) else { return false }
-            restored.append(ruleList)
+        let stored = await storedRuleLists(store)
+        newest: for generation in Set(stored.map(\.generation)).sorted(by: >) {
+            let lists = stored.filter { $0.generation == generation }.sorted { $0.index < $1.index }
+            guard let count = lists.first?.count, lists.map(\.index) == Array(0..<count) else { continue }
+            var restored: [WKContentRuleList] = []
+            for list in lists {
+                guard let ruleList = try? await store.contentRuleList(forIdentifier: list.identifier) else { continue newest }
+                restored.append(ruleList)
+            }
+            ruleLists = restored
+            return true
         }
-        guard !restored.isEmpty else { return false }
-        ruleLists = restored
-        return true
+        return false
     }
 
-    private func storedIdentifiers(_ store: WKContentRuleListStore) async -> [String] {
-        let identifiers = await store.availableIdentifiers() ?? []
-        return identifiers
-            .filter { $0.hasPrefix(Self.ruleListPrefix) }
-            .compactMap { identifier in Int(identifier.dropFirst(Self.ruleListPrefix.count)).map { ($0, identifier) } }
-            .sorted { $0.0 < $1.0 }
-            .map(\.1)
+    private func storedRuleLists(_ store: WKContentRuleListStore) async -> [StoredRuleList] {
+        (await store.availableIdentifiers() ?? []).compactMap(StoredRuleList.init)
+    }
+
+    /// Removes the lists `matches` picks, and any in an earlier format.
+    private func remove(from store: WKContentRuleListStore, where matches: (StoredRuleList) -> Bool) async {
+        for identifier in await store.availableIdentifiers() ?? [] where identifier.hasPrefix(StoredRuleList.prefix) {
+            if let list = StoredRuleList(identifier), !matches(list) { continue }
+            try? await store.removeContentRuleList(forIdentifier: identifier)
+        }
     }
 
     /// What the document at `url` needs: scriptlets in the page's world, and
@@ -209,6 +220,30 @@ final class ContentBlocker {
         (try? JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed))
             .map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
     }
+}
+
+/// One compiled list in WebKit's store: `interlinked-blocker-<generation>-<index>-<count>`.
+struct StoredRuleList: Equatable {
+    static let prefix = "interlinked-blocker-"
+    let generation: UInt64
+    let index: Int
+    let count: Int
+
+    init(generation: UInt64, index: Int, count: Int) {
+        self.generation = generation
+        self.index = index
+        self.count = count
+    }
+
+    init?(_ identifier: String) {
+        guard identifier.hasPrefix(Self.prefix) else { return nil }
+        let parts = identifier.dropFirst(Self.prefix.count).split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3, let generation = UInt64(parts[0]), let index = Int(parts[1]), let count = Int(parts[2]),
+              index >= 0, index < count else { return nil }
+        self.init(generation: generation, index: index, count: count)
+    }
+
+    var identifier: String { "\(Self.prefix)\(generation)-\(index)-\(count)" }
 }
 
 /// The blocking scripts registered for one document and what the cosmetics
