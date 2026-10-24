@@ -68,7 +68,8 @@ fi
 chmod 700 "$sockets"
 socket=$sockets/control.sock
 
-open -n "$app" \
+# -g keeps focus on whatever you're doing, often the Interlinked you use.
+open -n -g "$app" \
   --env CFFIXED_USER_HOME="$data" \
   --env INTERLINKED_SOCKET="$socket" \
   --args -ApplePersistenceIgnoreState YES
