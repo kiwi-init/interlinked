@@ -116,11 +116,12 @@ final class Workspace {
     var activePane: PaneID? { activeTab?.active }
 
     /// The name a tab goes by everywhere: your name for it, else the label
-    /// the page handle shows, else the page's own title.
+    /// the address field shows, else the page's own title. A tab with nothing
+    /// in it yet is a new page, whatever kind of page it will hold.
     func title(_ tab: Tab) -> String {
         if tab.panes == [onboarding.pane] { return Self.onboardingTitle }
         return OpenWork.title(customName: tab.name, pageTitle: assistance.labels[tab.active] ?? hosts.titles[tab.active],
-                       fallback: surfaces.tabTitle(tab))
+                       fallback: surfaces.line(tab.active).isEmpty ? Self.newPageTitle : surfaces.tabTitle(tab))
     }
 
     func selectWork(_ tab: TabID) {
@@ -690,6 +691,7 @@ final class Workspace {
     // MARK: - Onboarding
 
     static let onboardingTitle = "Welcome to Interlinked"
+    static let newPageTitle = "New Page"
 
     var onboardingTab: Tab? {
         guard let pane = onboarding.pane else { return nil }
@@ -955,7 +957,7 @@ final class Workspace {
     func title(_ pane: PaneID) -> String {
         if onboarding.contains(pane) { return Self.onboardingTitle }
         let line = surfaces.line(pane)
-        let fallback = line.isEmpty ? "New page" : surfaces.kind(pane).compactLabel(for: line)
+        let fallback = line.isEmpty ? Self.newPageTitle : surfaces.kind(pane).compactLabel(for: line)
         return OpenWork.title(customName: nil, pageTitle: assistance.labels[pane] ?? hosts.titles[pane],
                               fallback: fallback.isEmpty ? line : fallback)
     }
