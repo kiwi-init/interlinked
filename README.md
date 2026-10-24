@@ -20,9 +20,9 @@ The page label stays visible while scrolling. Clicking the page dismisses open c
 
 Favicons are fetched once per hostname, shared across tabs, and saved in `~/Library/Application Support/Interlinked/Favicons` for later launches. Closing or navigating away from the last tab on that hostname releases its in-memory icon and cancels any pending fetch. Failed lookups are remembered until that hostname is no longer open. Page previews are captured when you open the overview.
 
-Tabs restore from `~/Library/Application Support/Interlinked/session.json`. Older split workspaces migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored. ⇧⌘T reopens the last of up to 25 closed tabs. A corrupt session file is kept aside and the backup from the last good save opens instead. Back and forward lists do not survive a relaunch. [docs/session-state.md](docs/session-state.md) covers what is restored and why.
+Tabs restore from `~/Library/Application Support/Interlinked/session.json`, split views included. Workspaces from before split view migrate into individual browser tabs, preserving web addresses and the selected page. Legacy terminal entries are ignored. ⇧⌘T reopens the last of up to 25 closed tabs. A corrupt session file is kept aside and the backup from the last good save opens instead. Back and forward lists do not survive a relaunch. [docs/session-state.md](docs/session-state.md) covers what is restored and why.
 
-Browsing history stays in `history.json` for 90 days, up to 5,000 visits. The History panel removes one visit, every visit to a site, or the last hour, today, or everything. Settings > Privacy turns history off, which also deletes it. History never goes to Jev.
+Browsing history stays in `history.json` for 90 days, up to 5,000 visits. A history file this build can't read is kept aside as `history.json.corrupt-<time>`. The History panel removes one visit, every visit to a site, or the last hour, today, or everything. Settings > Privacy turns history off, which also deletes it. History never goes to Jev.
 
 Links and scripts that request a new browser window become a new Interlinked tab. WebKit offers only windows a person opened with a click; unsolicited popups are discarded. Command-click and middle-click open a link in a new tab. Mail, phone, and other non-web links open in the app that handles them after the usual warning.
 
@@ -117,11 +117,12 @@ xcodebuild -project Interlinked.xcodeproj -scheme InterlinkedTests -configuratio
   -derivedDataPath build -destination 'platform=macOS,arch=arm64' test
 ```
 
-UI tests launch the app against the local fixture server. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Quit any other Interlinked instance first: a second app would share its session and control socket.
+UI tests launch the app against the local fixture server. The Interlinked scheme starts the fixture server before testing and stops it afterwards with `script/fixture-server`, because the sandboxed test runner cannot start it. Each launch gets its own home folder and control socket under `/tmp/interlinked-uitests-<uid>`, so the Interlinked you use keeps its session, history, and socket. Build with a bundle ID suffix as below so it keeps its settings too. UI tests drive the real pointer and keyboard while they run.
 
 ```sh
 xcodebuild -project Interlinked.xcodeproj -scheme Interlinked -configuration Debug \
-  -derivedDataPath build -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build-uitests -destination 'platform=macOS,arch=arm64' \
+  INTERLINKED_BUNDLE_ID_SUFFIX=.testing CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
   -only-testing:InterlinkedUITests test
 ```
 

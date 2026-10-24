@@ -83,6 +83,11 @@ final class DailyDriverUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-interlinked-ui-testing", "-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["INTERLINKED_UI_TEST_URL"] = url
+        // A home and control socket of its own, so a test run never writes the
+        // session, history, caches, or socket of an Interlinked in use.
+        let scratch = "/tmp/interlinked-uitests-\(getuid())"
+        app.launchEnvironment["CFFIXED_USER_HOME"] = "\(scratch)/home-\(UUID().uuidString.prefix(8))"
+        app.launchEnvironment["INTERLINKED_SOCKET"] = "\(scratch)/control.sock"
         if filters {
             app.launchEnvironment["INTERLINKED_UI_TEST_FILTERS"] = repository("test-fixtures/blocker-filters.txt").path
             // Argument defaults override the saved settings without changing them.
