@@ -391,7 +391,10 @@ struct Tab: Codable, Equatable, Identifiable {
     static let ratioRange = 0.2...0.8
 
     var panes: [PaneID] { root.leaves() }
-    var splitRatio: Double { min(max(ratio ?? 0.5, Self.ratioRange.lowerBound), Self.ratioRange.upperBound) }
+    var splitRatio: Double {
+        guard let ratio, ratio.isFinite else { return 0.5 }
+        return min(max(ratio, Self.ratioRange.lowerBound), Self.ratioRange.upperBound)
+    }
     var isSplit: Bool { panes.count > 1 }
     var canSplit: Bool { panes.count < Self.maxPanes }
     /// The pane beside the focused one in split view.

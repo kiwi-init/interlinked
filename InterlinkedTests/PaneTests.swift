@@ -292,6 +292,15 @@ final class SplitViewTests: XCTestCase {
         XCTAssertNil(tab.ratio)
     }
 
+    func testANonFiniteRatioFallsBackToHalf() {
+        var tab = Tab(id: TabID(1), pane: PaneID(1))
+        _ = tab.split(PaneID(1), axis: .columns, new: PaneID(2), id: SplitID(1))
+        tab.ratio = .nan
+        XCTAssertEqual(tab.splitRatio, 0.5, "a NaN ratio would trap the divider's Int(ratio * 100)")
+        tab.ratio = .infinity
+        XCTAssertEqual(tab.splitRatio, 0.5)
+    }
+
     func testTabsSavedBeforeRatiosStillLoad() throws {
         let old = #"{"id":1,"root":{"leaf":1},"active":1}"#
         let tab = try JSONDecoder().decode(Tab.self, from: Data(old.utf8))
