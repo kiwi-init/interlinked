@@ -190,31 +190,6 @@ extension Control {
     }
 
     @MainActor
-    static func quickSwitch(_ words: [String], _ workspace: Workspace) -> String {
-        switch words.first ?? "state" {
-        case "state": break
-        case "show": workspace.quickSwitchOpen = true
-        case "hide": workspace.quickSwitchOpen = false
-        case "toggle": workspace.quickSwitchOpen.toggle()
-        case "select":
-            guard let index = words.dropFirst().first.flatMap(Int.init), workspace.selectQuickTab(index) else {
-                return error("quick-switch select takes an index from quick-switch state")
-            }
-        default:
-            return error("quick-switch takes state, show, hide, toggle, or select N")
-        }
-        return json([
-            "open": workspace.quickSwitchOpen,
-            "left_command": workspace.leftCommandKeyHeld,
-            "right_command": workspace.rightCommandKeyHeld,
-            "tabs": workspace.quickTabs.enumerated().map { index, tab in
-                ["index": index, "id": Int(tab.id.rawValue), "title": workspace.title(tab),
-                 "shortcut": index < 9 ? "⌘\(index + 1)" : ""] as [String: Any]
-            },
-        ])
-    }
-
-    @MainActor
     static func usefulInfo(_ words: [String], _ workspace: Workspace) -> String {
         let info = workspace.usefulInfo
         let shown = info.active
@@ -258,7 +233,7 @@ extension Control {
             "address": found?.address ?? "",
             "phones": found?.phones ?? [],
             "emails": found?.emails ?? [],
-            "shown": shown != nil && !workspace.overviewOpen,
+            "shown": shown != nil,
             "shown_address": shown?.address ?? "",
             "options": options.enumerated().map { index, option in
                 ["index": index, "kind": option.kind == .phone ? "phone" : "email", "value": option.value] as [String: Any]
@@ -583,14 +558,6 @@ extension Control {
     }
 
     // MARK: - Helpers
-
-    /// What the overview's search field matches, as `WorkspaceOverview` does.
-    @MainActor
-    static func overviewMatches(_ query: String, _ tab: Tab, _ workspace: Workspace) -> Bool {
-        OpenWork.matches(query, title: workspace.title(tab), details: tab.root.leaves().flatMap {
-            [workspace.surfaces.line($0), workspace.hosts.titles[$0] ?? ""]
-        })
-    }
 
     static func onOff(_ word: String?) -> Bool? {
         switch word {

@@ -1,18 +1,6 @@
 import Foundation
 
 enum OpenWork {
-    static func rows(count: Int) -> [Range<Int>] {
-        guard count > 0 else { return [] }
-        let lanes = (count + 4) / 5
-        let base = count / lanes, extra = count % lanes
-        var start = 0
-        return (0..<lanes).map { lane in
-            let end = start + base + (lane < extra ? 1 : 0)
-            defer { start = end }
-            return start..<end
-        }
-    }
-
     static func title(customName: String?, pageTitle: String?, fallback: String) -> String {
         for candidate in [customName, pageTitle] {
             if let title = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
@@ -22,24 +10,9 @@ enum OpenWork {
         return fallback
     }
 
-    /// Every other tab, oldest first. A pinned tab leads so its ⌘1 never moves.
-    static func switcherTabs(_ tabs: [Tab], current: TabID?, pinned: TabID? = nil) -> [Tab] {
-        tabs.filter { $0.id != current }.sorted {
-            if $0.id == pinned { return true }
-            if $1.id == pinned { return false }
-            return $0.id.rawValue < $1.id.rawValue
-        }
-    }
-
     static func shortcutIndex(_ characters: String) -> Int? {
         guard characters.count == 1, let digit = Int(characters), (1...9).contains(digit) else { return nil }
         return digit - 1
-    }
-
-    static func matches(_ query: String, title: String, details: [String]) -> Bool {
-        let words = query.split(whereSeparator: \.isWhitespace)
-        let text = ([title] + details).joined(separator: " ")
-        return words.allSatisfy { text.localizedStandardContains(String($0)) }
     }
 }
 

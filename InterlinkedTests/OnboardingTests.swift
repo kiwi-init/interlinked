@@ -78,10 +78,4 @@ final class OnboardingTests: XCTestCase {
         let progress = try JSONDecoder().decode(OnboardingProgress.self, from: Data(saved.utf8))
         XCTAssertEqual(progress.done, [.openedTab, .cameBack])
     }
-
-    func testThePinnedTabIsAlwaysCommandOne() {
-        let tabs = [Tab(id: TabID(2), pane: PaneID(2)), Tab(id: TabID(9), pane: PaneID(9)), Tab(id: TabID(5), pane: PaneID(5))]
-        XCTAssertEqual(OpenWork.switcherTabs(tabs, current: TabID(2), pinned: TabID(9)).map(\.id), [TabID(9), TabID(5)])
-        XCTAssertEqual(OpenWork.switcherTabs(tabs, current: TabID(9), pinned: TabID(9)).map(\.id), [TabID(2), TabID(5)])
-    }
 }

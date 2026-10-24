@@ -214,13 +214,6 @@ final class WebKitPage: NSObject {
         nativeView.evaluateJavaScript("getSelection()?.removeAllRanges()", in: nil, in: .defaultClient)
     }
 
-    func snapshot(width: CGFloat = 600) async -> NSImage? {
-        guard nativeView.bounds.width > 0, nativeView.bounds.height > 0 else { return nil }
-        let configuration = WKSnapshotConfiguration()
-        configuration.snapshotWidth = NSNumber(value: Double(width))
-        return try? await nativeView.takeSnapshot(configuration: configuration)
-    }
-
     func cancelDownload(_ identifier: UInt32) {
         guard let download = downloads[identifier] else { return }
         cancelledDownloads.insert(identifier)

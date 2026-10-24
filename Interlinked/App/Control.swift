@@ -25,9 +25,7 @@ enum Control {
         "clear-tab [index]",
         "tint [name]",
         "sidebar [width|collapse|expand|toggle]",
-        "overview [show|hide|toggle]",
         "identity [show|hide|toggle]",
-        "page-icons [show|hide|toggle]",
         "builtins [state|blocking on|off|dark off|system|always]",
         "new-page",
         "new-page-beside",
@@ -45,13 +43,11 @@ enum Control {
         "key KEY [MODS] [to browser|key|settings]",
         "edit-tab [index]",
         "close-whole-tab [index]",
-        "overview search QUERY|submit QUERY",
         "suggestions [state|next|prev|submit|open N]",
         "find [state|open [text]|query text|next|prev|meaning on|off|close]",
         "share-page [state|request|allow|remember|cancel|stop]",
         "history [state|open|close|toggle|visit N|remove N|remove-site N|clear [hour|today|all]]",
         "downloads [state|open|close|toggle|clear|cancel N|reveal N|allow-notifications]",
-        "quick-switch [state|show|hide|toggle|select N]",
         "useful-info [state|copy address|copy contact [N]|contact open|close]",
         "onboarding step STEP|feature FEATURE on|off",
         "settings [state|get NAME|set NAME VALUE|open [pane]|close|remove-jev-key|clear-ai-cache|update-lists]",
@@ -72,7 +68,6 @@ enum Control {
         "share-page",
         "history",
         "downloads",
-        "quick-switch",
         "suggestions",
         "settings",
         "sites",
@@ -125,7 +120,6 @@ enum Control {
         case "share-page": return sharePage(words, workspace)
         case "history": return history(words, workspace)
         case "downloads": return downloads(words, workspace)
-        case "quick-switch": return quickSwitch(words, workspace)
         case "useful-info": return usefulInfo(words, workspace)
         case "suggestions": return suggestions(words, workspace)
         case "settings": return settings(words, workspace)
@@ -228,16 +222,6 @@ enum Control {
 
         case "close-page-tool":
             workspace.assistance.closePanel()
-            return ok()
-
-
-        case "page-icons":
-            switch words.first {
-            case "show": workspace.quickSwitchOpen = true
-            case "hide": workspace.quickSwitchOpen = false
-            case "toggle", nil: workspace.quickSwitchOpen.toggle()
-            default: return error("page-icons takes show, hide, or toggle")
-            }
             return ok()
 
         case "measure-frames":
@@ -403,22 +387,11 @@ enum Control {
                 return error("identity wants show, hide, or toggle")
             }
 
-        case "overview", "sidebar":
+        case "sidebar":
             if words.isEmpty {
-                return json(["open": workspace.overviewOpen])
+                return json(["width": Double(workspace.sidebar), "collapsed": workspace.sidebarCollapsed])
             }
             switch words[0] {
-            case "search", "submit":
-                // The overview's search field: matching tabs, and Return opens
-                // the first match or goes to what was typed.
-                let query = words.dropFirst().joined(separator: " ")
-                let matches = workspace.tabs.filter { overviewMatches(query, $0, workspace) }
-                if words[0] == "submit" {
-                    if let tab = matches.first { workspace.selectWork(tab.id) }
-                    else if !query.isEmpty { workspace.openAddress(query) }
-                    return ok()
-                }
-                return json(["matches": matches.map { ["id": Int($0.id.rawValue), "title": workspace.title($0)] as [String: Any] }])
             case "hide", "collapse":
                 workspace.setSidebar(0)
                 return ok()
@@ -524,7 +497,7 @@ enum Control {
                 "next": workspace.onboarding.progress.next?.rawValue ?? "",
                 "notice": workspace.onboarding.notice ?? "",
                 "coach": workspace.showsOnboardingCoach,
-                "shortcut_1": workspace.quickTabs.first.map { workspace.title($0) } ?? "",
+                "shortcut_1": workspace.tabs.first.map { workspace.title($0) } ?? "",
                 "tabs": workspace.tabs.count,
             ] as [String: Any]).merging(onboardingDetail(workspace)) { $1 })
 
@@ -597,20 +570,17 @@ enum Control {
             "web": true,
             "tint": workspace.tint.name,
             "sidebar": Double(workspace.sidebar),
-            "overview": workspace.overviewOpen,
             "identity": workspace.identityOpen,
             "page_history": workspace.pageHistoryOpen,
             "recently_closed": workspace.recentlyClosed.reversed().map { closed in
                 ["url": closed.url, "name": closed.name ?? NSNull(), "closed": timestamp(closed.closed)] as [String: Any]
             },
             "downloads_panel": workspace.downloads.panelOpen,
-            "quick_switch": workspace.quickSwitchOpen,
             "page_tool": panelName(workspace.assistance.panel),
             "contact_open": workspace.usefulInfo.contactOpen,
             "onboarding": workspace.onboarding.pane != nil,
             "settings_window": settingsWindow()?.isVisible ?? false,
             "sharing_screen_mode": workspace.sharingScreenMode,
-            "command_keys": ["left": workspace.leftCommandKeyHeld, "right": workspace.rightCommandKeyHeld],
             "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
             "writing": writing(workspace),
             "active_tab": workspace.active,

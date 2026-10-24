@@ -154,7 +154,7 @@ final class BrowserAssistance {
     }
 
     func requestSharing(for destination: Panel? = nil) {
-        workspace?.discardLine(); workspace?.setOverviewOpen(false)
+        workspace?.discardLine()
         // The prompt replaces Find. A search still running would land on it.
         if panel == .find { closePanel() }
         nextPanel = destination; panel = .permission
@@ -216,7 +216,7 @@ final class BrowserAssistance {
     }
 
     func openFind() {
-        workspace?.discardLine(); workspace?.setOverviewOpen(false)
+        workspace?.discardLine()
         panel = .find
         findChanged()
     }
