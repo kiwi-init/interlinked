@@ -113,14 +113,6 @@ struct OnboardingView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: pagePart.step)
         .animation(reduceMotion ? nil : Metrics.morph, value: workspace.usesSiteMenu)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .confirmationDialog("Turn on Always-on Critical Reading?",
-                            isPresented: Bindable(workspace).onboardingAsksReadingConsent,
-                            titleVisibility: .visible) {
-            Button("Enable Always On") { workspace.assistance.acceptAutomaticReading() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(AutomaticReadingConsent.warning)
-        }
         .onChange(of: guide.progress.scene.id) { old, _ in
             shown = OnboardingScene.all.first { $0.id == old }
             Task { @MainActor in

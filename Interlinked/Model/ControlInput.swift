@@ -82,7 +82,6 @@ enum ControlSetting: String, CaseIterable {
     case jev
     case appleIntelligence = "apple-intelligence"
     case refineLabels = "refine-labels"
-    case criticalReading = "critical-reading"
     case sharingScreenMode = "sharing-screen-mode"
     case browsingHistory = "browsing-history"
     case onboardingAlwaysShow = "onboarding.always-show"
@@ -102,7 +101,6 @@ enum ControlSetting: String, CaseIterable {
     var choices: [String] {
         switch self {
         case .darkPages: PageDarkMode.allCases.map(\.rawValue)
-        case .criticalReading: CriticalReadingMode.allCases.map(\.rawValue)
         case .searchProvider: SearchProvider.allCases.map(\.rawValue)
         case .suggestionProvider: [Self.sameAsSearch] + SearchProvider.allCases.map(\.rawValue)
         default: ["on", "off"]
@@ -112,7 +110,7 @@ enum ControlSetting: String, CaseIterable {
     func parse(_ raw: String) -> Value? {
         let written = Self.folded(raw)
         switch self {
-        case .darkPages, .criticalReading, .searchProvider, .suggestionProvider:
+        case .darkPages, .searchProvider, .suggestionProvider:
             return choices.first { Self.folded($0) == written }.map(Value.choice)
         default:
             switch written {

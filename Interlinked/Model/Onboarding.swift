@@ -13,8 +13,6 @@ enum OnboardingStep: String, Codable, CaseIterable, Sendable {
     case intelligenceNext
     /// Find for me highlighted a match on the demo page.
     case foundWithMeaning
-    /// Critical Reading highlighted a passage on the demo page.
-    case readCritically
     /// Next on the Sharing Screen Mode and address scene. Both are optional.
     case extrasNext
     /// Start browsing, on the last scene.
@@ -25,7 +23,7 @@ enum OnboardingStep: String, Codable, CaseIterable, Sendable {
 enum OnboardingPage: Sendable {
     /// A real site with a full header, for Interlinked Menus.
     case figma
-    /// The demo blog, for Find for me and Critical Reading.
+    /// The demo blog, for Find for me.
     case slowMornings
 
     var url: URL {
@@ -45,8 +43,8 @@ enum OnboardingPage: Sendable {
     }
 }
 
-/// The page Find for me and Critical Reading are shown on: a made-up blog
-/// written so both have something to find. Debug builds can point it at a
+/// The page Find for me is shown on: a made-up blog
+/// written so it has something to find. Debug builds can point it at a
 /// local copy of `docs/try` with the `onboarding.demoURL` default.
 enum OnboardingDemo {
     /// Published from the public ojowwalker77/slow-mornings repo. Its source is `docs/try`.
@@ -68,7 +66,6 @@ enum OnboardingFeature: String, Sendable {
     case jev
     case sharingScreen
     case usefulInfo
-    case criticalReadingAlwaysOn
     case adBlocking
     case darkPages
 
@@ -79,7 +76,6 @@ enum OnboardingFeature: String, Sendable {
         case .jev: "Jev"
         case .sharingScreen: "Sharing Screen Mode"
         case .usefulInfo: "Address & contact"
-        case .criticalReadingAlwaysOn: "Critical Reading, always on"
         case .adBlocking: "Ad blocking"
         case .darkPages: "Dark pages"
         }
@@ -92,7 +88,6 @@ enum OnboardingFeature: String, Sendable {
         case .jev: "A classifier, not generative AI. Runs in the cloud."
         case .sharingScreen: "Blurs emails, phone numbers, cards and passwords while you share your screen. ⇧⌘S anytime."
         case .usefulInfo: "When a page lists its address or phone, copy it with one click above the Toolbox."
-        case .criticalReadingAlwaysOn: "Checks every page as it loads, not only when you ask. Needs Jev."
         case .adBlocking: "Blocks ads and trackers before they load."
         case .darkPages: "Darkens pages that have no dark theme of their own."
         }
@@ -104,7 +99,7 @@ enum OnboardingFeature: String, Sendable {
         case .siteMenu: (nil, nil)
         case .appleIntelligence: ("apple.intelligence", nil)
         case .jev: (nil, "JevMark")
-        case .sharingScreen, .usefulInfo, .criticalReadingAlwaysOn, .adBlocking, .darkPages: (nil, nil)
+        case .sharingScreen, .usefulInfo, .adBlocking, .darkPages: (nil, nil)
         }
     }
 }
@@ -223,9 +218,6 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
                                    .words("on the page beside and ask: how long is the warranty?"),
                                ],
                                check: "Found it with Find for me"),
-                OnboardingPart(step: .readCritically,
-                               instruction: [.words("Now hold right"), .keys(["⌘"]), .words("and choose Critical Reading.")],
-                               check: "Checked it with Critical Reading"),
             ],
             away: [.words("Press"), .keys(["⌘", "1"]), .words("to go back to the welcome tab and keep going.")],
             gif: "onboarding-scene-5"
@@ -250,7 +242,7 @@ struct OnboardingScene: Identifiable, Equatable, Sendable {
                 "Jev is free for now. That might change, for example to bringing your own API key, or whatever makes sense later.",
             ],
             smallPrint: true,
-            features: [.criticalReadingAlwaysOn, .adBlocking, .darkPages],
+            features: [.adBlocking, .darkPages],
             parts: [
                 OnboardingPart(step: .finished, instruction: [], check: "Started browsing"),
             ],
@@ -280,6 +272,15 @@ struct OnboardingProgress: Codable, Equatable, Sendable {
         guard step == next else { return false }
         done.append(step)
         return true
+    }
+}
+
+extension OnboardingProgress {
+    /// A step a later version removed is skipped, so progress saved before
+    /// it went still loads instead of starting over.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        done = try container.decode([String].self, forKey: .done).compactMap(OnboardingStep.init(rawValue:))
     }
 }
 

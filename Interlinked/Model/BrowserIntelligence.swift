@@ -196,16 +196,6 @@ actor BrowserIntelligence {
         return IntelligenceDecision(value: portrait, source: .appleIntelligence)
     }
 
-    func criticalReading(_ passages: [PagePassage]) async throws -> IntelligenceDecision<[PassageDecisions.Finding]> {
-        let responses = try await batched(passages, size: PassageDecisions.readingBatchSize) { intelligence, batch in
-            try await intelligence.observed(source: .jev, action: "Critical reading") {
-                try await intelligence.jev.decide(PassageDecisions.readingRequest(batch))
-            }
-        }
-        let answers = responses.reduce(into: [String: JevAnswer]()) { $0.merge($1.answers) { first, _ in first } }
-        return IntelligenceDecision(value: PassageDecisions.findings(JevResponse(answers: answers), passages: passages), source: .jev)
-    }
-
     func meaningFind(query: String, passages: [PagePassage]) async throws -> IntelligenceDecision<MeaningDecision> {
         let responses = try await batched(passages, size: PassageDecisions.meaningBatchSize) { intelligence, batch in
             try await intelligence.observed(source: .jev, action: "Meaning search") {

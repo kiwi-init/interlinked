@@ -4,7 +4,7 @@ import AppKit
 /// so the app can be driven and inspected without the pointer. None of
 /// these are reachable by voice: `Intent.command` names only tab commands.
 extension Control {
-    // MARK: - Find, Critical Reading, and page sharing
+    // MARK: - Find and page sharing
 
     @MainActor
     static func find(_ words: [String], _ workspace: Workspace) -> String {
@@ -43,33 +43,6 @@ extension Control {
             "match_index": assistant.matchIndex,
             "matches": assistant.matches.map { ["id": $0.id, "text": $0.text] },
             "scores": assistant.findScores,
-        ])
-    }
-
-    @MainActor
-    static func reading(_ words: [String], _ workspace: Workspace) -> String {
-        let assistant = workspace.assistance
-        switch words.first ?? "state" {
-        case "state": break
-        case "open":
-            workspace.downloads.closePanel()
-            assistant.openReading()
-        case "toggle":
-            workspace.downloads.closePanel()
-            assistant.panel == .reading ? assistant.closePanel() : assistant.openReading()
-        case "close":
-            if assistant.panel == .reading { assistant.closePanel() }
-        default:
-            return error("reading takes state, open, toggle, or close")
-        }
-        return json([
-            "open": assistant.panel == .reading,
-            "panel_open": assistant.readingPanelOpen,
-            "mode": assistant.criticalReadingMode.rawValue,
-            "automatic": assistant.automaticReadingEnabled,
-            "busy": assistant.busy,
-            "status": assistant.status,
-            "findings": assistant.findings.map { ["id": $0.id, "category": $0.signal.rawValue] },
         ])
     }
 
@@ -113,7 +86,6 @@ extension Control {
     static func panelName(_ panel: BrowserAssistance.Panel?) -> Any {
         switch panel {
         case .find: "find"
-        case .reading: "reading"
         case .permission: "permission"
         case nil: NSNull()
         }
@@ -381,7 +353,6 @@ extension Control {
             "jev_included": assistant.usesIncludedJev,
             "jev_key_saved": assistant.hasKey,
             "apple_intelligence_available": LocalIntelligenceRuntime.isAvailable,
-            "automatic_reading_consented": assistant.automaticReadingConsented,
             "ai_cache": assistant.cacheStatus,
             "notifications": workspace.downloads.notificationStatus,
             "lists_ready": builtIns.engineReady,
@@ -408,7 +379,6 @@ extension Control {
         case .jev: return assistant.enabled
         case .appleIntelligence: return workspace.binding(for: .appleIntelligence).wrappedValue
         case .refineLabels: return assistant.automaticLabels
-        case .criticalReading: return assistant.criticalReadingMode.rawValue
         case .sharingScreenMode: return workspace.sharingScreenMode
         case .browsingHistory: return workspace.browserHistory.enabled
         case .onboardingAlwaysShow: return workspace.onboarding.alwaysShow
@@ -442,16 +412,6 @@ extension Control {
             guard assistant.appleEnabled else { return "refine-labels needs apple-intelligence on" }
             assistant.automaticLabels = on
             assistant.configure()
-        case (.criticalReading, .choice(let raw)):
-            guard let mode = CriticalReadingMode(rawValue: raw) else { return "no reading mode \(raw)" }
-            if mode == .automatic && assistant.criticalReadingMode != .automatic {
-                // Asking for it here is the answer to the Settings warning.
-                assistant.acceptAutomaticReading()
-            } else {
-                if mode != .automatic { assistant.automaticReadingConsented = false }
-                assistant.criticalReadingMode = mode
-                assistant.configure()
-            }
         case (.sharingScreenMode, .bool(let on)): workspace.sharingScreenMode = on
         case (.browsingHistory, .bool(let on)): workspace.browserHistory.enabled = on
         case (.onboardingAlwaysShow, .bool(let on)): workspace.onboarding.alwaysShow = on

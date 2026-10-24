@@ -59,9 +59,6 @@ final class ControlSettingTests: XCTestCase {
         XCTAssertEqual(ControlSetting.darkPages.choices, ["off", "system", "always"])
         XCTAssertEqual(ControlSetting.darkPages.parse("always"), .choice("always"))
         XCTAssertNil(ControlSetting.darkPages.parse("on"))
-        XCTAssertEqual(ControlSetting.criticalReading.parse("on-request"), .choice("onRequest"))
-        XCTAssertEqual(ControlSetting.criticalReading.parse("onrequest"), .choice("onRequest"))
-        XCTAssertEqual(ControlSetting.criticalReading.parse("automatic"), .choice("automatic"))
         for setting in ControlSetting.allCases {
             for choice in setting.choices {
                 XCTAssertNotNil(setting.parse(choice), "\(setting.rawValue) accepts its own \(choice)")

@@ -26,7 +26,7 @@ extension PageJavaScriptEvaluating {
       const documentID = crypto.randomUUID?.()
         ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
       const ids = new WeakMap(), nodes = new Map(); let next = 0;
-      let stopReading, lastLink;
+      let lastLink;
       let siteMenuNode, siteMenuPrevious, siteMenuSpacer;
       let siteMenuExtras=[];
       // Dark pages, whether darkened by Interlinked or dark by design, get a
@@ -175,90 +175,6 @@ extension PageJavaScriptEvaluating {
           const marked=[...nodes.values()].find(node=>node.isConnected && node.dataset.interlinkedMarked);
           for (const node of nodes.values()) if (node.dataset?.interlinkedMarked) node.style.backgroundColor=markColors(darkened || darkSurface(node)).mark;
           return this.paintMarks(darkened || (marked ? darkSurface(marked) : false));
-        },
-        annotate(items, document, dark) {
-          if (document!==documentID) return false;
-          darkened=!!dark;
-          this.clear();
-          if (!items.length) return true;
-          const visible = item => { const r=nodes.get(item.id)?.getBoundingClientRect(); return r && r.bottom>0 && r.top<innerHeight-80; };
-          let index=Math.max(0,items.findIndex(visible)), pending=0, dismissed=false;
-          const itemIndexes=new Map(items.map((item,index)=>[item.id,index]));
-          let cardSize;
-          if (!this.highlight(items,items[index].id,document,false)) return false;
-          const host=window.document.createElement('div'); host.id='interlinked-reading-'+documentID;
-          host.style.cssText='all:initial;position:fixed;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:2147483647';
-          const root=host.attachShadow({mode:'open'});
-          const style=window.document.createElement('style');
-          style.textContent=`:host{all:initial}*{box-sizing:border-box}
-            aside{position:fixed;left:0;top:0;width:240px;max-width:calc(100vw - 32px);padding:14px;pointer-events:auto;color:#fff;
-              background:rgba(35,35,38,.88);backdrop-filter:blur(24px) saturate(1.35);border:1px solid #ffffff30;
-              border-radius:14px;box-shadow:0 8px 28px #0003;font:12px/1.45 -apple-system,BlinkMacSystemFont,sans-serif;will-change:transform}
-            header{display:flex;align-items:center;gap:8px;margin-bottom:7px}strong{flex:1;font-weight:600}
-            p{margin:0;color:#ffffffbd}footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:10px}
-            small{margin-right:auto;color:#ffffff8c;font:10px -apple-system,sans-serif}
-            button{border:0;background:transparent;color:inherit;font:16px -apple-system,sans-serif;padding:2px 5px;cursor:pointer;border-radius:5px}
-            button:hover,button:focus-visible{background:#ffffff20}aside[hidden]{display:none}`;
-          const card=window.document.createElement('aside'); card.setAttribute('aria-label','Critical reading evaluation');
-          card.innerHTML='<header><strong></strong><button aria-label="Hide evaluation">×</button></header><p></p><footer><small></small><button aria-label="Previous finding">‹</button><button aria-label="Next finding">›</button></footer>';
-          root.append(style,card); window.document.documentElement.append(host);
-          const buttons=card.querySelectorAll('button');
-          const select=next=>{
-            index=(next+items.length)%items.length; dismissed=false;
-            const item=items[index];
-            if (!this.highlight(items,item.id,document,false)) { this.clear();return; }
-            card.querySelector('strong').textContent=item.label;
-            card.querySelector('p').textContent=item.explanation;
-            card.querySelector('small').textContent=(index+1)+' / '+items.length+' · Wording signal';
-            cardSize=null;
-            position();
-          };
-          const position=()=>{
-            pending=0;
-            if (!nodes.get(items[index].id)?.isConnected) { this.clear();return; }
-            const r=nodes.get(items[index].id).getBoundingClientRect();
-            card.hidden=dismissed || r.bottom<=0 || r.top>=innerHeight-64;
-            if (card.hidden) return;
-            cardSize ||= {width:card.offsetWidth,height:card.offsetHeight};
-            const w=cardSize.width,h=cardSize.height,gap=12;
-            const right=r.right+gap,left=r.left-w-gap;
-            const beside=right+w<=innerWidth-16 || left>=16;
-            const x=right+w<=innerWidth-16 ? right : left>=16 ? left : Math.max(16,innerWidth-w-16);
-            const y=beside ? r.top : r.bottom+gap;
-            card.style.transform='translate3d('+x+'px,'+Math.max(16,Math.min(y,innerHeight-h-76))+'px,0)';
-          };
-          const schedule=()=>{ if (!pending) pending=requestAnimationFrame(position); };
-          const point=event=>{
-            if (event.composedPath().includes(host)) return;
-            let target=event.target,found=Infinity;
-            while (target) {
-              const candidate=itemIndexes.get(ids.get(target));
-              if (candidate!==undefined) found=Math.min(found,candidate);
-              target=target.parentNode;
-            }
-            if (found!==Infinity) { if (found!==index || dismissed) select(found); }
-            else if (event.type==='click') { dismissed=true;position(); }
-          };
-          const resized=()=>{cardSize=null;schedule();};
-          buttons[0].onclick=()=>{dismissed=true;position();};
-          buttons[1].onclick=()=>select(index-1);buttons[2].onclick=()=>select(index+1);
-          window.document.addEventListener('pointerover',point);
-          window.document.addEventListener('click',point);
-          window.document.addEventListener('scroll',schedule,{passive:true,capture:true});
-          window.addEventListener('resize',resized);
-          const resize=new ResizeObserver(schedule);resize.observe(window.document.body);
-          const mutations=new MutationObserver(()=>{
-            if (items.some(item=>!nodes.get(item.id)?.isConnected || nodeText(nodes.get(item.id))!==item.text)) this.clear();
-            else schedule();
-          });
-          items.forEach(item=>mutations.observe(nodes.get(item.id),{childList:true,characterData:true,subtree:true}));
-          stopReading=()=>{
-            host.remove();resize.disconnect();mutations.disconnect();cancelAnimationFrame(pending);
-            window.document.removeEventListener('pointerover',point);window.document.removeEventListener('click',point);
-            window.document.removeEventListener('scroll',schedule,true);window.removeEventListener('resize',resized);
-          };
-          select(index);
-          return true;
         },
         siteMenu() {
           try {
@@ -493,7 +409,6 @@ extension PageJavaScriptEvaluating {
           return true;
         },
         clear() {
-          if (stopReading) { const stop=stopReading;stopReading=null;stop(); }
           const name='interlinked-'+documentID;
           globalThis.CSS?.highlights?.delete(name);globalThis.CSS?.highlights?.delete(name+'-current');
           window.document.getElementById(name)?.remove();
@@ -576,16 +491,6 @@ extension PageJavaScriptEvaluating {
     static func clear<View: PageJavaScriptEvaluating>(_ view: View?) {
         guard let view else { return }
         Task { _ = try? await view.interlinkedEvaluate("globalThis.interlinkedContext?.clear()", arguments: [:]) }
-    }
-
-    static func annotate<View: PageJavaScriptEvaluating>(
-        _ findings: [PassageDecisions.Finding], document: String, view: View
-    ) async -> Bool {
-        let items = findings.map { ["id": $0.passage.id, "text": $0.passage.text,
-                                    "label": $0.signal.label, "explanation": $0.signal.explanation] }
-        return (try? await execute(view,
-            body: "return globalThis.interlinkedContext?.annotate(items, document, dark) ?? false;",
-            arguments: ["items": items, "document": document, "dark": view.rendersDark])) as? Bool ?? false
     }
 
     private static func execute<View: PageJavaScriptEvaluating>(

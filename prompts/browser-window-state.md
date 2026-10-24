@@ -14,7 +14,7 @@ Open a PR on `ojowwalker77/interlinked` that closes #32 and #36. Branch from `ma
 
 ## Issue #32: same-document navigations wipe page intelligence state
 
-On a single-page app, an internal route change or `#anchor` click clears intelligence metadata, labels, grants, and filter results, and closes an open Find or Reading panel. `loaded` never follows because there is no commit, so `current` stays nil until the next full load: sharing is unavailable, find falls back to "Exact find only", reading checks are unavailable, and filtered nodes stay hidden while the count shows 0.
+On a single-page app, an internal route change or `#anchor` click clears intelligence metadata, labels, grants, and filter results, and closes an open Find panel. `loaded` never follows because there is no commit, so `current` stays nil until the next full load: sharing is unavailable, find falls back to "Exact find only", and filtered nodes stay hidden while the count shows 0.
 
 Fix: only call `assistance.committed` and `usefulInfo.committed` from `chromiumPageDidCommit`, not from `update(_:)`. For a URL change with no commit, keep the existing state and refresh whatever depends on the URL (the line text, favicon sync, history record) as `update` already does. If some consumer needs the new URL in `metadata[pane]`, update that field in place rather than clearing. Add a unit test in `InterlinkedTests` that drives a same-document URL change through the delegate and asserts the metadata, grants, filter results, and open panel survive, and a second test that a real commit still resets them.
 

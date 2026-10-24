@@ -198,21 +198,14 @@ final class JevServiceTests: XCTestCase {
         let response = try await provider.decide(request)
         XCTAssertEqual(response.answers["page"]?.choice, "a")
     }
-    func testCriticalReadingDefaultsToOnRequestAndPersistsAlwaysOn() throws {
-        let name = "CriticalReadingPreferences-" + UUID().uuidString
+    func testJevDefaultsToOnAndPersistsOff() throws {
+        let name = "JevPreferences-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
 
         XCTAssertTrue(JevPreferences.enabled(in: defaults))
-        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .onRequest)
-        XCTAssertFalse(AutomaticReadingConsent.accepted(in: defaults))
-
         defaults.set(false, forKey: JevPreferences.enabledKey)
-        CriticalReadingMode.automatic.save(to: defaults)
-        AutomaticReadingConsent.accept(in: defaults)
         XCTAssertFalse(JevPreferences.enabled(in: defaults))
-        XCTAssertEqual(CriticalReadingMode(defaults: defaults), .automatic)
-        XCTAssertTrue(AutomaticReadingConsent.accepted(in: defaults))
     }
 }
 
@@ -273,7 +266,7 @@ final class IntelligenceAuditStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: location.directory) }
         let started = Date(timeIntervalSince1970: 1_700_000_000)
         let original = IntelligenceAuditStore(file: location.file, now: { started })
-        original.begin(source: .jev, action: "Critical reading")
+        original.begin(source: .jev, action: "Meaning search")
         original.flush()
 
         let recovered = IntelligenceAuditStore(
@@ -460,11 +453,9 @@ final class BrowserIntelligenceTests: XCTestCase {
         )
         let found = try await intelligence.meaningFind(query: "passage", passages: passages)
         XCTAssertEqual(found.value.scores.count, 200)
-        let reading = try await intelligence.criticalReading(passages)
-        XCTAssertEqual(reading.value.count, 200)
         let calls = await jev.calls
-        // 4 meaning batches of 60, one first-result pick, 5 reading batches of 40.
-        XCTAssertEqual(calls, 4 + 1 + 5)
+        // 4 meaning batches of 60 and one first-result pick.
+        XCTAssertEqual(calls, 4 + 1)
     }
 
     func testRelatedGroupsUseJevOnAboutsNotApple() async throws {
@@ -609,7 +600,6 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertEqual(extract.passages.map(\.text), ["first words of this passage", "third words of this passage"])
         let repeated = [PagePassage(id: "a", text: "one"), PagePassage(id: "a", text: "two")]
         XCTAssertEqual(Set(PassageDecisions.scoreRequest(query: "q", passages: repeated).questions.keys), ["a"])
-        XCTAssertEqual(Set(PassageDecisions.readingRequest(repeated).questions.keys), ["a"])
         XCTAssertEqual(Set(PassageDecisions.bestMatchRequest(query: "q", passages: repeated).questions.keys), ["best_match"])
     }
     func testIntentScoresRankSupportBeforeIncidentalWordStems() throws {
@@ -645,60 +635,6 @@ final class BrowserIntelligenceTests: XCTestCase {
         XCTAssertTrue(PassageDecisions.matches(response, passages: shortlist).isEmpty)
     }
 
-    func testReadingUsesFixedCategoriesAndPreservesEvidenceWithoutTrainingExamples() {
-        let passages = [PagePassage(id: "p1", text: "You must buy now or disappoint everyone."), PagePassage(id: "p2", text: "The study reports a range of estimates.")]
-        let request = PassageDecisions.readingRequest(passages)
-        XCTAssertEqual(Set(request.questions["p1"]!.criteria.keys), Set(PassageDecisions.Signal.allCases.map(\.rawValue)))
-        XCTAssertEqual(request.questions["p1"]?.instructions, PassageDecisions.classificationInstruction + " Passage ID: p1.")
-        XCTAssertFalse(request.state.contains("examples"))
-        let response = JevResponse(answers: ["p1": JevAnswer(type: "choice", choice: "pressure", confidence: 0.8), "p2": JevAnswer(type: "choice", choice: "uncertain", confidence: 0.9)])
-        let found = PassageDecisions.findings(response, passages: passages)
-        XCTAssertEqual(found.count, 1); XCTAssertEqual(found.first?.passage, passages[0]); XCTAssertEqual(found.first?.signal, .pressure)
-    }
-    func testReadingSuppressesShortFragmentsLowConfidenceAndWeakChoiceProbabilities() {
-        let passages = [
-            PagePassage(id: "fragment", text: "Irresistível."),
-            PagePassage(id: "weak", text: "Order by Friday to receive free standard shipping."),
-            PagePassage(id: "split", text: "This wording contains enough words to inspect responsibly."),
-            PagePassage(id: "clear", text: "Buy now or prove that you do not care about your family.")
-        ]
-        let response = JevResponse(answers: [
-            "fragment": JevAnswer(type: "choice", choice: "loaded", confidence: 0.99, probabilities: ["loaded": 0.99]),
-            "weak": JevAnswer(type: "choice", choice: "pressure", confidence: PassageDecisions.displayConfidence - 0.01),
-            "split": JevAnswer(type: "choice", choice: "loaded", confidence: 0.9, probabilities: ["loaded": PassageDecisions.displayCategoryProbability - 0.01, "none": 0.51]),
-            "clear": JevAnswer(type: "choice", choice: "pressure", confidence: 0.4, probabilities: ["pressure": 0.55, "certainty": 0.4, "none": 0.05])
-        ])
-        XCTAssertEqual(PassageDecisions.findings(response, passages: passages), [.init(passage: passages[3], signal: .pressure)])
-        XCTAssertTrue(PassageDecisions.classificationInstruction.contains("Default to none"))
-        XCTAssertTrue(PassageDecisions.Signal.pressure.explanation.contains("normal deadline"))
-        XCTAssertEqual(PassageDecisions.Signal.financialInterest.rawValue, "financial_interest")
-        XCTAssertEqual(PassageDecisions.Signal.financialInterest.label, "Possible financial interest")
-        XCTAssertTrue(PassageDecisions.Signal.financialInterest.explanation.contains("concrete reason"))
-        XCTAssertEqual(PassageDecisions.Signal.politicalBias.rawValue, "political_bias")
-        XCTAssertEqual(PassageDecisions.Signal.politicalBias.label, "Possible political bias")
-        XCTAssertTrue(PassageDecisions.Signal.politicalBias.explanation.contains("partisan political framing"))
-    }
-    func testReadingFiltersFragmentsAndSendsWholePassages() {
-        let passages = [PagePassage(id: "short", text: "Too good."),
-                        PagePassage(id: "heading", text: "A meaningful heading with enough words", role: "heading")] +
-            (0..<85).map { PagePassage(id: "p\($0)", text: String(repeating: "substantive ", count: 200), role: "passage") }
-        let candidates = PassageDecisions.readingCandidates(passages)
-        XCTAssertEqual(candidates.count, 85)
-        let request = PassageDecisions.readingRequest([candidates[0]])
-        XCTAssertTrue(request.state.contains(candidates[0].text))
-        XCTAssertEqual(Set(request.questions.keys), ["p0"])
-    }
-    func testReadingCanFlagLikelyAIGeneratedTextWithoutPresentingLowConfidenceGuesses() {
-        let passages = [PagePassage(id: "likely", text: "A passage with repeated model-like patterns."),
-                        PagePassage(id: "weak", text: "A short ordinary sentence.")]
-        let response = JevResponse(answers: [
-            "likely": JevAnswer(type: "choice", choice: "ai_generated", confidence: 0.75),
-            "weak": JevAnswer(type: "choice", choice: "ai_generated", confidence: PassageDecisions.displayConfidence - 0.01)
-        ])
-        let found = PassageDecisions.findings(response, passages: passages)
-        XCTAssertEqual(found, [.init(passage: passages[0], signal: .aiGenerated)])
-        XCTAssertTrue(PassageDecisions.Signal.aiGenerated.explanation.contains("not proof"))
-    }
     func testBrowserHistoryRecordsVisitsAcrossPagesAndPersists() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }
