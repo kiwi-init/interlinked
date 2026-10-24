@@ -119,8 +119,28 @@ struct WorkInput: NSViewRepresentable {
 
         override func becomeFirstResponder() -> Bool {
             let accepted = super.becomeFirstResponder()
-            if accepted { beginEditing() }
+            if accepted {
+                (currentEditor() as? NSTextView).map(Self.plain)
+                beginEditing()
+            }
             return accepted
+        }
+
+        /// Addresses, searches, and find queries are not prose. Checking one
+        /// cost about 84 ms on the main thread each time the field gave up
+        /// focus, and smart quotes and dashes rewrote what was typed. Every
+        /// text field in the browser window is a WorkInput, so the window's
+        /// shared field editor can stay this way.
+        private static func plain(_ editor: NSTextView) {
+            editor.isContinuousSpellCheckingEnabled = false
+            editor.isGrammarCheckingEnabled = false
+            editor.isAutomaticSpellingCorrectionEnabled = false
+            editor.isAutomaticQuoteSubstitutionEnabled = false
+            editor.isAutomaticDashSubstitutionEnabled = false
+            editor.isAutomaticTextReplacementEnabled = false
+            // The switches above leave language detection on, which was most
+            // of the cost.
+            editor.enabledTextCheckingTypes = 0
         }
 
         override func viewDidMoveToWindow() {
