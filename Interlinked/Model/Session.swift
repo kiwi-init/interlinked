@@ -112,7 +112,9 @@ struct Session: Codable {
         return copy
     }
 
-    /// Decode old workspaces without losing any of their web pages.
+    /// Decode old workspaces without losing any of their web pages. A split
+    /// view of web pages comes back as it was. Any other split, from layouts
+    /// that also held terminals or more panes, becomes one tab per page.
     func browserOnly() -> Session {
         var copy = self
         let saved = Surfaces.restore(surfaces)
@@ -120,7 +122,15 @@ struct Session: Codable {
         copy.tabs = []
         copy.next_tab = max(next_tab, (tabs.map { $0.id.rawValue }.max() ?? 0) + 1)
         for tab in tabs {
-            let pages = tab.root.leaves().filter { saved.kind($0) == .browser || saved.kind($0) == .blank }
+            let leaves = tab.root.leaves()
+            let pages = leaves.filter { saved.kind($0) == .browser || saved.kind($0) == .blank }
+            if pages.count > 1, pages.count == leaves.count, pages.count <= Tab.maxPanes {
+                copy.tabs.append(tab)
+                if case .split(let id, _, _, _) = tab.root {
+                    copy.next_split = max(copy.next_split, id.rawValue + 1)
+                }
+                continue
+            }
             let primary = pages.contains(tab.active) ? tab.active : pages.first
             for page in pages {
                 let id = page == primary ? tab.id : TabID(copy.next_tab)
@@ -131,10 +141,10 @@ struct Session: Codable {
             }
         }
         copy.active = copy.tabs.firstIndex { $0.active == selected } ?? min(active, max(0, copy.tabs.count - 1))
-        copy.surfaces = copy.tabs.map {
-            SurfacePair(pane: $0.active, surface: Surface(kind: .browser, line: saved.line($0.active)))
+        copy.surfaces = copy.tabs.flatMap(\.panes).map {
+            SurfacePair(pane: $0, surface: Surface(kind: .browser, line: saved.line($0)))
         }
-        copy.next_pane = max(next_pane, (copy.tabs.map { $0.active.rawValue }.max() ?? 0) + 1)
+        copy.next_pane = max(next_pane, (copy.tabs.flatMap(\.panes).map(\.rawValue).max() ?? 0) + 1)
         return copy
     }
 
