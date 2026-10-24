@@ -51,13 +51,12 @@ enum Control {
         "overview search QUERY|submit QUERY",
         "suggestions [state|next|prev|submit|open N]",
         "find [state|open [text]|query text|next|prev|meaning on|off|close]",
-        "reading [state|open|toggle|close]",
         "share-page [state|request|allow|remember|cancel|stop]",
         "history [state|open|close|toggle|visit N|remove N|remove-site N|clear [hour|today|all]]",
         "downloads [state|open|close|toggle|clear|cancel N|reveal N|allow-notifications]",
         "quick-switch [state|show|hide|toggle|select N]",
         "useful-info [state|copy address|copy contact [N]|contact open|close]",
-        "onboarding step STEP|feature FEATURE on|off|accept-reading|decline-reading",
+        "onboarding step STEP|feature FEATURE on|off",
         "settings [state|get NAME|set NAME VALUE|open [pane]|close|remove-jev-key|clear-ai-cache|update-lists]",
         "sites [state|remove GROUP SITE [KIND]|remove-all GROUP]",
         "activity [state|export PATH|clear]",
@@ -74,7 +73,6 @@ enum Control {
         "site-menu",
         "useful-info",
         "find",
-        "reading",
         "share-page",
         "history",
         "downloads",
@@ -128,7 +126,6 @@ enum Control {
             return ok()
 
         case "find": return find(words, workspace)
-        case "reading": return reading(words, workspace)
         case "share-page": return sharePage(words, workspace)
         case "history": return history(words, workspace)
         case "downloads": return downloads(words, workspace)
@@ -278,12 +275,10 @@ enum Control {
             let a = workspace.assistance
             return json(["enabled": a.enabled, "key_saved": a.hasKey, "jev_ready": a.hasJevAccess, "status": a.status,
                          "matches": a.matches.map { ["id": $0.id, "text": $0.text] },
-                         "findings": a.findings.map { ["id": $0.id, "category": $0.signal.rawValue] },
                          "label": workspace.activePane.map { a.label($0, url: workspace.surfaces.line($0)) } ?? "",
                          "origin": TrustedOrigin.inspect(workspace.currentPageURL)?.displayHost ?? "",
                          "origin_transport": TrustedOrigin.inspect(workspace.currentPageURL)?.transport.rawValue ?? "",
                          "can_share": a.canShare,
-                         "automatic_reading": a.automaticReadingEnabled,
                          "granted_origins": a.originGrants.records,
                          "last_decision": a.lastDecisionStatus, "find_scores": a.findScores])
 
@@ -291,10 +286,6 @@ enum Control {
             workspace.assistance.openFind()
             workspace.assistance.query = words.joined(separator: " ")
             workspace.assistance.findChanged()
-            return ok()
-
-        case "check-wording":
-            workspace.assistance.openReading()
             return ok()
 
         case "close-page-tool":
@@ -620,14 +611,8 @@ enum Control {
                     return error("onboarding feature takes a feature from the scene and on or off")
                 }
                 workspace.binding(for: feature).wrappedValue = on
-            case "accept-reading":
-                guard workspace.onboardingAsksReadingConsent else { return error("onboarding is not asking about Always on") }
-                workspace.onboardingAsksReadingConsent = false
-                workspace.assistance.acceptAutomaticReading()
-            case "decline-reading":
-                workspace.onboardingAsksReadingConsent = false
             case "state": break
-            default: return error("onboarding takes open, close, reset, step STEP, feature FEATURE on|off, accept-reading, decline-reading, or state")
+            default: return error("onboarding takes open, close, reset, step STEP, feature FEATURE on|off, or state")
             }
             return json(([
                 "open": workspace.onboarding.pane != nil,
@@ -720,7 +705,6 @@ enum Control {
             "downloads_panel": workspace.downloads.panelOpen,
             "quick_switch": workspace.quickSwitchOpen,
             "page_tool": panelName(workspace.assistance.panel),
-            "reading_panel": workspace.assistance.readingPanelOpen,
             "contact_open": workspace.usefulInfo.contactOpen,
             "site_menu": [
                 "shown": workspace.siteMenu != nil,
@@ -753,7 +737,6 @@ enum Control {
             "side_pane": side,
             "steps": guide.progress.scene.steps.map(\.rawValue),
             "features": features,
-            "asks_reading_consent": workspace.onboardingAsksReadingConsent,
             "always_show": guide.alwaysShow,
         ]
     }

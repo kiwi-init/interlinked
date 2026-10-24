@@ -37,7 +37,7 @@ private extension SettingsDestination {
         switch self {
         case .general: ["site menu", "header", "search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
-        case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "critical reading", "always on", "labels", "meaning search"]
+        case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "labels", "meaning search"]
         case .sites: ["permissions", "camera", "microphone", "location", "grants", "exceptions", "revoke", "blocking off", "kept light", "navigation"]
         case .privacy: ["history", "browsing history", "sharing screen mode", "screen sharing", "presenting", "blur", "cache", "activity", "audit", "export", "clear", "data", "signed in", "passwords"]
         }
@@ -334,10 +334,8 @@ private struct PagesSettingsPane: View {
 
 private struct IntelligenceSettingsPane: View {
     @Environment(Workspace.self) private var workspace
-    @Environment(\.openWindow) private var openWindow
     @State private var key = ""
     @State private var keyMessage = ""
-    @State private var confirmAutomaticReading = false
 
     var body: some View {
         @Bindable var assistant = workspace.assistance
@@ -345,7 +343,7 @@ private struct IntelligenceSettingsPane: View {
             Section {
                 ModelStatusRow(
                     symbol: "sparkles", tint: .purple, title: "Jev",
-                    detail: "Meaning search, Critical Reading, and related-tab grouping.",
+                    detail: "Meaning search and related-tab grouping.",
                     status: jevStatus(assistant)
                 )
                 ModelStatusRow(
@@ -395,47 +393,6 @@ private struct IntelligenceSettingsPane: View {
                 Text("Jev")
             }
 
-            Section {
-                LabeledContent {
-                    Picker("Run Critical Reading", selection: Binding(
-                        get: { assistant.criticalReadingMode },
-                        set: { mode in
-                            if mode == .automatic && assistant.criticalReadingMode != .automatic {
-                                confirmAutomaticReading = true
-                            } else {
-                                if mode != .automatic { assistant.automaticReadingConsented = false }
-                                assistant.criticalReadingMode = mode
-                                assistant.configure()
-                            }
-                        }
-                    )) {
-                        ForEach(CriticalReadingMode.allCases) { mode in Text(mode.label).tag(mode) }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
-                    .pointingHandCursor()
-                    .accessibilityIdentifier("critical-reading-mode")
-                } label: {
-                    Text("Run Critical Reading")
-                    Text(assistant.automaticReadingEnabled
-                         ? "Checks every page you open, without asking. Page → Stop Sharing This Page pauses a site."
-                         : "Checks a page when you choose Critical Reading in the toolbox.")
-                }
-
-                LabeledContent {
-                    Button("Show Definitions…") { openWindow(id: "about") }
-                        .pointingHandCursor()
-                } label: {
-                    Text("How it decides")
-                    Text("\(PassageDecisions.Signal.allCases.count - 2) fixed, dictionary-based signals. They cannot be edited.")
-                }
-            } header: {
-                Text("Critical Reading")
-            } footer: {
-                SettingsFooter("An anti-bias aid, not a fact checker. Read the highlighted source and decide for yourself.")
-            }
-
             Section("Apple Intelligence") {
                 Toggle(isOn: workspace.binding(for: .appleIntelligence)) {
                     Text("Use Apple Intelligence")
@@ -454,17 +411,6 @@ private struct IntelligenceSettingsPane: View {
             }
         }
         .settingsPane()
-        .confirmationDialog(
-            "Turn on Always-on Critical Reading?",
-            isPresented: $confirmAutomaticReading,
-            titleVisibility: .visible
-        ) {
-            Button("Enable Always On") { workspace.assistance.acceptAutomaticReading() }
-                .accessibilityIdentifier("confirm-automatic-reading")
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(AutomaticReadingConsent.warning)
-        }
     }
 
     private func jevStatus(_ assistant: BrowserAssistance) -> (String, StatusBadge.Tone) {
@@ -618,7 +564,7 @@ private struct PrivacySettingsPane: View {
                 PrivacyFact(symbol: "person.crop.circle.badge.exclamationmark", title: "Signed-in pages are not detected",
                             detail: "Sharing a page while you are signed in sends what it shows, including messages or balances.")
                 PrivacyFact(symbol: "hand.tap.fill", title: "Nothing runs without you",
-                            detail: "Jev reads a page only when you ask, or on every page once you turn on Always on and accept its warning.")
+                            detail: "Jev reads a page only when you search it by meaning.")
                 LabeledContent {
                     Button("Read Full Details…") { openWindow(id: "about") }
                         .pointingHandCursor()

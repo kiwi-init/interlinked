@@ -2,7 +2,7 @@
 
 The relay keeps the OpenRouter key out of the macOS app. TestFlight supplies an App Store-signed `AppTransaction`; the relay verifies that signature and the `computer.interlinked` bundle ID before it accepts a Jev request.
 
-It stores only a SHA-256 request hash and the Jev response in a local SQLite database for five days. It does not store the page URL, page text, query, signed App Transaction, or OpenRouter key. Identical Critical Reading checks and generated tab-name decisions can therefore share a result across testers without a URL-based tracking database.
+It stores only a SHA-256 request hash and the Jev response in a local SQLite database for five days. It does not store the page URL, page text, query, signed App Transaction, or OpenRouter key. Identical meaning searches can therefore share a result across testers without a URL-based tracking database.
 
 Required deployment configuration:
 

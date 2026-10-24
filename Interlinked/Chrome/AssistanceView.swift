@@ -14,7 +14,7 @@ struct AssistanceView: View {
         @Bindable var assistant = assistant
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(assistant.panel == .find ? "Find in page" : assistant.panel == .reading ? "Critical reading" : "Share this page")
+                Text(assistant.panel == .find ? "Find in page" : "Share this page")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button { assistant.closePanel() } label: { Image(systemName: "xmark") }
@@ -45,10 +45,9 @@ struct AssistanceView: View {
                         .font(.system(size: 10)).foregroundStyle(.primary)
                 }
                 Text(assistant.status).foregroundStyle(.primary).lineLimit(3)
-            case .reading: EmptyView()
             case .permission:
                 Text(assistant.origin.isEmpty ? "Page unavailable" : assistant.origin).lineLimit(1).fontWeight(.medium)
-                Text("Jev uses OpenRouter and TypeSafe to evaluate this page's title, description, labels, and readable page text for each search or reading check. Form fields, password pages, and cookies are excluded. A grant covers this site origin. Sharing this visit ends when you quit; remembering the site keeps the grant until you revoke it.")
+                Text("Jev uses OpenRouter and TypeSafe to evaluate this page's title, description, labels, and readable page text for each search. Form fields, password pages, and cookies are excluded. A grant covers this site origin. Sharing this visit ends when you quit; remembering the site keeps the grant until you revoke it.")
                 Text("Interlinked can't tell whether you're signed in. If you are, this page's text, including messages, account details, or balances shown on it, goes to Jev too.")
                     .fontWeight(.semibold)
                     .foregroundStyle(Color(red: 0.82, green: 0.38, blue: 0.08))
@@ -97,73 +96,60 @@ struct Toolbox: View {
     var palette: Palette
     private var assistant: BrowserAssistance { workspace.assistance }
     private var expanded: Bool {
-        hovering || workspace.rightCommandKeyHeld || assistant.panel == .find || assistant.readingPanelOpen
+        hovering || workspace.rightCommandKeyHeld || assistant.panel == .find
     }
     private var menuWidth: CGFloat { assistant.panel == .find ? 400 : 250 }
-    private var menuRows: CGFloat {
-        CGFloat(assistant.criticalReadingMode == .onRequest ? 3 : 2)
-    }
+    private let menuRows: CGFloat = 2
     private var collapsedWidth: CGFloat { workspace.sharingScreenMode ? 136 : 108 }
-    private var width: CGFloat {
-        if assistant.readingPanelOpen { return 340 }
-        return expanded ? menuWidth : collapsedWidth
-    }
-    private var height: CGFloat {
-        if assistant.readingPanelOpen { return 176 }
-        return expanded ? 44 + menuRows * 40 : 44
-    }
+    private var width: CGFloat { expanded ? menuWidth : collapsedWidth }
+    private var height: CGFloat { expanded ? 44 + menuRows * 40 : 44 }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if assistant.readingPanelOpen {
-                ToolboxReadingPanel(palette: palette)
-                    .transition(.opacity)
-            } else {
-                if expanded {
-                    PageTools(palette: palette)
-                    .frame(width: menuWidth)
-                    .padding(.bottom, 44)
-                    .transition(.opacity)
-                }
+            if expanded {
+                PageTools(palette: palette)
+                .frame(width: menuWidth)
+                .padding(.bottom, 44)
+                .transition(.opacity)
+            }
 
-                if expanded {
-                    Button {
-                        workspace.settingsDestination = .general
-                        openSettings()
-                    } label: {
-                        ToolboxRowLabel(
-                            title: "Settings",
-                            symbol: "gearshape",
-                            shortcut: workspace.toolboxShortcutLabel(.settings)
-                        )
-                        .frame(width: menuWidth, height: 44, alignment: .leading)
-                    }
-                    .buttonStyle(.pointing)
-                    .font(.system(size: 12, weight: .medium))
-                    .accessibilityIdentifier("toolbox-settings-button")
-                } else {
-                    HStack(spacing: 0) {
-                        if workspace.sharingScreenMode {
-                            // Always visible while it is on, so it is never forgotten.
-                            Image(systemName: "eye.slash.fill")
-                                .foregroundStyle(palette.accent)
-                                .frame(width: 28, height: 44)
-                                .padding(.leading, 8)
-                                .help("Sharing Screen Mode is on · ⇧⌘S")
-                        }
-                        Image(systemName: "wrench.and.screwdriver")
-                            .frame(width: workspace.sharingScreenMode ? 28 : 44, height: 44)
-                        Text("Toolbox")
-                            .font(.system(size: 12, weight: .medium))
-                            .padding(.leading, workspace.sharingScreenMode ? 6 : 0)
-                            .padding(.trailing, 16)
-                    }
-                    .frame(width: collapsedWidth, height: 44, alignment: .trailing)
-                    .contentShape(Rectangle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(workspace.sharingScreenMode ? "Toolbox, Sharing Screen Mode on" : "Toolbox")
-                    .accessibilityHint("Hover or hold right Command to show page tools")
+            if expanded {
+                Button {
+                    workspace.settingsDestination = .general
+                    openSettings()
+                } label: {
+                    ToolboxRowLabel(
+                        title: "Settings",
+                        symbol: "gearshape",
+                        shortcut: workspace.toolboxShortcutLabel(.settings)
+                    )
+                    .frame(width: menuWidth, height: 44, alignment: .leading)
                 }
+                .buttonStyle(.pointing)
+                .font(.system(size: 12, weight: .medium))
+                .accessibilityIdentifier("toolbox-settings-button")
+            } else {
+                HStack(spacing: 0) {
+                    if workspace.sharingScreenMode {
+                        // Always visible while it is on, so it is never forgotten.
+                        Image(systemName: "eye.slash.fill")
+                            .foregroundStyle(palette.accent)
+                            .frame(width: 28, height: 44)
+                            .padding(.leading, 8)
+                            .help("Sharing Screen Mode is on · ⇧⌘S")
+                    }
+                    Image(systemName: "wrench.and.screwdriver")
+                        .frame(width: workspace.sharingScreenMode ? 28 : 44, height: 44)
+                    Text("Toolbox")
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.leading, workspace.sharingScreenMode ? 6 : 0)
+                        .padding(.trailing, 16)
+                }
+                .frame(width: collapsedWidth, height: 44, alignment: .trailing)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(workspace.sharingScreenMode ? "Toolbox, Sharing Screen Mode on" : "Toolbox")
+                .accessibilityHint("Hover or hold right Command to show page tools")
             }
         }
         .frame(width: width, height: height, alignment: .bottomTrailing)
@@ -423,32 +409,6 @@ private struct DownloadRow: View {
     }
 }
 
-private struct ToolboxReadingPanel: View {
-    @Environment(Workspace.self) private var workspace
-    var palette: Palette
-    private var assistant: BrowserAssistance { workspace.assistance }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ToolboxPanelHeader(title: "Critical Reading", close: assistant.closePanel)
-            HStack(spacing: 8) {
-                if assistant.busy { ProgressView().controlSize(.small) }
-                Text(assistant.status)
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.textDim)
-                    .lineLimit(3)
-            }
-            Text("Sends this page's readable text to Jev, including anything shown while you're signed in.")
-                .font(.system(size: 10))
-                .foregroundStyle(palette.textDim)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .buttonStyle(.pointing)
-        .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
 private struct ToolboxPanelHeader: View {
     var title: String
     var close: () -> Void
@@ -501,16 +461,6 @@ struct PageTools: View {
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             }
 
-            if assistant.criticalReadingMode == .onRequest {
-                toolboxButton("Critical Reading", symbol: "text.magnifyingglass", shortcut: .reading) {
-                    workspace.downloads.closePanel()
-                    assistant.panel == .reading ? assistant.closePanel() : assistant.openReading()
-                }
-                .accessibilityLabel("Critical reading")
-                .accessibilityIdentifier("page-reading-button")
-                .help(assistant.panel == .reading ? assistant.status : "Review wording in this page")
-            }
-
             toolboxButton(workspace.sharingScreenMode ? "Sharing Screen Mode On" : "Sharing Screen Mode",
                           symbol: workspace.sharingScreenMode ? "eye.slash.fill" : "eye.slash",
                           shortcut: .sharingScreen) {
@@ -527,7 +477,6 @@ struct PageTools: View {
         .foregroundStyle(palette.text)
         .onChange(of: assistant.byMeaning) { _, _ in assistant.findChanged() }
         .animation(reduceMotion ? nil : Metrics.morph, value: open)
-        .animation(reduceMotion ? nil : Metrics.morph, value: assistant.criticalReadingMode)
     }
 
     private var findButton: some View {

@@ -165,7 +165,6 @@ final class ToolboxShortcutTests: XCTestCase {
     func testToolboxUsesConventionalMacShortcuts() {
         XCTAssertEqual(ToolboxShortcut.find.label, "⌘F")
         XCTAssertEqual(ToolboxShortcut.settings.label, "⌘,")
-        XCTAssertEqual(ToolboxShortcut.reading.label, "")
     }
 }
 

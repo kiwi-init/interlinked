@@ -3,7 +3,7 @@ import XCTest
 final class IntelligencePromptTests: XCTestCase {
     func testEveryFeatureHasAVisibleDefaultAndCorrectProvider() {
         XCTAssertEqual(IntelligencePromptFeature.features(for: .appleIntelligence).count, 3)
-        XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 4)
+        XCTAssertEqual(IntelligencePromptFeature.features(for: .jev).count, 3)
         for feature in IntelligencePromptFeature.allCases {
             XCTAssertFalse(feature.title.isEmpty)
             XCTAssertFalse(feature.defaultText.isEmpty)
@@ -23,20 +23,6 @@ final class IntelligencePromptTests: XCTestCase {
         )
         XCTAssertFalse(IntelligencePromptPreferences.isCustomized(feature, defaults: defaults))
         XCTAssertTrue(feature.defaultText.contains("one-or-two-sentence description"))
-    }
-
-    func testCriticalReadingDefinitionsAreLockedAndDictionaryBased() {
-        XCTAssertEqual(
-            IntelligencePromptPreferences.rendered(
-                .jevCriticalReading,
-                values: ["passage_id": "p1"]
-            ),
-            PassageDecisions.classificationInstruction + " Passage ID: p1."
-        )
-        XCTAssertTrue(PassageDecisions.Signal.loaded.explanation.hasPrefix("Loaded language:"))
-        XCTAssertTrue(PassageDecisions.Signal.pressure.explanation.hasPrefix("Pressure:"))
-        XCTAssertTrue(PassageDecisions.Signal.opinion.explanation.hasPrefix("Opinion:"))
-        XCTAssertTrue(PassageDecisions.classificationInstruction.contains("dictionary definitions"))
     }
 
     func testRuntimeVariablesRenderInsideTheShippedPrompt() {

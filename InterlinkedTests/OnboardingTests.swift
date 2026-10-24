@@ -46,16 +46,14 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(progress.record(.intelligenceNext))
         XCTAssertEqual(progress.scene.id, 5)
         XCTAssertEqual(progress.scene.page, .slowMornings)
-        XCTAssertFalse(progress.record(.readCritically), "Find for me comes first")
         XCTAssertTrue(progress.record(.foundWithMeaning))
-        XCTAssertTrue(progress.record(.readCritically))
         XCTAssertEqual(progress.scene.id, 6)
         XCTAssertEqual(progress.scene.features, [.sharingScreen, .usefulInfo])
         XCTAssertEqual(progress.scene.page, .slowMornings)
         XCTAssertTrue(progress.record(.extrasNext))
         XCTAssertEqual(progress.scene.id, 7)
         XCTAssertNil(progress.scene.page, "the last scene closes the page beside it")
-        XCTAssertEqual(progress.scene.features, [.criticalReadingAlwaysOn, .adBlocking, .darkPages])
+        XCTAssertEqual(progress.scene.features, [.adBlocking, .darkPages])
         XCTAssertTrue(progress.record(.finished))
         XCTAssertNil(progress.next)
     }
@@ -76,6 +74,12 @@ final class OnboardingTests: XCTestCase {
         store.reset()
         XCTAssertEqual(OnboardingStore(defaults: defaults).progress, OnboardingProgress())
         XCTAssertFalse(OnboardingStore(defaults: defaults).dismissed)
+    }
+
+    func testProgressSavedWithARemovedStepStillLoads() throws {
+        let saved = #"{"done":["openedTab","cameBack","readCritically"]}"#
+        let progress = try JSONDecoder().decode(OnboardingProgress.self, from: Data(saved.utf8))
+        XCTAssertEqual(progress.done, [.openedTab, .cameBack])
     }
 
     func testThePinnedTabIsAlwaysCommandOne() {

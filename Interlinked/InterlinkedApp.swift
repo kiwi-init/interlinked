@@ -59,7 +59,6 @@ struct InterlinkedApp: App {
                     .keyboardShortcut("g", modifiers: .command)
                 Button("Find Previous") { workspace.assistance.moveMatch(-1) }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
-                Button("Critical Reading…") { workspace.assistance.openReading() }
                 Button("Share This Page with Jev…") { workspace.assistance.requestSharing() }
                 Button("Stop Sharing This Page") { workspace.assistance.revokePage() }
                     .disabled(!workspace.assistance.shared)

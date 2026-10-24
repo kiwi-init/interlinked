@@ -802,7 +802,7 @@ final class Workspace {
         if downloads.panelOpen { downloads.closePanel() }
         if usefulInfo.contactOpen { usefulInfo.contactOpen = false }
         if siteMenuSearching || siteMenuExpanded != nil { collapseSiteMenuChrome() }
-        if assistance.panel != nil && assistance.panel != .reading { assistance.closePanel() }
+        if assistance.panel != nil { assistance.closePanel() }
         hosts.touch(pane)
         if activePane != pane {
             activatePane(pane)
@@ -992,11 +992,10 @@ final class Workspace {
         restoreFocus()
     }
 
-    /// Find for me or Critical Reading came back with something to show.
-    func noteOnboardingResult(meaning: Bool, reading: Bool) {
+    /// Find for me came back with something to show.
+    func noteOnboardingFound() {
         guard onboardingTab != nil else { return }
-        if meaning { onboarding.record(.foundWithMeaning) }
-        if reading { onboarding.record(.readCritically) }
+        onboarding.record(.foundWithMeaning)
     }
 
     /// The deliberate way out. It will not open at launch again.
@@ -1062,22 +1061,6 @@ final class Workspace {
                 self.usefulInfo.showsAddress = on
                 self.usefulInfo.showsContact = on
             })
-        case .criticalReadingAlwaysOn:
-            Binding(get: { self.assistance.automaticReadingEnabled }, set: { on in
-                if on {
-                    // The same informed consent Settings asks for, before anything is sent.
-                    if self.assistance.automaticReadingConsented {
-                        self.assistance.criticalReadingMode = .automatic
-                        self.assistance.configure()
-                    } else {
-                        self.onboardingAsksReadingConsent = true
-                    }
-                } else {
-                    self.assistance.automaticReadingConsented = false
-                    self.assistance.criticalReadingMode = .onRequest
-                    self.assistance.configure()
-                }
-            })
         case .adBlocking:
             Binding(get: { self.builtIns.blockingEnabled }, set: { self.builtIns.blockingEnabled = $0 })
         case .darkPages:
@@ -1106,17 +1089,12 @@ final class Workspace {
         NSWorkspace.shared.open(url)
     }
 
-    /// Set while the Onboarding page shows the Always-on privacy warning.
-    var onboardingAsksReadingConsent = false
-
     /// Features a fresh onboarding introduces start off, so switching them
     /// on is part of learning them.
     private func switchOffOnboardingFeatures() {
         usesSiteMenu = false
         builtIns.blockingEnabled = false
         builtIns.darkMode = .off
-        assistance.automaticReadingConsented = false
-        assistance.criticalReadingMode = .onRequest
         sharingScreenMode = false
         usefulInfo.showsAddress = false
         usefulInfo.showsContact = false
