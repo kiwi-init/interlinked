@@ -3,11 +3,14 @@ import Foundation
 enum BrowserRecoveryCause: String, Equatable {
     case memoryPressure
     case webContentTerminated
+    /// Left alone long enough to sleep. It wakes by itself when shown.
+    case idle
 
     var title: String {
         switch self {
         case .memoryPressure: return "This tab was paused"
         case .webContentTerminated: return "This page stopped responding"
+        case .idle: return "This tab was asleep"
         }
     }
 
@@ -17,12 +20,14 @@ enum BrowserRecoveryCause: String, Equatable {
             return "Interlinked freed this background tab after macOS reported memory pressure. Restore it when you need it."
         case .webContentTerminated:
             return "The website process ended. Reload the page to continue."
+        case .idle:
+            return "Interlinked put this tab to sleep after you left it alone for a while."
         }
     }
 
     var action: String {
         switch self {
-        case .memoryPressure: return "Restore Page"
+        case .memoryPressure, .idle: return "Restore Page"
         case .webContentTerminated: return "Reload Page"
         }
     }
@@ -159,6 +164,15 @@ enum TabMemoryPolicy {
             retained = max(3, Int(ceil(Double(liveCount) * 0.40)))
         }
         return max(0, liveCount - retained)
+    }
+
+    /// Background tabs left alone this long go to sleep.
+    static let idleSleepAfter: TimeInterval = 30 * 60
+
+    /// Unprotected tabs untouched for at least `after`, oldest first.
+    static func idleCandidates(_ candidates: [TabMemoryCandidate], now: Date,
+                               after: TimeInterval = idleSleepAfter) -> [PaneID] {
+        orderedDiscardCandidates(candidates.filter { now.timeIntervalSince($0.lastUsed) >= after })
     }
 
     static func orderedDiscardCandidates(_ candidates: [TabMemoryCandidate]) -> [PaneID] {

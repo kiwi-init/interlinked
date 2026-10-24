@@ -38,6 +38,7 @@ enum Control {
         "forward [pane]",
         "reload",
         "recover [pane]",
+        "sleep-tabs [minutes]",
         "copy-url",
         "click pane",
         "escape",
@@ -170,6 +171,15 @@ enum Control {
                 workspace.recoverPane(pane)
                 return ok()
             }
+
+        case "sleep-tabs":
+            // What the idle pass does every few minutes, now, for tabs left
+            // alone at least this long.
+            guard let minutes = words.first.map(Double.init) ?? TabMemoryPolicy.idleSleepAfter / 60, minutes >= 0 else {
+                return error("sleep-tabs takes a number of minutes")
+            }
+            Task { @MainActor in await workspace.hosts.sleepIdleTabs(workspace: workspace, after: minutes * 60) }
+            return ok()
 
         case "copy-url":
             return workspace.copyCurrentPageURL() ? ok() : error("no web page to copy")
