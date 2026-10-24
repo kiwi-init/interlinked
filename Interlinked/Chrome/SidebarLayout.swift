@@ -1,16 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The conventional layout: open pages down a glass sidebar, glass toolbar
-/// groups above the page, and nothing over the page itself, which stands off
-/// the frosted window on its own shadow. Each group morphs in place: the
-/// sidebar into History or Downloads, the address field into results or the
-/// site's connection, and the toolbar's tools into Find.
+/// Laid out like a terminal multiplexer: open pages down a glass sidebar, and
+/// each page a card of its own, lifted off the frosted window, with its own
+/// header in place of a toolbar across the window. Each group morphs in
+/// place: the sidebar into History or Downloads, the address field into
+/// results or the site's connection, and a header's tools into Find.
 struct SidebarLayout<Page: View>: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.colorScheme) private var scheme
     var palette: Palette
     @ViewBuilder var page: () -> Page
     /// The width while the divider is dragged, before it settles.
@@ -37,38 +35,20 @@ struct SidebarLayout<Page: View>: View {
                     .overlay(alignment: .trailing) { resizer }
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            ZStack(alignment: .top) {
-                page()
-                    .clipShape(RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous))
-                    // A hairline keeps a dark page's edge, and a shadow lifts
-                    // the page off the window.
-                    .overlay {
-                        RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
-                            .strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
-                            .allowsHitTesting(false)
-                    }
-                    .background {
-                        RoundedRectangle(cornerRadius: SidebarMetrics.radius, style: .continuous)
-                            .fill(palette.pane)
-                            .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.16), radius: 18, y: 6)
-                            .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.08), radius: 2, y: 1)
-                    }
-                    .padding(.top, SidebarMetrics.toolbar)
-                    .padding([.trailing, .bottom], 8)
-                    .padding(.leading, workspace.sidebarCollapsed ? 8 : 0)
-                // The toolbar row stands in for a titlebar.
-                Color.clear
-                    .frame(height: SidebarMetrics.toolbar)
-                    .windowDragArea()
-                PageToolbar(palette: palette)
-            }
-            // A gap shows the sidebar's edge.
-            .padding(.leading, workspace.sidebarCollapsed ? 0 : 8)
+            // The pages, each its own card (`SplitLayout`), with a gap that
+            // shows the sidebar's edge and the window around them.
+            page()
+                .padding(8)
         }
         .overlay(alignment: .topLeading) {
             if workspace.sidebarCollapsed { peek }
         }
         .animation(reduceMotion ? nil : Metrics.morph, value: workspace.sidebarCollapsed)
+        .onAppear { workspace.beginEmptyPageEditingIfNeeded() }
+        .onChange(of: workspace.activePane) { _, _ in workspace.beginEmptyPageEditingIfNeeded() }
+        .onChange(of: workspace.isEmptyActivePage) { _, isEmpty in
+            if isEmpty { workspace.beginEmptyPageEditingIfNeeded() }
+        }
     }
 
     /// Hidden, the sidebar slides back over the page while the pointer rests
@@ -148,11 +128,11 @@ extension View {
 }
 
 enum SidebarMetrics {
-    /// The toolbar row, centered on the window buttons when the sidebar is
-    /// tucked away.
-    static let toolbar: CGFloat = 44
-    /// The sidebar's top row holds the window buttons.
-    static let header: CGFloat = 28
+    /// The sidebar's top row and each page's header, centered on the window
+    /// buttons, which sit in one or the other.
+    static let header: CGFloat = 30
+    /// A header's buttons and address field.
+    static let headerControl: CGFloat = 26
     static let row: CGFloat = 30
     static let icon: CGFloat = 20
     static let control: CGFloat = 32
@@ -212,16 +192,21 @@ private struct TabSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer()
+            HStack(spacing: 2) {
+                // The window buttons sit here, drawn by AppKit.
+                Color.clear
+                    .frame(width: WindowButtonPlacement.slot.width - 6)
+                    .allowsHitTesting(false)
+                SidebarToggle(palette: palette)
+                Spacer(minLength: 0)
                 Button(action: workspace.newPage) {
-                    Image(systemName: "plus").frame(width: 28, height: SidebarMetrics.header)
+                    ToolbarIcon(symbol: "plus", palette: palette)
                 }
-                .buttonStyle(.pointing)
                 .help("New page · ⌘T")
                 .accessibilityLabel("New page")
                 .accessibilityIdentifier("sidebar-new-page")
             }
+            .buttonStyle(.pointing)
             .padding(.horizontal, 6)
             .frame(height: SidebarMetrics.header)
             .background { Color.clear.windowDragArea() }
@@ -251,6 +236,14 @@ private struct TabSidebar: View {
     private var tabs: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
+                Text("Tabs")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(palette.textDim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+                    .accessibilityAddTraits(.isHeader)
                 ForEach(Array(workspace.tabs.enumerated()), id: \.element.id) { index, tab in
                     SidebarTabRow(tab: tab, palette: palette)
                         .overlay(alignment: .top) { dropLine(before: index) }
@@ -285,43 +278,75 @@ private struct TabSidebar: View {
         }
     }
 
+    /// The page's copy buttons, then one row of icons along the bottom.
     private var tools: some View {
         VStack(spacing: 2) {
             if let found = workspace.usefulInfo.active {
                 SidebarUsefulInfo(found: found, palette: palette)
             }
-            Divider().padding(.vertical, 4)
-            Button(action: workspace.togglePageHistory) {
-                SidebarRowLabel(title: "History", symbol: "clock.arrow.circlepath", palette: palette)
-            }
-            .accessibilityIdentifier("sidebar-history")
-            Button(action: workspace.toggleDownloads) {
-                SidebarRowLabel(title: "Downloads",
-                                symbol: workspace.downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
-                                detail: workspace.downloads.activeCount > 0 ? "\(workspace.downloads.activeCount)" : nil,
+            HStack(spacing: 2) {
+                Button(action: workspace.togglePageHistory) {
+                    ToolbarIcon(symbol: "clock.arrow.circlepath", palette: palette)
+                }
+                .help("History")
+                .accessibilityLabel("History")
+                .accessibilityIdentifier("sidebar-history")
+                Button(action: workspace.toggleDownloads) {
+                    ToolbarIcon(symbol: workspace.downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
                                 palette: palette)
+                        .overlay(alignment: .topTrailing) {
+                            if workspace.downloads.activeCount > 0 {
+                                Text("\(workspace.downloads.activeCount)")
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                    .monospacedDigit()
+                                    .padding(.horizontal, 3)
+                                    .background(palette.accent, in: Capsule())
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                }
+                .help("Downloads")
+                .accessibilityLabel(workspace.downloads.activeCount > 0 ? "Downloads, \(workspace.downloads.activeCount) active" : "Downloads")
+                .accessibilityIdentifier("sidebar-downloads")
+                Button { workspace.sharingScreenMode.toggle() } label: {
+                    ToolbarIcon(symbol: workspace.sharingScreenMode ? "eye.slash.fill" : "eye.slash", palette: palette)
+                }
+                .foregroundStyle(workspace.sharingScreenMode ? palette.accent : palette.text)
+                .help("Sharing Screen Mode\(workspace.sharingScreenMode ? ", on" : ""): blur emails, phone numbers, card and document numbers, keys, and passwords on every page · \(ToolboxShortcut.sharingScreen.label)")
+                .accessibilityLabel(workspace.sharingScreenMode ? "Sharing Screen Mode, on" : "Sharing Screen Mode")
+                .accessibilityIdentifier("sidebar-sharing-screen")
+                Spacer(minLength: 0)
+                Button {
+                    workspace.settingsDestination = .general
+                    workspace.openSettings?()
+                } label: {
+                    ToolbarIcon(symbol: "gearshape", palette: palette)
+                }
+                .help("Settings · \(ToolboxShortcut.settings.label)")
+                .accessibilityLabel("Settings")
+                .accessibilityIdentifier("sidebar-settings")
             }
-            .accessibilityIdentifier("sidebar-downloads")
-            Button { workspace.sharingScreenMode.toggle() } label: {
-                SidebarRowLabel(title: "Sharing Screen Mode",
-                                symbol: workspace.sharingScreenMode ? "eye.slash.fill" : "eye.slash",
-                                detail: workspace.sharingScreenMode ? "On" : nil, palette: palette)
-            }
-            .foregroundStyle(workspace.sharingScreenMode ? palette.accent : palette.text)
-            .help("Blur emails, phone numbers, card and document numbers, keys, and passwords on every page · \(ToolboxShortcut.sharingScreen.label)")
-            .accessibilityIdentifier("sidebar-sharing-screen")
-            Button {
-                workspace.settingsDestination = .general
-                workspace.openSettings?()
-            } label: {
-                SidebarRowLabel(title: "Settings", symbol: "gearshape", palette: palette)
-            }
-            .help("Settings · \(ToolboxShortcut.settings.label)")
-            .accessibilityIdentifier("sidebar-settings")
+            .padding(.top, 4)
         }
         .buttonStyle(.pointing)
         .padding(.horizontal, 6)
-        .padding(.bottom, 8)
+        .padding(.bottom, 6)
+    }
+}
+
+/// Hides the sidebar from its top row, or brings it back from the first
+/// page's header.
+private struct SidebarToggle: View {
+    @Environment(Workspace.self) private var workspace
+    var palette: Palette
+
+    var body: some View {
+        Button(action: workspace.toggleSidebar) {
+            ToolbarIcon(symbol: "sidebar.left", palette: palette)
+        }
+        .help("\(workspace.sidebarCollapsed ? "Show" : "Hide") sidebar · ⌃⌘S")
+        .accessibilityLabel(workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar")
+        .accessibilityIdentifier("toolbar-sidebar")
     }
 }
 
@@ -401,16 +426,23 @@ private struct SidebarTabRow: View {
         }
         .overlay(alignment: .trailing) {
             if hovering || active {
-                Button { workspace.closeTab(tab.id) } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
+                Menu {
+                    Button("Rename") { _ = workspace.editTab(tab.id) }
+                    Button("Close Tab") { workspace.closeTab(tab.id) }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 11, weight: .semibold))
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
+                .menuStyle(.button)
                 .buttonStyle(.pointing)
+                .menuIndicator(.hidden)
+                .fixedSize()
                 .padding(.trailing, 5)
-                .help("Close tab · ⌘W")
-                .accessibilityLabel("Close \(workspace.title(tab))")
+                .help("Rename or close")
+                .accessibilityLabel("More for \(workspace.title(tab))")
+                .accessibilityIdentifier("sidebar-tab-more-\(tab.id.rawValue)")
             }
         }
         .onHover { hovering = $0 }
@@ -459,82 +491,116 @@ private struct SidebarUsefulInfo: View {
     }
 }
 
-// MARK: - Toolbar
+// MARK: - Page header
 
-private struct PageToolbar: View {
+/// A page's own header inside its card, as each pane has in a terminal
+/// multiplexer. The page with focus carries navigation, the address and its
+/// tools. The other side of a split shows its title, and a click there brings
+/// it in. With the sidebar tucked away, the first page's header makes room for
+/// the window buttons and the button that brings the sidebar back.
+struct PageHeader: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var pane: PaneID
     var palette: Palette
+    var holdsWindowButtons: Bool
 
-    private var pane: PaneID? { workspace.activePane }
+    private var focused: Bool { workspace.activePane == pane }
     private var finding: Bool { workspace.assistance.panel == .find }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            HStack(spacing: 0) {
-                control(workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar", symbol: "sidebar.left",
-                        id: "toolbar-sidebar", action: workspace.toggleSidebar)
-                    .help("\(workspace.sidebarCollapsed ? "Show" : "Hide") sidebar · ⌃⌘S")
-                control("Back", symbol: "chevron.left", id: "browser-back") {
-                    workspace.discardLine()
-                    if let pane { workspace.hosts.existingBrowser(pane)?.goBack() }
-                }
-                .disabled(pane.map { !workspace.hosts.canGoBack[$0, default: false] } ?? true)
-                control("Forward", symbol: "chevron.right", id: "browser-forward") {
-                    workspace.discardLine()
-                    if let pane { workspace.hosts.existingBrowser(pane)?.goForward() }
-                }
-                .disabled(pane.map { !workspace.hosts.canGoForward[$0, default: false] } ?? true)
-                control("Reload", symbol: "arrow.clockwise", id: "browser-reload") {
-                    if let pane { workspace.hosts.existingBrowser(pane)?.reload() }
-                }
-                .disabled(workspace.currentPageURL == nil)
+        HStack(alignment: .top, spacing: 2) {
+            if holdsWindowButtons {
+                // The window buttons sit here, drawn by AppKit.
+                Color.clear
+                    .frame(width: WindowButtonPlacement.slot.width - 6, height: SidebarMetrics.headerControl)
+                    .allowsHitTesting(false)
+                SidebarToggle(palette: palette)
             }
-            .padding(.horizontal, 4)
-            .frame(height: SidebarMetrics.control)
-            .modifier(PageGlass(radius: SidebarMetrics.control / 2))
-
-            AddressField(palette: palette)
-
-            Group {
-                if finding {
-                    ToolbarFindField(palette: palette)
-                        .frame(width: 320)
-                } else {
-                    HStack(spacing: 0) {
-                        control("Find for me", symbol: "magnifyingglass", id: "page-search-button",
-                                action: workspace.assistance.openFind)
-                            .help("Find in page · \(ToolboxShortcut.find.label)")
-                        shareControl
-                        control(workspace.isSplit ? "Move side page to its own tab" : "Split view",
-                                symbol: workspace.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
-                                id: "split-view-button", action: workspace.toggleSplitView)
-                            .help(workspace.isSplit ? "Move the other page to its own tab · ⌘\\" : "Split view · ⌘\\")
-                    }
+            if focused {
+                navigation
+                // Results and the site's connection open downward, over the page.
+                AddressField(palette: palette)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
+                tools
+            } else {
+                Button { workspace.clickPane(pane) } label: {
+                    HStack(spacing: 6) {
+                        SiteIcon(pane: pane, palette: palette, framed: false, size: 16)
+                        Text(workspace.title(pane))
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.textDim)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 6)
+                    .frame(height: SidebarMetrics.headerControl)
+                    .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Switch to \(workspace.title(pane))")
             }
-            .frame(height: SidebarMetrics.control)
-            .modifier(PageGlass(radius: SidebarMetrics.control / 2))
+            if workspace.isSplit {
+                control("Close this side", symbol: "xmark", id: "page-close-\(pane.rawValue)") {
+                    workspace.closePane(pane)
+                }
+                .help("Close this side · ⌘W")
+            }
         }
         .buttonStyle(.pointing)
         .foregroundStyle(palette.text)
-        // Tucked away, the sidebar leaves the window buttons on the toolbar.
-        .padding(.leading, workspace.sidebarCollapsed ? Metrics.trafficLightsWidth + 8 : 8)
-        .padding(.trailing, 8)
-        .padding(.top, (SidebarMetrics.toolbar - SidebarMetrics.control) / 2)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 6)
+        .padding(.top, (SidebarMetrics.header - SidebarMetrics.headerControl) / 2)
+        // A fixed height, so an open address field spills over the page
+        // instead of pushing it down.
+        .frame(height: SidebarMetrics.header, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { Color.clear.windowDragArea() }
         .animation(reduceMotion ? nil : Metrics.morph, value: finding)
-        .onAppear { workspace.beginEmptyPageEditingIfNeeded() }
-        .onChange(of: workspace.activePane) { _, _ in workspace.beginEmptyPageEditingIfNeeded() }
-        .onChange(of: workspace.isEmptyActivePage) { _, isEmpty in
-            if isEmpty { workspace.beginEmptyPageEditingIfNeeded() }
+    }
+
+    private var navigation: some View {
+        HStack(spacing: 0) {
+            control("Back", symbol: "chevron.left", id: "browser-back") {
+                workspace.discardLine()
+                workspace.hosts.existingBrowser(pane)?.goBack()
+            }
+            .disabled(!workspace.hosts.canGoBack[pane, default: false])
+            control("Forward", symbol: "chevron.right", id: "browser-forward") {
+                workspace.discardLine()
+                workspace.hosts.existingBrowser(pane)?.goForward()
+            }
+            .disabled(!workspace.hosts.canGoForward[pane, default: false])
+            control("Reload", symbol: "arrow.clockwise", id: "browser-reload") {
+                workspace.hosts.existingBrowser(pane)?.reload()
+            }
+            .disabled(workspace.currentPageURL == nil)
+        }
+    }
+
+    @ViewBuilder
+    private var tools: some View {
+        if finding {
+            ToolbarFindField(palette: palette)
+                .frame(maxWidth: 300)
+                .modifier(PageGlass(radius: SidebarMetrics.headerControl / 2))
+        } else {
+            HStack(spacing: 0) {
+                control("Find for me", symbol: "magnifyingglass", id: "page-search-button",
+                        action: workspace.assistance.openFind)
+                    .help("Find in page · \(ToolboxShortcut.find.label)")
+                shareControl
+                control(workspace.isSplit ? "Move side page to its own tab" : "Split view",
+                        symbol: workspace.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
+                        id: "split-view-button", action: workspace.toggleSplitView)
+                    .help(workspace.isSplit ? "Move the other page to its own tab · ⌘\\" : "Split view · ⌘\\")
+            }
         }
     }
 
     @ViewBuilder
     private var shareControl: some View {
-        let url = pane.flatMap(workspace.hosts.existingBrowser)?.url
+        let url = workspace.hosts.existingBrowser(pane)?.url
         if let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             ShareLink(item: url) {
                 ToolbarIcon(symbol: "square.and.arrow.up", palette: palette)
@@ -559,7 +625,8 @@ private struct PageToolbar: View {
     }
 }
 
-/// A toolbar button's icon, lit under the pointer to show what a click will hit.
+/// A header or sidebar button's icon, lit under the pointer to show what a
+/// click will hit.
 private struct ToolbarIcon: View {
     @Environment(\.isEnabled) private var isEnabled
     @State private var hovering = false
@@ -569,7 +636,7 @@ private struct ToolbarIcon: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: 12, weight: .medium))
-            .frame(width: SidebarMetrics.control, height: SidebarMetrics.control)
+            .frame(width: SidebarMetrics.headerControl, height: SidebarMetrics.headerControl)
             .background(hovering && isEnabled ? palette.hover : .clear, in: Circle())
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
@@ -620,7 +687,7 @@ private struct AddressField: View {
                         }
                         .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
                         .padding(.horizontal, 6)
-                        .frame(height: 22)
+                        .frame(height: 20)
                         .background(palette.text.opacity(0.07), in: Capsule())
                         .contentShape(Capsule())
                     }
@@ -643,9 +710,9 @@ private struct AddressField: View {
                         .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
                 }
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 12)
-            .frame(height: SidebarMetrics.control)
+            .padding(.leading, 4)
+            .padding(.trailing, 10)
+            .frame(height: SidebarMetrics.headerControl)
 
             if identityOpen {
                 IdentityInspector(origin: origin, palette: palette)
@@ -657,7 +724,7 @@ private struct AddressField: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .modifier(PageGlass(radius: open ? SidebarMetrics.radius : SidebarMetrics.control / 2))
+        .modifier(PageGlass(radius: open ? SidebarMetrics.radius : SidebarMetrics.headerControl / 2))
         .animation(reduceMotion ? nil : Metrics.morph, value: open)
     }
 
@@ -698,7 +765,7 @@ private struct AddressField: View {
     }
 }
 
-/// Find for me, in the place of the tools that opened it.
+/// Find for me, in the place of the header tools that opened it.
 private struct ToolbarFindField: View {
     @Environment(Workspace.self) private var workspace
     var palette: Palette
@@ -717,7 +784,7 @@ private struct ToolbarFindField: View {
             WorkInput(text: $assistant.query, placeholder: "Find…", identifier: "page-find", fontSize: 12,
                       palette: palette, submit: { assistant.moveMatch(1) }, cancel: assistant.closePanel,
                       moveSelection: assistant.moveMatch)
-                .frame(minWidth: 70, maxWidth: .infinity).frame(height: 24)
+                .frame(minWidth: 70, maxWidth: .infinity).frame(height: 22)
                 .onChange(of: assistant.query) { _, _ in assistant.findChanged() }
             Group {
                 if assistant.busy { ProgressView().controlSize(.mini) }
@@ -726,11 +793,11 @@ private struct ToolbarFindField: View {
             }
             .font(.system(size: 10)).foregroundStyle(palette.textDim).frame(minWidth: 26)
             .help(assistant.status).accessibilityLabel(assistant.status)
-            Button { assistant.moveMatch(-1) } label: { Image(systemName: "chevron.up").frame(width: 22, height: 30) }
+            Button { assistant.moveMatch(-1) } label: { Image(systemName: "chevron.up").frame(width: 22, height: SidebarMetrics.headerControl) }
                 .accessibilityLabel("Previous match")
-            Button { assistant.moveMatch(1) } label: { Image(systemName: "chevron.down").frame(width: 22, height: 30) }
+            Button { assistant.moveMatch(1) } label: { Image(systemName: "chevron.down").frame(width: 22, height: SidebarMetrics.headerControl) }
                 .accessibilityLabel("Next match")
-            Button(action: assistant.closePanel) { Image(systemName: "xmark").frame(width: 22, height: 30) }
+            Button(action: assistant.closePanel) { Image(systemName: "xmark").frame(width: 22, height: SidebarMetrics.headerControl) }
                 .accessibilityLabel("Close find")
         }
         .padding(.horizontal, 6)

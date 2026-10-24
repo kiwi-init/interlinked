@@ -13,7 +13,7 @@ struct ContentView: View {
             }
             .overlay(alignment: .topTrailing) {
                 PageActions(palette: palette, available: geometry.size)
-                    .padding(.top, SidebarMetrics.toolbar)
+                    .padding(.top, SidebarMetrics.header + 8)
                     .padding(18)
             }
             .overlay {

@@ -1,6 +1,6 @@
 # Interlinked
 
-A minimal macOS browser. Your tabs run down a Liquid Glass sidebar, glass groups above the page hold navigation and the address, and the page stands off the frosted window with nothing floating over it. Settings > General > Tint colors the glass, or lets it follow your Mac's accent color. Built with SwiftUI and WebKit.
+A minimal macOS browser. Laid out like a terminal multiplexer: your tabs run down a Liquid Glass sidebar, and each page is its own card, standing off the frosted window, with a header of its own for navigation, the address and its tools. Nothing floats over the page. Settings > General > Tint colors the glass, or lets it follow your Mac's accent color. Built with SwiftUI and WebKit.
 
 ## Run
 
@@ -10,7 +10,7 @@ macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a t
 
 ## Browse
 
-The address field shows the page label beside a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. Click the label to edit the address. The sidebar lists every tab with its icon and label, and hovering one shows its close button. ⌘1 to ⌘9 pick tabs in sidebar order. ⌃⌘S or the toolbar's sidebar button tucks the sidebar away; drag its edge to resize it. Tucked away, it slides back over the page while the pointer rests on the window's left edge, and Escape or moving away puts it back. History, Downloads, Sharing Screen Mode, and Settings sit at the bottom of the sidebar.
+The address field shows the page label beside a separate trusted origin. Titles, favicons, and AI labels cannot replace the registrable domain. HTTP shows as Not Secure. Click the origin for the full URL and connection details. Click the label to edit the address. In split view each side has its own card and header; the other side's header shows its title, and clicking it brings that side in. The sidebar's top row holds the window buttons, the sidebar button and +. Under Tabs it lists every tab with its icon and label, and hovering one shows … to rename or close it. ⌘1 to ⌘9 pick tabs in sidebar order. ⌃⌘S or the sidebar button tucks the sidebar away, and the first page's header then holds the window buttons and the button that brings it back; drag the sidebar's edge to resize it. Tucked away, it slides back over the page while the pointer rests on the window's left edge, and Escape or moving away puts it back. History, Downloads, Sharing Screen Mode, and Settings are a row of icons along the bottom of the sidebar.
 
 Type an address or search words. Three Google suggestions appear below the address after a short pause. Click a suggestion, or use the arrow keys and Return. Return without a selection searches Google.
 
@@ -51,7 +51,7 @@ Interlinked does not load browser extensions. The features people install extens
 
 ## Find
 
-**Find for me** sits in the toolbar and turns its tools into a single-row find field. Match navigation, a count, and close stay in that row. Right-click the search icon to switch between meaning search and exact text. Search status is available on hover without adding another row.
+**Find for me** sits in the page's header and turns its tools into a single-row find field. Match navigation, a count, and close stay in that row. Right-click the search icon to switch between meaning search and exact text. Search status is available on hover without adding another row.
 
 Meaning search uses Jev to score a local shortlist of page elements by likely intent, including translations and synonyms, then pick a first result among the strongest scores. Extraction includes navigation links and headings so a useful destination can rank above an incidental word fragment in body text. Results highlight the original text in yellow. Hover over the count to check coverage or errors. Changed pages invalidate stale results.
 

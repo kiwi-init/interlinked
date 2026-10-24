@@ -48,14 +48,14 @@ struct WindowChrome: NSViewRepresentable {
     }
 }
 
-/// Centers the traffic lights in the sidebar's top row, or in the toolbar's
-/// when the sidebar is tucked away. AppKit puts them back in its own place
+/// Centers the traffic lights in the sidebar's top row, or in the first page's
+/// header when the sidebar is tucked away. AppKit puts them back in its own place
 /// whenever it lays out the titlebar, so this view sits in the titlebar and
 /// moves them again from its own layout, which runs after its superview's. In
 /// full screen they keep the system's place.
 final class WindowButtonPlacement: NSView {
     /// Where the buttons sit, from the window's top left.
-    static let slot = CGRect(x: 8, y: 8, width: 78, height: 28)
+    static let slot = CGRect(x: 8, y: 8, width: 78, height: SidebarMetrics.header)
 
     /// In full screen the titlebar moves to another window, so keep this one.
     private weak var browserWindow: NSWindow?
@@ -136,8 +136,8 @@ final class WindowButtonPlacement: NSView {
     }
 }
 
-/// Frosted glass in the window's free spaces, between the sidebar, the
-/// toolbar, and the page, like a Finder sidebar, washed with the tint.
+/// Frosted glass in the window's free spaces, around the sidebar and the
+/// pages, like a Finder sidebar, washed with the tint.
 /// Reduce Transparency keeps the plain pane color.
 struct WindowBackdrop: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
