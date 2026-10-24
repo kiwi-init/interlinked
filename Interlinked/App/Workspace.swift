@@ -68,7 +68,6 @@ final class Workspace {
     let assistance = BrowserAssistance()
     let downloads = DownloadCenter()
     let permissions = WebsitePermissionStore()
-    let navigationExceptions = NavigationExceptionStore()
     let browserHistory = BrowserHistoryStore()
     let builtIns = PageBuiltIns()
     let usefulInfo = UsefulInfo()
@@ -356,11 +355,12 @@ final class Workspace {
             try? FileManager.default.removeItem(at: support.appendingPathComponent(file))
         }
         UserDefaults.standard.removeObject(forKey: "newTab.savedSites")
-        // Critical Reading, Interlinked Menus, and the prompts of other removed
-        // AI features left these settings behind.
+        // Critical Reading, Interlinked Menus, the prompts of other removed
+        // AI features, and the navigation warnings left these settings behind.
         for key in ["jev.criticalReadingMode", "jev.automaticReadingConsent", "siteMenu.enabled",
                     "intelligence.prompt.jevCriticalReading", "intelligence.prompt.jevRelatedPages",
-                    "intelligence.prompt.appleNavigationCheck", "intelligence.prompt.appleSiteMenu"] {
+                    "intelligence.prompt.appleNavigationCheck", "intelligence.prompt.appleSiteMenu",
+                    "navigation-exceptions-v1"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
         builtIns.start(workspace: self)

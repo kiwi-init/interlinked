@@ -38,7 +38,7 @@ private extension SettingsDestination {
         case .general: ["search", "search provider", "search engine", "google", "duckduckgo", "bing", "brave", "ecosia", "suggestions", "local suggestions", "useful information", "address", "contact", "phone", "email", "copy", "downloads", "notifications"]
         case .pages: ["ads", "trackers", "blocking", "filter lists", "easylist", "ublock", "dark", "appearance", "theme"]
         case .intelligence: ["jev", "apple intelligence", "openrouter", "api key", "labels", "meaning search"]
-        case .sites: ["permissions", "camera", "microphone", "location", "grants", "exceptions", "revoke", "blocking off", "kept light", "navigation"]
+        case .sites: ["permissions", "camera", "microphone", "location", "grants", "revoke", "blocking off", "kept light"]
         case .privacy: ["history", "browsing history", "sharing screen mode", "screen sharing", "presenting", "blur", "cache", "activity", "audit", "export", "clear", "data", "signed in", "passwords"]
         }
     }
@@ -494,7 +494,6 @@ private struct SitesSettingsPane: View {
     private func groups() -> [(String, String, [Entry])] {
         let grants = workspace.assistance.originGrants
         let permissions = workspace.permissions
-        let exceptions = workspace.navigationExceptions
         let builtIns = workspace.builtIns
         return [
             ("Page text shared with Jev",
@@ -520,12 +519,6 @@ private struct SitesSettingsPane: View {
              builtIns.lightSites.sorted().map { site in
                  Entry(id: "light-" + site, site: site, detail: "Dark pages off",
                        revoke: { builtIns.removeLightSite(site) })
-             }),
-            ("Navigation exceptions", "Links to these sites open without the safety warning you already dismissed.",
-             exceptions.records.map { record in
-                 Entry(id: "exception-\(record.id)", site: host(record.key.origin),
-                       detail: record.key.reasons.joined(separator: " "),
-                       revoke: { exceptions.revoke(record.key) })
              })
         ]
     }

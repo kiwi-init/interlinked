@@ -26,7 +26,6 @@ extension PageJavaScriptEvaluating {
       const documentID = crypto.randomUUID?.()
         ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
       const ids = new WeakMap(), nodes = new Map(); let next = 0;
-      let lastLink;
       // Dark pages, whether darkened by Interlinked or dark by design, get a
       // deep amber mark with cream text, so the text never turns white on
       // yellow. A page Interlinked inverts turns the light mark into that
@@ -53,10 +52,6 @@ extension PageJavaScriptEvaluating {
         if (node.matches('video')) return clean(node.getAttribute('aria-label') || node.getAttribute('title')) || 'Video';
         return clean(node.innerText);
       };
-      document.addEventListener('pointerdown',event=>{
-        const link=event.target?.closest?.('a[href]');
-        lastLink=link ? {href:link.href,text:clean(link.innerText||link.getAttribute('aria-label')||link.title).slice(0,160),at:Date.now()} : null;
-      },true);
       globalThis.interlinkedContext = {
         metadata() {
           const meta = name => clean(document.querySelector('meta[name="'+name+'"],meta[property="'+name+'"]')?.content).slice(0,240);
@@ -99,12 +94,6 @@ extension PageJavaScriptEvaluating {
           }
           out.text=text.slice(0,8000);
           return out;
-        },
-        navigationLink(destination) {
-          if (!lastLink || Date.now()-lastLink.at>5000) return null;
-          try { if (new URL(lastLink.href,location.href).href!==new URL(destination,location.href).href) return null; }
-          catch { return null; }
-          return lastLink.text || null;
         },
         extract() {
           const root = document.body;
@@ -196,10 +185,6 @@ extension PageJavaScriptEvaluating {
     }
     static func extract<View: PageJavaScriptEvaluating>(_ view: View) async throws -> PageExtract {
         try await value(view, call: "return interlinkedContext.extract();", type: PageExtract.self)
-    }
-    static func navigationLinkText<View: PageJavaScriptEvaluating>(_ view: View, destination: URL) async -> String? {
-        (try? await execute(view, body: "return globalThis.interlinkedContext?.navigationLink(destination) ?? null;",
-                            arguments: ["destination": destination.absoluteString])) as? String
     }
     private static func value<T: Decodable, View: PageJavaScriptEvaluating>(
         _ view: View, call: String, type: T.Type

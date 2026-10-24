@@ -21,8 +21,8 @@ Additional local pages:
 
 Failed login, upload, download, or popup on these local pages is a release blocker. The manual matrix for Gmail, Docs, GitHub, Slack, OAuth, a video meeting, and one checkout flow is `COMPATIBILITY.md`. Do not commit account passwords or payment details.
 
-The popup section covers issue 12. GET and POST target-blank requests must open normal Interlinked tabs, report that `window.opener` is intact, and keep the POST body. The child Close button must close its tab. The user-initiated script popup may open after a navigation warning; the delayed script popup must be blocked.
+The popup section covers issue 12. GET and POST target-blank requests must open normal Interlinked tabs, report that `window.opener` is intact, and keep the POST body. The child Close button must close its tab. The user-initiated script popup must open; the delayed script popup must be blocked.
 
-The navigation section covers issue 22. The misleading link and cross-site redirect must show a warning before `Navigation completed` loads. Continuing can save an exact-origin, exact-warning exception, which can be revoked in Settings > Sites.
+The navigation section covers issue 22. The misleading link and the cross-site redirect must both load `Navigation completed` without a warning.
 
 The HTTP server binds only to loopback. Use `fixture` / `interlinked` for both authentication challenges. A client-certificate challenge needs a trusted TLS fixture configured to request a client identity; Interlinked cancels that unsupported flow and explains why in native UI.

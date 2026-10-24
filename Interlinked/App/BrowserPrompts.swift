@@ -171,32 +171,17 @@ enum BrowserPrompts {
         return decision
     }
 
-    static func confirmNavigation(
-        _ review: NavigationReview,
-        store: NavigationExceptionStore,
-        window: NSWindow?
-    ) async -> Bool {
+    /// Asks before a page hands a link to another app, as Safari does. A link
+    /// no app on this Mac opens does nothing.
+    static func confirmOpeningApp(for url: URL, window: NSWindow?) async -> Bool {
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return false }
+        let name = app.deletingPathExtension().lastPathComponent
         let alert = NSAlert()
-        let blocked = review.disposition == .block
-        alert.alertStyle = .warning
-        alert.messageText = blocked ? "Interlinked blocked this navigation" : "Check where this link is going"
-        var details = ["Destination: \(review.destinationOrigin)"]
-        if let source = review.sourceOrigin { details.append("From: \(source)") }
-        details.append(contentsOf: review.reasons.map(\.rawValue))
-        alert.informativeText = details.joined(separator: "\n\n")
-        alert.addButton(withTitle: blocked ? "OK" : "Go Back")
-        if !blocked { alert.addButton(withTitle: "Continue") }
-        if !blocked, review.exceptionKey != nil {
-            alert.showsSuppressionButton = true
-            alert.suppressionButton?.title = "Always allow this origin for these warnings"
-        }
-        guard !blocked else {
-            _ = await run(alert, window: window)
-            return false
-        }
-        let allowed = await run(alert, window: window) == .alertSecondButtonReturn
-        if allowed, alert.suppressionButton?.state == .on { store.allow(review) }
-        return allowed
+        alert.messageText = "Allow this page to open “\(name)”?"
+        alert.addButton(withTitle: "Allow")
+        let cancel = alert.addButton(withTitle: "Cancel")
+        cancel.keyEquivalent = "\u{1b}"
+        return await run(alert, window: window) == .alertFirstButtonReturn
     }
 
     static func showCertificateError(url: URL, error: String, window: NSWindow?) async {

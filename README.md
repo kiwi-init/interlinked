@@ -59,7 +59,7 @@ On supported Macs, Apple Intelligence generates one tab label from bounded title
 
 When AI replaces the deterministic page label with its selected label, the page handle briefly picks up a spectrum glow. Deterministic labels and names you type yourself do not trigger it.
 
-Interlinked includes deterministic navigation checks for active-content URLs, invalid ports, embedded credentials, HTTPS downgrades, encoded hostnames, unusual ports, cross-site forms, popups, downloads, redirect chains, and misleading link text.
+Links, redirects, forms, popups, and downloads open without a warning. Interlinked never opens a `javascript:` or `data:` address as a page, and asks before a page opens another app, as Safari does.
 
 Choose **Interlinked → About Interlinked** for a plain-language account of what the browser sends to AI services and what stays on your Mac.
 

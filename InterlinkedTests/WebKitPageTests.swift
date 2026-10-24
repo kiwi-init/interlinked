@@ -1,9 +1,8 @@
 import WebKit
 import XCTest
 
-/// Drives `WebKitPage` against a loopback server: the navigation reviews it
-/// asks for, tracking parameters, redirect chains, error pages, popups, dark
-/// pages, and content blocking.
+/// Drives `WebKitPage` against a loopback server: tracking parameters,
+/// redirects, app links, error pages, popups, dark pages, and content blocking.
 @MainActor
 final class WebKitPageTests: XCTestCase {
     private var server: TestHTTPServer!
@@ -28,76 +27,22 @@ final class WebKitPageTests: XCTestCase {
         ContentBlocker.shared.setEnabled(false, disabledSites: [])
     }
 
-    func testTrackingParametersAreStrippedBeforeTheReview() async throws {
+    func testTrackingParametersAreStrippedBeforeThePageLoads() async throws {
         let (page, delegate) = makePage()
         page.load(server.url("/page?utm_source=news&id=5&gclid=abc"))
         try await waitFor { delegate.finished.contains(self.server.url("/page?id=5")) }
-        XCTAssertEqual(delegate.reviews.map(\.destination), [server.url("/page?id=5")])
+        XCTAssertFalse(delegate.finished.contains { $0.query?.contains("utm_source") == true }, "\(delegate.finished)")
     }
 
-    func testCrossSiteRedirectIsReviewedFromWhereTheChainStarted() async throws {
-        server.route("/hop", .redirect(to: server.url("/page", host: "localhost")))
-        let (page, delegate) = makePage()
-        try await followLink(to: "/hop", in: page, delegate)
-        try await waitFor { delegate.finished.contains(self.server.url("/page", host: "localhost")) }
-        let redirects = delegate.reviews.filter { $0.kind == .redirect }
-        XCTAssertEqual(redirects, [.init(destination: server.url("/page", host: "localhost"), source: server.url("/hop"), kind: .redirect)])
-    }
-
-    func testSameSiteRedirectIsNotReviewedAsARedirect() async throws {
-        server.route("/hop", .redirect(to: server.url("/page")))
-        let (page, delegate) = makePage()
-        try await followLink(to: "/hop", in: page, delegate)
-        try await waitFor { delegate.finished.contains(self.server.url("/page")) }
-        XCTAssertFalse(delegate.reviews.contains { $0.kind == .redirect }, "\(delegate.reviews)")
-    }
-
-    func testDeclinedRedirectLeavesThePageWhereItWas() async throws {
-        server.route("/hop", .redirect(to: server.url("/page", host: "localhost")))
-        let (page, delegate) = makePage()
-        delegate.allows = { $0.kind != .redirect }
-        try await followLink(to: "/hop", in: page, delegate)
-        try await waitFor { delegate.reviews.contains { $0.kind == .redirect } }
-        try await Task.sleep(for: .milliseconds(500))
-        XCTAssertEqual(page.url, server.url("/links"))
-        XCTAssertFalse(delegate.finished.contains(server.url("/page", host: "localhost")))
-    }
-
-    func testScriptNavigationThatRedirectsToAnotherSiteIsReviewed() async throws {
-        // WebKit calls a page's own location change `other`, like an address
-        // Interlinked opens, but the page started it.
-        server.route("/hop", .redirect(to: server.url("/page", host: "localhost")))
-        let (page, delegate) = makePage()
-        page.load(server.url("/page"))
-        try await waitFor { delegate.finished.contains(self.server.url("/page")) }
-        _ = try await page.evaluateJavaScript("location.href = '/hop'")
-        try await waitFor { delegate.finished.contains(self.server.url("/page", host: "localhost")) }
-        XCTAssertTrue(delegate.reviews.contains(.init(destination: server.url("/page", host: "localhost"),
-                                                      source: server.url("/hop"), kind: .redirect)), "\(delegate.reviews)")
-    }
-
-    func testOpenedAddressThatRedirectsToAnotherSiteIsNotReviewedAsARedirect() async throws {
-        // Typed, or opened from another app: the person chose the address,
-        // and links from mail often bounce through a tracker on another site.
-        server.route("/hop", .redirect(to: server.url("/page?utm_source=mail&id=3", host: "localhost")))
-        let (page, delegate) = makePage()
-        page.load(server.url("/hop"))
-        try await waitFor { delegate.finished.contains(self.server.url("/page?id=3", host: "localhost")) }
-        XCTAssertFalse(delegate.reviews.contains { $0.kind == .redirect }, "\(delegate.reviews)")
-    }
-
-    func testRedirectRestartedWithoutTrackingParametersIsStillReviewedAsARedirect() async throws {
+    func testCrossSiteRedirectFromALinkLoadsWithoutAsking() async throws {
         server.route("/hop", .redirect(to: server.url("/page?utm_source=mail&id=7", host: "localhost")))
         let (page, delegate) = makePage()
         try await followLink(to: "/hop", in: page, delegate)
-        let clean = server.url("/page?id=7", host: "localhost")
-        try await waitFor { delegate.finished.contains(clean) }
-        XCTAssertTrue(delegate.reviews.contains(.init(destination: clean, source: server.url("/hop"), kind: .redirect)),
-                      "\(delegate.reviews)")
-        XCTAssertFalse(delegate.reviews.contains { $0.destination.query?.contains("utm_source") == true })
+        try await waitFor { delegate.finished.contains(self.server.url("/page?id=7", host: "localhost")) }
+        XCTAssertEqual(page.url, server.url("/page?id=7", host: "localhost"))
     }
 
-    func testSubframeLoadDuringARestartKeepsTheRestartedReview() async throws {
+    func testSubframeLoadDuringARestartLetsTheRestartFinish() async throws {
         let (page, delegate) = makePage()
         page.load(server.url("/page"))
         try await waitFor { delegate.finished.contains(self.server.url("/page")) }
@@ -113,18 +58,34 @@ final class WebKitPageTests: XCTestCase {
         }
         XCTAssertEqual(decisions, [.cancel, .allow])
         try await waitFor { delegate.finished.contains(clean) }
-        XCTAssertTrue(delegate.reviews.contains(.init(destination: clean, source: server.url("/page"), kind: .link)),
-                      "\(delegate.reviews)")
     }
 
-    func testFailedLoadShowsAnErrorPageWithoutAnotherReview() async throws {
+    func testActiveContentNeverOpensAsThePage() async throws {
+        let (page, _) = makePage()
+        var decisions: [WKNavigationActionPolicy] = []
+        for address in ["data:text/html,hello", "javascript:alert(1)"] {
+            page.webView(page.nativeView, decidePolicyFor: FakeAction(URL(string: address)!, in: FakeFrame(main: true),
+                                                                      type: .linkActivated)) { decisions.append($0) }
+        }
+        XCTAssertEqual(decisions, [.cancel, .cancel])
+    }
+
+    func testAppLinkGoesToTheAppAndLeavesThePage() async throws {
+        let mail = URL(string: "mailto:someone@example.com")!
+        let (page, delegate) = makePage()
+        try await followLink(to: mail.absoluteString, in: page, delegate)
+        try await waitFor { !delegate.apps.isEmpty }
+        XCTAssertEqual(delegate.apps, [mail])
+        XCTAssertEqual(page.url, server.url("/links"))
+    }
+
+    func testFailedLoadShowsAnErrorPage() async throws {
         server.route("/drop", .drop)
         let closed = server.url("/drop")
         let (page, delegate) = makePage()
         page.load(closed)
         try await waitFor { page.title == "Can’t open this page" }
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(delegate.reviews.filter { $0.destination == closed }.count, 1, "\(delegate.reviews)")
         XCTAssertEqual(delegate.failures.count, 1)
         XCTAssertFalse(delegate.finished.contains(closed), "The error page is not a page the rest of Interlinked reads")
         XCTAssertEqual(page.url, closed)
@@ -351,22 +312,13 @@ private final class FakeFrame: WKFrameInfo {
     override var isMainFrame: Bool { main }
 }
 
-/// Records what a page asks of Interlinked and answers every review with
-/// `allows`.
+/// Records what a page asks of Interlinked.
 @MainActor
 private final class RecordingPageDelegate: WebKitPageDelegate {
-    struct Review: Equatable, CustomStringConvertible {
-        let destination: URL
-        let source: URL?
-        let kind: NavigationKind
-        var description: String { "\(kind) \(destination) from \(source?.absoluteString ?? "nil")" }
-    }
-
-    var allows: (Review) -> Bool = { _ in true }
-    var reviews: [Review] = []
     var finished: [URL] = []
     var failures: [String] = []
     var popups: [URL] = []
+    var apps: [URL] = []
 
     func pageDidChange(_ page: WebKitPage) {}
     func pageDidCommit(_ page: WebKitPage) {}
@@ -377,18 +329,8 @@ private final class RecordingPageDelegate: WebKitPageDelegate {
     func page(_ page: WebKitPage, didUpdateDownload identifier: UInt32, fullPath: String, receivedBytes: Int64,
               totalBytes: Int64, percent: Int, complete: Bool, cancelled: Bool, interrupted: Bool) {}
 
-    func page(_ page: WebKitPage, decideNavigationTo destination: URL, source: URL?, kind: NavigationKind,
-              completion: @escaping (Bool) -> Void) -> Bool {
-        guard destination.scheme != "about" else { return false }
-        let review = Review(destination: destination, source: source, kind: kind)
-        reviews.append(review)
-        completion(allows(review))
-        return true
-    }
-
+    func page(_ page: WebKitPage, opensApp url: URL) { apps.append(url) }
     func page(_ page: WebKitPage, decidePermissionFor origin: String, kind: WebsitePermissionKind,
-              completion: @escaping (Bool) -> Void) { completion(false) }
-    func page(_ page: WebKitPage, decideDownloadFrom source: URL?, to destination: URL,
               completion: @escaping (Bool) -> Void) { completion(false) }
     func page(_ page: WebKitPage, didRejectCertificateAt url: URL, error: String) {}
     func pageWebContentProcessDidTerminate(_ page: WebKitPage) {}
