@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// One continuous shape holds the icon, address, open work, and voice feedback.
+/// One continuous shape holds the icon, address, and open work.
 struct PageHandle: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -23,8 +23,7 @@ struct PageHandle: View {
             panelOpen: workspace.identityOpen || historyOpen || downloadsOpen,
             hovering: hovering,
             editing: workspace.editing != nil,
-            isNewTab: isNewTab,
-            voiceActive: voiceCaption != nil
+            isNewTab: isNewTab
         )
     }
     private var trustedOrigin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
@@ -33,21 +32,6 @@ struct PageHandle: View {
         if workspace.onboarding.contains(pane) { return Workspace.onboardingTitle }
         let label = workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
         return label.isEmpty ? "Search or enter an address" : label
-    }
-    private var voiceCaption: String? {
-        switch workspace.voice.state {
-        case .idle: return nil
-        case .starting: return "Starting microphone…"
-        case .listening(let heard, _): return heard.isEmpty ? "Listening…" : heard
-        case .finishing(let heard): return heard.isEmpty ? "Finishing…" : heard
-        case .failed(let reason): return reason
-        case .heard(let said, let outcome):
-            switch outcome {
-            case .refused(let reason): return reason
-            case .notACommand: return "Command not recognized: \(said)"
-            default: return said
-            }
-        }
     }
     private var overviewSize: CGSize {
         CGSize(width: min(560, available.width - 36), height: min(400, available.height - 72))
@@ -71,7 +55,7 @@ struct PageHandle: View {
         CGSize(width: min(390, available.width - 36), height: min(404, available.height - 72))
     }
     private var handleBarHeight: CGFloat {
-        if morphed || workspace.editing != nil || voiceCaption != nil {
+        if morphed || workspace.editing != nil {
             return 44
         }
         return trustedOrigin == nil ? 44 : 52
@@ -84,7 +68,6 @@ struct PageHandle: View {
         if workspace.identityOpen { return identitySize }
         if historyOpen { return historySize }
         if downloadsOpen { return downloadsSize }
-        if voiceCaption != nil { return CGSize(width: min(340, available.width - 36), height: 44) }
         if showsTabs {
             let address = workspace.editing?.text ?? pane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? ""
             let text = address.isEmpty ? "Search or address" : address
@@ -269,11 +252,6 @@ struct PageHandle: View {
                 .accessibilityIdentifier("page-handle")
                 if workspace.editing != nil {
                     LineEditor(palette: palette)
-                        .padding(.trailing, 14)
-                } else if let caption = voiceCaption, !workspace.overviewOpen {
-                    Label(caption, systemImage: workspace.voice.state.isListening ? "waveform" : "mic")
-                        .font(.system(size: 12))
-                        .lineLimit(1)
                         .padding(.trailing, 14)
                 } else if workspace.identityOpen || historyOpen || downloadsOpen {
                     Spacer(minLength: 0)

@@ -72,21 +72,3 @@ final class ControlSettingTests: XCTestCase {
         XCTAssertNil(ControlSetting(rawValue: "usefulInfo.address"))
     }
 }
-
-final class SpokenCommandTests: XCTestCase {
-    /// Spoken commands reach the control channel. Debugging and settings
-    /// commands must never be one sentence away.
-    func testSpeechOnlyReachesTabCommands() {
-        let allowed: Set<String> = ["new-tab", "next-tab", "prev-tab", "close-tab", "clear", "focus-tab"]
-        let sentences = [
-            "open a new tab", "next tab", "previous page", "close", "clear it", "go to tab three",
-            "press escape", "open settings", "turn jev off", "quit", "key command w", "show downloads",
-            "open history", "set dark pages always", "share this page", "find in page",
-        ]
-        for sentence in sentences {
-            guard let command = Intent.command(sentence) else { continue }
-            let name = String(command.split(separator: " ").first ?? "")
-            XCTAssertTrue(allowed.contains(name), "'\(sentence)' ran \(command)")
-        }
-    }
-}

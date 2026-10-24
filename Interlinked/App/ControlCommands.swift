@@ -1,8 +1,7 @@
 import AppKit
 
 /// Control commands for the page tools, panels, Settings, and the window,
-/// so the app can be driven and inspected without the pointer. None of
-/// these are reachable by voice: `Intent.command` names only tab commands.
+/// so the app can be driven and inspected without the pointer.
 extension Control {
     // MARK: - Find and page sharing
 

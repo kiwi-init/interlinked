@@ -45,9 +45,8 @@ targets:
         NSCameraUsageDescription: Interlinked lets websites use the camera only after you approve their request.
         NSBluetoothAlwaysUsageDescription: Interlinked lets websites use nearby Bluetooth devices only after you approve their request.
         NSHumanReadableCopyright: Copyright © 2026 Jonatas Walker. All rights reserved.
-        NSMicrophoneUsageDescription: Interlinked uses the microphone for voice navigation and for websites you authorize.
+        NSMicrophoneUsageDescription: Interlinked lets websites use the microphone only after you approve their request.
         NSLocationWhenInUseUsageDescription: Interlinked lets websites use your location only after you approve their request.
-        NSSpeechRecognitionUsageDescription: Interlinked uses on-device speech recognition for voice navigation and browser commands.
         InterlinkedJevRelayURL: "$(INTERLINKED_JEV_RELAY_URL)"
         InterlinkedBlockerResourcesURL: "$(INTERLINKED_BLOCKER_RESOURCES_URL)"
         UTExportedTypeDeclarations:
@@ -111,7 +110,6 @@ targets:
     sources:
       - path: InterlinkedTests
       - path: Interlinked/Model
-      - path: Interlinked/App/Intent.swift
       - path: Interlinked/App/PageTextBridge.swift
     settings:
       base:
