@@ -88,7 +88,7 @@ struct AssistanceView: View {
     }
 }
 
-/// The page-sharing request appears top right, under the toolbar. History
+/// The page-sharing request appears top right, under the page's header. History
 /// and downloads open in the sidebar instead.
 struct PageActions: View {
     @Environment(Workspace.self) private var workspace

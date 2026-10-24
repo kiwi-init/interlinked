@@ -18,12 +18,15 @@ extension NSItemProvider {
     }
 }
 
-/// One page, or two side by side. Every page renders from the same list so the
-/// first keeps its identity, and its web view, when the second appears.
+/// One page, or two side by side, each a card with its own header. Every page
+/// renders from the same list so the first keeps its identity, and its web
+/// view, when the second appears.
 struct SplitLayout: View {
     @Environment(Workspace.self) private var workspace
     var tab: Tab
     var palette: Palette
+    /// The space between two cards, which also drags to resize them.
+    static let gap: CGFloat = 8
 
     @State private var dropSide: DropSide?
     @State private var width: CGFloat = 0
@@ -39,17 +42,12 @@ struct SplitLayout: View {
                 if index > 0 {
                     divider
                 }
-                BrowserPage(pane: pane, palette: palette)
+                PageCard(pane: pane, palette: palette,
+                         holdsWindowButtons: index == 0 && workspace.sidebarCollapsed,
+                         // The page the chrome is not following steps back a little.
+                         dimmed: panes.count > 1 && pane != tab.active)
                     // The first page takes its share; the second fills the rest.
                     .frame(width: index == 0 && panes.count == 2 ? firstWidth : nil)
-                    .overlay {
-                        // The page the chrome is not following steps back a little.
-                        if panes.count > 1 && pane != tab.active {
-                            Color.black.opacity(0.16)
-                                .allowsHitTesting(false)
-                                .transition(.opacity)
-                        }
-                    }
                     .animation(.easeOut(duration: 0.15), value: tab.active)
             }
         }
@@ -61,17 +59,16 @@ struct SplitLayout: View {
     }
 
     private var firstWidth: CGFloat {
-        max(0, (width - 1) * (dragRatio ?? tab.splitRatio))
+        max(0, (width - Self.gap) * (dragRatio ?? tab.splitRatio))
     }
 
-    /// A hairline with a wider grip that drags to resize the two pages.
+    /// The gap between the two cards, which drags to resize them.
     private var divider: some View {
-        Rectangle()
-            .fill(palette.hairline)
-            .frame(width: 1)
+        Color.clear
+            .frame(width: Self.gap)
             .overlay {
                 Color.clear
-                    .frame(width: 9)
+                    .frame(width: Self.gap)
                     .contentShape(Rectangle())
                     .cursorRegion(.resizeLeftRight)
                     .gesture(
@@ -150,6 +147,47 @@ private struct TabDropDelegate: DropDelegate {
 
     private func resolve(_ info: DropInfo) -> SplitLayout.DropSide {
         info.location.x < width / 2 ? .leading : .trailing
+    }
+}
+
+/// A page as its own card, lifted off the window on a shadow: its header, then
+/// the page.
+private struct PageCard: View {
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var scheme
+    var pane: PaneID
+    var palette: Palette
+    var holdsWindowButtons: Bool
+    var dimmed: Bool
+
+    var body: some View {
+        let radius = SidebarMetrics.radius
+        let card = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        VStack(spacing: 0) {
+            PageHeader(pane: pane, palette: palette, holdsWindowButtons: holdsWindowButtons)
+                // Above the page, so an open address field spills over it.
+                .zIndex(1)
+            BrowserPage(pane: pane, palette: palette)
+                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius,
+                                                  style: .continuous))
+                .overlay {
+                    if dimmed {
+                        Color.black.opacity(0.16)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+        }
+        .background {
+            card.fill(palette.pane)
+                .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.16), radius: 18, y: 6)
+                .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.08), radius: 2, y: 1)
+        }
+        // A hairline keeps a dark page's edge.
+        .overlay {
+            card.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
+                .allowsHitTesting(false)
+        }
     }
 }
 
