@@ -1,453 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// One continuous shape holds the icon, address, and open work.
-struct PageHandle: View {
-    @Environment(Workspace.self) private var workspace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var palette: Palette
-    var available: CGSize
-    private var hovering: Bool { workspace.quickSwitchOpen || workspace.leftCommandKeyHeld }
-    private var isNewTab: Bool { workspace.isEmptyActivePage }
-
-    private var pane: PaneID? { workspace.activePane }
-    private var downloads: DownloadCenter { workspace.downloads }
-    private var historyOpen: Bool { workspace.pageHistoryOpen && workspace.editing == nil }
-    private var downloadsOpen: Bool { downloads.panelOpen && workspace.editing == nil }
-    /// States that replace the handle's contents with a panel above its bar.
-    private var morphed: Bool { workspace.overviewOpen || workspace.identityOpen || historyOpen || downloadsOpen }
-    private var expanded: Bool { morphed || hovering || workspace.editing != nil || isNewTab }
-    private var showsTabs: Bool {
-        PageHandleExpansion.showsOpenWork(
-            overviewOpen: workspace.overviewOpen,
-            panelOpen: workspace.identityOpen || historyOpen || downloadsOpen,
-            hovering: hovering,
-            editing: workspace.editing != nil,
-            isNewTab: isNewTab
-        )
-    }
-    private var trustedOrigin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
-    private var identity: String {
-        guard let pane else { return "All tabs" }
-        if workspace.onboarding.contains(pane) { return Workspace.onboardingTitle }
-        let label = workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
-        return label.isEmpty ? "Search or enter an address" : label
-    }
-    private var overviewSize: CGSize {
-        CGSize(width: min(560, available.width - 36), height: min(400, available.height - 72))
-    }
-    private var quickTabs: [Tab] { workspace.quickTabs }
-    private var resultsHeight: CGFloat {
-        let headings = Set(workspace.searchResults.map(\.source.label)).count
-        return min(CGFloat(workspace.searchResults.count * 42 + headings * 22), max(84, available.height - 170))
-    }
-    private var tabsHeight: CGFloat {
-        min(CGFloat(quickTabs.count * 42), max(0, available.height - 112 - resultsHeight - splitRowHeight))
-    }
-    private var splitRowHeight: CGFloat { workspace.isSplit ? 42 : 0 }
-    private var controlsHeight: CGFloat { 32 + handleBarHeight + tabsHeight + splitRowHeight }
-    private var historySize: CGSize {
-        let count = workspace.historyClearing ? HistoryRange.allCases.count : workspace.browserHistory.visits.count
-        let rows = CGFloat(count) * 44 + 58
-        return CGSize(width: min(330, available.width - 36), height: min(max(140, rows) + 44, available.height - 72))
-    }
-    private var downloadsSize: CGSize {
-        CGSize(width: min(390, available.width - 36), height: min(404, available.height - 72))
-    }
-    private var handleBarHeight: CGFloat {
-        if morphed || workspace.editing != nil {
-            return 44
-        }
-        return trustedOrigin == nil ? 44 : 52
-    }
-    private var identitySize: CGSize {
-        CGSize(width: min(420, available.width - 36), height: min(248, available.height - 72))
-    }
-    private var size: CGSize {
-        if workspace.overviewOpen { return overviewSize }
-        if workspace.identityOpen { return identitySize }
-        if historyOpen { return historySize }
-        if downloadsOpen { return downloadsSize }
-        if showsTabs {
-            let address = workspace.editing?.text ?? pane.map { workspace.assistance.label($0, url: workspace.surfaces.line($0)) } ?? ""
-            let text = address.isEmpty ? "Search or address" : address
-            let textWidth = (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
-            let tabsWidth = quickTabs.map { tab in
-                (workspace.title(tab) as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width + 96
-            }.max() ?? 0
-            return CGSize(width: min(max(!workspace.searchResults.isEmpty ? 320 : 312, tabsWidth, textWidth + 76), available.width - 36),
-                          height: controlsHeight + resultsHeight)
-        }
-        let labelWidth = (identity as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
-        if let origin = trustedOrigin {
-            let originWidth = (origin.compactLabel as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium)]).width
-            return CGSize(width: min(max(labelWidth, originWidth) + 78, 280, available.width - 36), height: 52)
-        }
-        return CGSize(width: min(labelWidth + 66, 240, available.width - 36), height: 44)
-    }
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            if showsTabs {
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        browserControl("Back", symbol: "chevron.left", id: "browser-back") {
-                            workspace.discardLine()
-                            if let pane { workspace.hosts.existingBrowser(pane)?.goBack() }
-                        }
-                        .disabled(pane.map { !workspace.hosts.canGoBack[$0, default: false] } ?? true)
-                        browserControl("Forward", symbol: "chevron.right", id: "browser-forward") {
-                            workspace.discardLine()
-                            if let pane { workspace.hosts.existingBrowser(pane)?.goForward() }
-                        }
-                        .disabled(pane.map { !workspace.hosts.canGoForward[$0, default: false] } ?? true)
-                        Spacer(minLength: 0)
-                        browserControl("Browser history", symbol: "clock.arrow.circlepath", id: "page-history-button",
-                                       action: workspace.togglePageHistory)
-                            .help("Browser history")
-                        browserControl(downloads.activeCount == 0 ? "Downloads" : "Downloads, \(downloads.activeCount) active",
-                                       symbol: downloads.activeCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle",
-                                       id: "downloads-button", action: workspace.toggleDownloads)
-                            .overlay(alignment: .topTrailing) {
-                                if downloads.unreadCount > 0 {
-                                    Circle().fill(.red).frame(width: 6, height: 6).offset(x: -5, y: 5)
-                                }
-                            }
-                            .help("Downloads · ⌘J")
-                        shareControl
-                        browserControl(workspace.isSplit ? "Move side page to its own tab" : "Split view",
-                                       symbol: workspace.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
-                                       id: "split-view-button", action: workspace.toggleSplitView)
-                            .help(workspace.isSplit ? "Move the other page to its own tab · ⌘\\" : "Split view · ⌘\\")
-                        browserControl("New page", symbol: "plus", id: "new-page", action: workspace.newPage)
-                        browserControl("Close page", symbol: "xmark", id: "browser-close") {
-                            workspace.discardLine()
-                            workspace.closeActive()
-                        }
-                        .disabled(pane == nil)
-                    }
-                    .padding(.horizontal, 6)
-                    .frame(height: 32)
-                    if !quickTabs.isEmpty {
-                        ScrollView(.vertical) {
-                            VStack(spacing: 0) {
-                                ForEach(Array(quickTabs.enumerated()), id: \.element.id) { index, tab in
-                                    Button { workspace.selectWork(tab.id) } label: {
-                                        HStack(spacing: 8) {
-                                            if tab.isSplit && tab.name == nil {
-                                                SplitTabLabel(tab: tab, palette: palette)
-                                            } else {
-                                                SiteIcon(pane: tab.active, palette: palette, framed: false)
-                                                    .frame(width: 28, height: 28)
-                                                Text(workspace.title(tab))
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .lineLimit(1)
-                                            }
-                                            Spacer(minLength: 8)
-                                            if index < 9 {
-                                                Text("⌘\(index + 1)")
-                                                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                                                    .foregroundStyle(palette.textDim)
-                                                    .monospacedDigit()
-                                            }
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .frame(height: 42)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.pointing)
-                                    .id(tab.id)
-                                    // Drop it on the page to open the two side by side.
-                                    .onDrag { NSItemProvider.tab(tab.id) } preview: {
-                                        Label(workspace.title(tab), systemImage: "rectangle.split.2x1")
-                                            .font(.system(size: 12, weight: .medium))
-                                            .padding(.horizontal, 12)
-                                            .frame(height: 32)
-                                            .background(.regularMaterial, in: Capsule())
-                                    }
-                                    .accessibilityLabel(index < 9 ? "Switch to \(workspace.title(tab)), Command \(index + 1)" : "Switch to \(workspace.title(tab))")
-                                    .accessibilityHint("Drag onto the page to open it side by side")
-                                    .accessibilityIdentifier("quick-tab-\(tab.id.rawValue)")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                        }
-                        .scrollIndicators(.hidden)
-                        .frame(height: tabsHeight)
-                    }
-                    if let tab = workspace.activeTab, tab.isSplit {
-                        SplitFocusRow(tab: tab, palette: palette)
-                            .padding(.horizontal, 4)
-                            .frame(height: splitRowHeight)
-                    }
-                }
-                .padding(.bottom, handleBarHeight)
-                .transition(.opacity)
-            }
-            if workspace.editing != nil && !workspace.searchResults.isEmpty {
-                let results = workspace.searchResults
-                ScrollView { VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
-                        if index == 0 || results[index - 1].source.label != result.source.label {
-                            Text(result.source.label)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(palette.textDim)
-                                .padding(.horizontal, 14)
-                                .frame(height: 22)
-                        }
-                        Button { workspace.openSearchResult(result) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(result.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                Text(CompactLine.host(result.url.absoluteString))
-                                    .font(.system(size: 10)).foregroundStyle(palette.textDim).lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .frame(height: 42)
-                            .contentShape(Rectangle())
-                            .background(workspace.selectedSearchResult == index ? palette.text.opacity(0.12) : .clear)
-                        }
-                        .buttonStyle(.pointing)
-                        .accessibilityIdentifier("search-result-\(index)")
-                        .accessibilityAddTraits(workspace.selectedSearchResult == index ? .isSelected : [])
-                    }
-                }
-                }.frame(height: resultsHeight)
-                .padding(.bottom, controlsHeight)
-                .transition(.opacity)
-            }
-            if workspace.overviewOpen && workspace.editing == nil {
-                WorkspaceOverview(palette: palette)
-                    .frame(width: overviewSize.width, height: overviewSize.height)
-                    .transition(.opacity)
-            }
-            if workspace.identityOpen && workspace.editing == nil {
-                IdentityInspector(origin: trustedOrigin, palette: palette)
-                    .frame(width: identitySize.width, height: identitySize.height)
-                    .transition(.opacity)
-            }
-            if historyOpen {
-                PageHistoryPanel(palette: palette) { workspace.pageHistoryOpen = false }
-                    .padding(.bottom, 44)
-                    .frame(width: historySize.width, height: historySize.height)
-                    .transition(.opacity)
-            }
-            if downloadsOpen {
-                DownloadsPanel(palette: palette)
-                    .padding(.bottom, 44)
-                    .frame(width: downloadsSize.width, height: downloadsSize.height)
-                    .transition(.opacity)
-            }
-            HStack(spacing: 0) {
-                Button { workspace.toggleOverview() } label: {
-                    SiteIcon(pane: pane, palette: palette, framed: false)
-                        .frame(width: 44, height: 44)
-                        .padding(.leading, 6)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pointing)
-                .accessibilityLabel(workspace.overviewOpen ? "Return to page" : "Show all tabs, \(identity)")
-                .accessibilityHint("Hover or hold left Command to show open pages")
-                .accessibilityIdentifier("page-handle")
-                if workspace.editing != nil {
-                    LineEditor(palette: palette)
-                        .padding(.trailing, 14)
-                } else if workspace.identityOpen || historyOpen || downloadsOpen {
-                    Spacer(minLength: 0)
-                } else {
-                    identityRows
-                }
-            }
-            .frame(height: handleBarHeight)
-        }
-        .frame(width: size.width, height: size.height, alignment: .bottomLeading)
-        .clipShape(RoundedRectangle(cornerRadius: morphed ? 20 : 14, style: .continuous))
-        .modifier(PageGlass(radius: morphed ? 20 : 14))
-        .modifier(AILabelGlow(effect: workspace.assistance.labelEffect, pane: pane,
-                               radius: morphed ? 20 : 14))
-        .foregroundStyle(palette.text)
-        .onHover { workspace.quickSwitchOpen = $0 }
-        .onAppear { workspace.beginEmptyPageEditingIfNeeded() }
-        .onChange(of: workspace.activePane) { _, _ in workspace.beginEmptyPageEditingIfNeeded() }
-        .onChange(of: workspace.isEmptyActivePage) { _, isEmpty in
-            if isEmpty { workspace.beginEmptyPageEditingIfNeeded() }
-        }
-        .animation(reduceMotion ? nil : Metrics.morph, value: size)
-        .animation(reduceMotion ? nil : Metrics.morph, value: expanded)
-    }
-
-    /// The address, then the origin. Pointing at the origin opens the handle,
-    /// so the origin keeps its place and identity in both states to stay clickable.
-    private var identityRows: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsTabs {
-                HStack(spacing: 0) {
-                    LineEditor(palette: palette)
-                        .padding(.trailing, workspace.currentPageURL == nil ? 14 : 8)
-                    if workspace.currentPageURL != nil {
-                        Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .monospacedDigit()
-                            .frame(width: 42, alignment: .trailing)
-                            .padding(.trailing, 14)
-                            .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
-                    }
-                }
-            } else {
-                addressButton
-                    .padding(.trailing, 16)
-            }
-            if let origin = trustedOrigin {
-                originButton(origin)
-                    .padding(.trailing, 16)
-            }
-        }
-        .frame(height: trustedOrigin == nil ? 44 : 52)
-    }
-
-    private var addressButton: some View {
-        Button { workspace.editActiveLine() } label: {
-            Group {
-                if workspace.showsCopiedPageURL {
-                    Text("Copied")
-                        .font(.system(size: 12, weight: .medium))
-                } else {
-                    AILabel(identity: identity, pane: pane, effect: workspace.assistance.labelEffect)
-                }
-            }
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.pointing)
-        .accessibilityLabel(trustedOrigin.map { "Edit address, \(identity), \($0.accessibilityLabel)" } ?? "Edit address, \(identity)")
-        .accessibilityIdentifier("page-address")
-        .help(pane.map { workspace.surfaces.line($0) } ?? "")
-    }
-
-    private func originButton(_ origin: TrustedOrigin) -> some View {
-        Button { workspace.toggleIdentity() } label: {
-            HStack(spacing: 4) {
-                Image(systemName: origin.transport == .http ? "exclamationmark.triangle.fill" : "lock.fill")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
-                Text(origin.compactLabel)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(origin.transport == .http ? Color(red: 0.82, green: 0.38, blue: 0.08) : palette.textDim)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.pointing)
-        .accessibilityLabel("Site identity, \(origin.accessibilityLabel)")
-        .accessibilityIdentifier("page-origin")
-        .help(origin.fullURL)
-    }
-
-    @ViewBuilder
-    private var shareControl: some View {
-        let url = pane.flatMap(workspace.hosts.existingBrowser)?.url
-        if let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-            ShareLink(item: url) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.pointing)
-            .accessibilityLabel("Share page")
-            .accessibilityIdentifier("share-page-button")
-            .help("Share this page")
-        } else {
-            browserControl("Share page", symbol: "square.and.arrow.up", id: "share-page-button") { }
-                .disabled(true)
-                .help("This page cannot be shared")
-        }
-    }
-
-    private func browserControl(_ label: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.pointing)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(id)
-    }
-
-}
-
-/// The current tab when it is split: both pages on one line, as they sit on
-/// screen. Clicking one gives it focus.
-private struct SplitFocusRow: View {
-    @Environment(Workspace.self) private var workspace
-    var tab: Tab
-    var palette: Palette
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(tab.panes, id: \.self) { pane in
-                Button {
-                    workspace.clickPane(pane)
-                } label: {
-                    HStack(spacing: 8) {
-                        SiteIcon(pane: pane, palette: palette, framed: false)
-                            .frame(width: 28, height: 28)
-                        Text(workspace.title(pane))
-                            .font(.system(size: 12, weight: pane == tab.active ? .semibold : .medium))
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: 38)
-                    .background(pane == tab.active ? palette.text.opacity(0.1) : .clear,
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.pointing)
-                .accessibilityLabel(pane == tab.active ? "\(workspace.title(pane)), focused" : "Focus \(workspace.title(pane))")
-                .accessibilityIdentifier("split-focus-\(pane.rawValue)")
-            }
-        }
-    }
-}
-
-/// A split tab in the open pages list: both pages on one line, in the order
-/// they sit on screen.
-private struct SplitTabLabel: View {
-    @Environment(Workspace.self) private var workspace
-    var tab: Tab
-    var palette: Palette
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(Array(tab.panes.enumerated()), id: \.element) { index, pane in
-                if index > 0 {
-                    Image(systemName: "rectangle.split.2x1")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(palette.textDim)
-                        .accessibilityHidden(true)
-                }
-                SiteIcon(pane: pane, palette: palette, framed: false)
-                    .frame(width: 28, height: 28)
-                Text(workspace.title(pane))
-                    .font(.system(size: 12, weight: pane == tab.active ? .semibold : .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(pane == tab.active ? 1 : 0)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// Connection details for the current origin. Page labels never appear here.
-private struct IdentityInspector: View {
+struct IdentityInspector: View {
     @Environment(Workspace.self) private var workspace
     var origin: TrustedOrigin?
     var palette: Palette
@@ -503,7 +58,6 @@ private struct IdentityInspector: View {
         .foregroundStyle(palette.text)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(16)
-        .padding(.bottom, 44)
         .onExitCommand { workspace.closeIdentity() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("identity-inspector")
@@ -524,7 +78,7 @@ private struct IdentityInspector: View {
 
 /// An AI-refined label arrives with a brief spectrum sweep. The ordinary local
 /// label and user-authored tab names retain the browser's normal text color.
-private struct AILabel: View {
+struct AILabel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var identity: String
     var pane: PaneID?
@@ -573,8 +127,8 @@ private struct AILabel: View {
 }
 
 /// A restrained version of the Apple Intelligence spectrum glow. It hugs a
-/// glass panel only while an AI-refined result is being revealed: the page
-/// label on the handle.
+/// row only while an AI-refined result is being revealed: the tab's label in
+/// the sidebar.
 struct AILabelGlow: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var effect: AILabelEffect?
@@ -735,7 +289,7 @@ struct PageControlRegion: NSViewRepresentable {
     }
 }
 
-/// The glass floats over the page, which repaints the cursor for whatever
+/// Glass can float over the page, which repaints the cursor for whatever
 /// content sits underneath. Over Interlinked's own controls the page gives the
 /// cursor up: clickable controls show the pointing hand, the rest of the glass
 /// the arrow, and the page's cursor returns when the mouse moves on it again.
@@ -794,6 +348,7 @@ struct SiteIcon: View {
     var pane: PaneID?
     var palette: Palette
     var framed = true
+    var size: CGFloat = 34
 
     var body: some View {
         ZStack {
@@ -801,14 +356,14 @@ struct SiteIcon: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.panel)
             }
             if let pane, let icon = workspace.hosts.favicons[pane] {
-                Image(nsImage: icon).resizable().scaledToFit().padding(5)
+                Image(nsImage: icon).resizable().scaledToFit().padding(size * 0.15)
             } else {
                 Image(systemName: pane.map { workspace.surfaces.kind($0).symbol } ?? "square.grid.2x2")
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: size * 0.53, weight: .medium))
                     .foregroundStyle(palette.text)
             }
         }
-        .frame(width: 34, height: 34)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }

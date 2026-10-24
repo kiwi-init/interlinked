@@ -77,7 +77,7 @@ enum OnboardingFeature: String, Sendable {
         case .appleIntelligence: "Runs on your Mac. Nothing leaves it."
         case .jev: "A classifier, not generative AI. Runs in the cloud."
         case .sharingScreen: "Blurs emails, phone numbers, cards and passwords while you share your screen. ⇧⌘S anytime."
-        case .usefulInfo: "When a page lists its address or phone, copy it with one click above the Toolbox."
+        case .usefulInfo: "When a page lists its address or phone, copy it with one click in the sidebar."
         case .adBlocking: "Blocks ads and trackers before they load."
         case .darkPages: "Darkens pages that have no dark theme of their own."
         }

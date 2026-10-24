@@ -122,7 +122,7 @@ private struct GeneralSettingsPane: View {
                 Toggle(isOn: $usefulInfo.showsAddress) {
                     Label {
                         Text("Address")
-                        Text("A button above the toolbox copies the page's street address.")
+                        Text("A button in the sidebar copies the page's street address.")
                     } icon: {
                         Image(systemName: "map")
                     }
@@ -132,7 +132,7 @@ private struct GeneralSettingsPane: View {
                 Toggle(isOn: $usefulInfo.showsContact) {
                     Label {
                         Text("Contact")
-                        Text("Copies the page's phone number or email. With several, the button opens to let you choose.")
+                        Text("Copies the page's phone numbers and emails, one row each.")
                     } icon: {
                         Image(systemName: "person.crop.circle")
                     }

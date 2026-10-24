@@ -87,18 +87,6 @@ enum NewTabPage {
     }
 }
 
-enum PageHandleExpansion {
-    static func showsOpenWork(
-        overviewOpen: Bool,
-        panelOpen: Bool,
-        hovering: Bool,
-        editing: Bool,
-        isNewTab: Bool
-    ) -> Bool {
-        !overviewOpen && !panelOpen && (hovering || editing || isNewTab)
-    }
-}
-
 enum ToolboxShortcut: Equatable {
     case find
     case sharingScreen

@@ -2,7 +2,7 @@ import AppKit
 import Observation
 
 /// The page's own address and contact details, found on this Mac when a page
-/// loads, and offered as copy buttons above the toolbox.
+/// loads, and offered as copy buttons in the sidebar.
 @MainActor @Observable
 final class UsefulInfo {
     var showsAddress: Bool {

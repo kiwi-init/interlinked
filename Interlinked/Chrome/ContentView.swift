@@ -4,30 +4,16 @@ struct ContentView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
-    @State private var fullScreen = false
 
     var body: some View {
         let palette = Palette.of(colorScheme, tint: workspace.tint)
         GeometryReader { geometry in
-            ZStack(alignment: .bottomLeading) {
+            SidebarLayout(palette: palette) {
                 detail(palette: palette)
-                PageHandle(palette: palette, available: geometry.size)
-                    .padding(18)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                VStack(alignment: .trailing, spacing: 10) {
-                    UsefulInfoStack(palette: palette)
-                    Toolbox(palette: palette)
-                }
-                .padding(18)
-            }
-            .overlay(alignment: .topLeading) {
-                if !fullScreen {
-                    WindowButtonsGlass()
-                }
             }
             .overlay(alignment: .topTrailing) {
                 PageActions(palette: palette, available: geometry.size)
+                    .padding(.top, SidebarMetrics.toolbar)
                     .padding(18)
             }
             .overlay {
@@ -37,7 +23,7 @@ struct ContentView: View {
             }
         }
         .background(palette.pane)
-        .background(WindowChrome(fullScreen: $fullScreen))
+        .background(WindowChrome())
         .frame(minWidth: 640, minHeight: 400)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear {

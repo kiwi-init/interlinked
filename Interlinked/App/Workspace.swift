@@ -157,15 +157,19 @@ final class Workspace {
         activateTab(index)
     }
 
+    /// ⌘1 to ⌘9 pick tabs in the sidebar's order.
+    @discardableResult
+    func selectTab(at index: Int) -> Bool {
+        guard tabs.indices.contains(index) else { return false }
+        selectWork(tabs[index].id)
+        return true
+    }
+
     @discardableResult
     func selectQuickTab(_ index: Int) -> Bool {
         guard quickTabs.indices.contains(index) else { return false }
         selectWork(quickTabs[index].id)
         return true
-    }
-
-    func toolboxShortcutLabel(_ shortcut: ToolboxShortcut) -> String {
-        shortcut.label
     }
 
     var currentPageURL: URL? {
@@ -1043,7 +1047,7 @@ final class Workspace {
     }
 
     func toggleSidebar() {
-        toggleOverview()
+        setSidebar(sidebarCollapsed ? sidebarLast : 0)
     }
 
     func settleSidebar() {
@@ -1353,7 +1357,7 @@ final class Workspace {
         }
 
         if modifiers == .command, let character, let index = OpenWork.shortcutIndex(character) {
-            return selectQuickTab(index)
+            return selectTab(at: index)
         }
 
         if event.keyCode == 48 && (modifiers == .control || modifiers == [.control, .shift]) {
@@ -1369,7 +1373,7 @@ final class Workspace {
         case ("t", [.command, .option]):
             newPageBeside()
         case ("s", [.command, .control]):
-            toggleOverview()
+            toggleSidebar()
         case ("]", .command):
             cycleTabs(1)
         case ("[", .command):
