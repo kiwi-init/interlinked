@@ -781,7 +781,7 @@
 				INTERLINKED_JEV_RELAY_URL = "https://interlinked-jev.187-77-224-188.sslip.io/v1/jev";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited) $(SRCROOT)/blocker/target/release";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 2026.10.0;
 				OTHER_LDFLAGS = "$(inherited) -linterlinked_blocker";
 				PRODUCT_BUNDLE_IDENTIFIER = "computer.interlinked$(INTERLINKED_BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = Interlinked;
@@ -971,7 +971,7 @@
 				INTERLINKED_JEV_RELAY_URL = "";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited) $(SRCROOT)/blocker/target/release";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 2026.10.0;
 				OTHER_LDFLAGS = "$(inherited) -linterlinked_blocker";
 				PRODUCT_BUNDLE_IDENTIFIER = "computer.interlinked$(INTERLINKED_BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = Interlinked;
@@ -1122,7 +1122,7 @@
 				INTERLINKED_JEV_RELAY_URL = "";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited) $(SRCROOT)/blocker/target/release";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 2026.10.0;
 				OTHER_LDFLAGS = "$(inherited) -linterlinked_blocker";
 				PRODUCT_BUNDLE_IDENTIFIER = "computer.interlinked$(INTERLINKED_BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = Interlinked;

@@ -1,6 +1,7 @@
 name: Release
 
-# A tag like v1.2.3 publishes a release; v1.2.3-rc.1 publishes a pre-release.
+# A tag like v2026.10.0 (YYYY.M.PATCH, from script/next-version) publishes a
+# release; v2026.10.0-rc.1 publishes a pre-release.
 # Signing and notarization run only when their secrets are set; without them
 # the DMG is published unsigned and labeled so, for testing the pipeline.
 #
@@ -38,7 +39,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           full="${tag#v}"
-          # The app shows 1.2.3 for 1.2.3-rc.1; the build number tells RCs apart.
+          # The app shows 2026.10.0 for 2026.10.0-rc.1; the build number tells RCs apart.
           echo "version=${full%%-*}" >> "$GITHUB_OUTPUT"
           echo "full=$full" >> "$GITHUB_OUTPUT"
           case "$full" in
