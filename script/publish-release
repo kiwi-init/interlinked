@@ -21,7 +21,14 @@ git fetch --quiet --tags origin main
 [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || fail "release from main"
 [ -z "$(git status --porcelain)" ] || fail "the checkout has uncommitted changes"
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail "main isn't the same as origin/main"
-! git rev-parse -q --verify "refs/tags/v$version" >/dev/null || fail "v$version is already tagged"
+# A draft is what a failed upload leaves behind; a published release is done.
+if draft=$(gh release view "v$version" --repo "$downloads" --json isDraft --jq .isDraft 2>/dev/null); then
+  [ "$draft" = true ] || fail "v$version is already published on $downloads (script/bump-cask $version points the cask at it)"
+fi
+# A rerun after a failed upload finds its own tag on this commit and carries on.
+if tagged=$(git rev-parse -q --verify "refs/tags/v$version^{commit}"); then
+  [ "$tagged" = "$(git rev-parse HEAD)" ] || fail "v$version is already tagged on another commit"
+fi
 
 identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
 [ -n "$identity" ] || fail "no Developer ID Application identity in the keychain"
@@ -33,9 +40,6 @@ build=$(date -u +%Y%m%d%H%M)
 DEVELOPER_ID_IDENTITY="$identity" NOTARY_PROFILE="$profile" script/release "$version" "$build"
 dmg=".build/release/Interlinked-$version.dmg"
 [ -f "$dmg" ] || fail "$dmg wasn't made, so it isn't notarized"
-
-git tag -a "v$version" -m "Interlinked $version"
-git push --quiet origin "v$version"
 
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT
@@ -50,8 +54,13 @@ trap 'rm -f "$notes"' EXIT
   echo
   echo "SHA-256: \`$(cut -d' ' -f1 "$dmg.sha256")\`"
 } > "$notes"
+[ "${draft:-}" != true ] || gh release delete "v$version" --repo "$downloads" --yes
 gh release create "v$version" "$dmg" "$dmg.sha256" --repo "$downloads" \
   --title "Interlinked $version" --notes-file "$notes"
+
+# The source is tagged once the download is out, so a failed upload can be rerun.
+git rev-parse -q --verify "refs/tags/v$version" >/dev/null || git tag -a "v$version" -m "Interlinked $version"
+git push --quiet origin "v$version"
 
 if [ -x script/bump-cask ]; then
   script/bump-cask "$version"
