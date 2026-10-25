@@ -21,15 +21,21 @@
 
     <main>
       <section class="hero">
-        <h1>A minimal browser for macOS.</h1>
-        <p class="lede">Your tabs run down a sidebar, and each page is its own card with its own header, like the panes of a terminal multiplexer. Nothing floats over the page.</p>
-        <div class="ctas">
-          <a class="dl" href="https://github.com/kiwi-init/interlinked-releases/releases/latest"><span class="go">Download</span><span class="for">macOS 26, Apple silicon</span></a>
-          <a class="button quiet" href="https://github.com/kiwi-init/interlinked">Source Code</a>
+        <div class="linked" aria-hidden="true">
+          <img src="/icon.svg" alt="" width="824" height="824" />
+          <canvas></canvas>
         </div>
-        <div class="copybox">
-          <pre id="brew-hero">brew install --cask <span class="nowrap">kiwi-init/tap/interlinked</span></pre>
-          <button class="copy" type="button" data-copy="brew-hero">copy</button>
+        <div class="pitch">
+          <h1>A minimal browser for macOS.</h1>
+          <p class="lede">Your tabs run down a sidebar, and each page is its own card with its own header, like the panes of a terminal multiplexer. Nothing floats over the page.</p>
+          <div class="ctas">
+            <a class="dl" href="https://github.com/kiwi-init/interlinked-releases/releases/latest"><span class="go">Download</span><span class="for">macOS 26, Apple silicon</span></a>
+            <a class="button quiet" href="https://github.com/kiwi-init/interlinked">Source Code</a>
+          </div>
+          <div class="copybox">
+            <pre id="brew-hero">brew install --cask <span class="nowrap">kiwi-init/tap/interlinked</span></pre>
+            <button class="copy" type="button" data-copy="brew-hero">copy</button>
+          </div>
         </div>
       </section>
 
@@ -107,5 +113,6 @@
     </footer>
 
     <script src="/app.js"></script>
+    <script src="/hero.js"></script>
   </body>
 </html>
