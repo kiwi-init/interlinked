@@ -58,7 +58,9 @@ trap 'rm -f "$notes"' EXIT
 gh release create "v$version" "$dmg" "$dmg.sha256" --repo "$downloads" \
   --title "Interlinked $version" --notes-file "$notes"
 
-# The source is tagged once the download is out, so a failed upload can be rerun.
+# The source is tagged once the download is out, so a failed upload can be
+# rerun. If only this push fails, the rerun stops at "already published":
+# push the tag by hand with `git push origin vVERSION`.
 git rev-parse -q --verify "refs/tags/v$version" >/dev/null || git tag -a "v$version" -m "Interlinked $version"
 git push --quiet origin "v$version"
 
