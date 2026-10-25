@@ -5,6 +5,7 @@ Interlinked's page: what it is, what it does, and how to get it. It is static fi
 ## Files
 
 - `public/index.html`, `public/styles.css`, `public/app.js`: the page, hand-written, no build step. `app.js` only runs the copy buttons. It is a file of its own so the CSP can stay `script-src 'self'`.
+- `public/hero.js`: the hero's two linked glass frames, the icon's mark in 3D, raymarched in WebGL in the manner of Channels' `site/world.js`. They drift in, link as they do in the icon while a band of spectral light crosses them, and settle; after that it draws only to lean them towards the pointer, and nothing while the hero is off-screen or the tab is hidden. With reduced motion they're drawn once, linked. Without WebGL (or without JavaScript) the icon's SVG stays in their place.
 - `public/404.html`: what any other path shows.
 - `public/_headers`: the security headers, the same CSP as Channels' site and kiwiinit.com.
 - `public/icon.svg`: the app icon, from `script/app-icon/icon.svg` with its viewBox cropped to the icon's square, as on kiwiinit.com.
