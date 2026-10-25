@@ -7,13 +7,7 @@ struct LineEditor: View {
 
     var body: some View {
         WorkInput(text: Binding(
-                get: {
-                    if let text = workspace.editing?.text { return text }
-                    if workspace.isEmptyActivePage { return "" }
-                    guard let pane = workspace.activePane else { return "" }
-                    if workspace.onboarding.contains(pane) { return Workspace.onboardingTitle }
-                    return workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
-                },
+                get: { workspace.editing?.text ?? Self.restingText(workspace) },
                 set: {
                     if workspace.editing == nil { workspace.editActiveLine() }
                     workspace.editing?.text = $0
@@ -39,6 +33,17 @@ struct LineEditor: View {
             workspace.discardLine()
             workspace.beginEmptyPageEditingIfNeeded()
         }
+    }
+}
+
+extension LineEditor {
+    /// What the field shows while nobody is typing in it: the page's label.
+    @MainActor
+    static func restingText(_ workspace: Workspace) -> String {
+        if workspace.isEmptyActivePage { return "" }
+        guard let pane = workspace.activePane else { return "" }
+        if workspace.onboarding.contains(pane) { return Workspace.onboardingTitle }
+        return workspace.assistance.label(pane, url: workspace.surfaces.line(pane))
     }
 }
 
