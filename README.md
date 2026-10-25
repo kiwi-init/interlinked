@@ -6,7 +6,9 @@ A minimal macOS browser. Laid out like a terminal multiplexer: your tabs run dow
 
 Open `Interlinked.xcodeproj` in Xcode and press Play, or run `script/run`.
 
-macOS 14 or later. Native Liquid Glass requires macOS 26; older versions use a translucent material.
+macOS 26 or later.
+
+Or install a release with Homebrew: `brew install kiwi-init/tap/interlinked`. The cask lives in [kiwi-init/homebrew-tap](https://github.com/kiwi-init/homebrew-tap) and installs the notarized DMG from [kiwi-init/interlinked-releases](https://github.com/kiwi-init/interlinked-releases). Once a release is published, `script/bump-cask VERSION` points the cask at it. `brew uninstall --zap interlinked` also removes Interlinked's settings, history, caches and website data.
 
 ## Browse
 
