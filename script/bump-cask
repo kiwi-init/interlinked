@@ -1,0 +1,48 @@
+#!/bin/sh
+# Point the Homebrew cask at a published release.
+#
+#   script/bump-cask VERSION
+#
+# VERSION is a published release (YYYY.M.PATCH, see script/next-version). Its
+# notarized DMG must already be on kiwi-init/interlinked-releases. This
+# downloads it, so the sha256 is the one people will get, sets the cask's
+# version and sha256 in the tap, and pushes "interlinked VERSION".
+# INTERLINKED_TAP and INTERLINKED_DOWNLOADS name other tap and download
+# repositories.
+set -eu
+
+version=${1:?usage: script/bump-cask VERSION}
+tap=${INTERLINKED_TAP:-kiwi-init/homebrew-tap}
+downloads=${INTERLINKED_DOWNLOADS:-kiwi-init/interlinked-releases}
+case $version in
+  [0-9][0-9][0-9][0-9].[0-9]*.[0-9]*) ;;
+  *) echo "VERSION must look like YYYY.M.PATCH, not '$version'" >&2; exit 1 ;;
+esac
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+url="https://github.com/$downloads/releases/download/v$version/Interlinked-$version.dmg"
+curl -fsSL -o "$work/Interlinked.dmg" "$url" || {
+  echo "No DMG at $url. Publish the release first." >&2
+  exit 1
+}
+sha=$(shasum -a 256 "$work/Interlinked.dmg" | cut -d' ' -f1)
+
+gh repo clone "$tap" "$work/tap" -- --quiet --depth 1
+cask="$work/tap/Casks/interlinked.rb"
+sed -i '' \
+  -e "s/^  version \".*\"$/  version \"$version\"/" \
+  -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" \
+  "$cask"
+grep -q "^  version \"$version\"$" "$cask" && grep -q "^  sha256 \"$sha\"$" "$cask" || {
+  echo "Could not set the version and sha256 in $cask" >&2
+  exit 1
+}
+if git -C "$work/tap" diff --quiet; then
+  echo "The cask is already at $version."
+  exit 0
+fi
+git -C "$work/tap" commit -qam "interlinked $version"
+git -C "$work/tap" push -q
+echo "Cask: interlinked $version, sha256 $sha"
