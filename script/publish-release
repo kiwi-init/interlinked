@@ -35,17 +35,18 @@ identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer I
 xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1 \
   || fail "no notarytool profile '$profile': run xcrun notarytool store-credentials $profile"
 
+# script/release regenerates the project, and this xcodegen may write it a
+# little differently. The checkout was clean before the build, so whatever
+# happens from here, put the project back.
+notes=$(mktemp)
+trap 'rm -f "$notes"; git checkout -- Interlinked.xcodeproj' EXIT
+
 # Build numbers only go up, past CI's run numbers too: the minute it was built.
 build=$(date -u +%Y%m%d%H%M)
 DEVELOPER_ID_IDENTITY="$identity" NOTARY_PROFILE="$profile" script/release "$version" "$build"
-# script/release regenerates the project, and this xcodegen may write it a
-# little differently. The checkout was clean before the build, so put it back.
-git checkout -- Interlinked.xcodeproj
 dmg=".build/release/Interlinked-$version.dmg"
 [ -f "$dmg" ] || fail "$dmg wasn't made, so it isn't notarized"
 
-notes=$(mktemp)
-trap 'rm -f "$notes"' EXIT
 {
   echo "Requires macOS 26 on an Apple silicon Mac (M1 or later)."
   echo
