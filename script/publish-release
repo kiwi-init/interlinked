@@ -1,0 +1,60 @@
+#!/bin/sh
+# Release Interlinked from this Mac: build the DMG signed with your Developer
+# ID, notarize it with the notarytool keychain profile `interlinked-notary`
+# (made once with `xcrun notarytool store-credentials interlinked-notary`),
+# tag the source, publish the DMG on kiwi-init/interlinked-releases, and point
+# the Homebrew cask at it.
+#
+#   script/publish-release [VERSION]    # VERSION defaults to script/next-version
+#
+# Only what is on main, committed and pushed, gets released. NOTARY_PROFILE
+# and INTERLINKED_DOWNLOADS name another profile or download repository.
+set -eu
+cd "$(dirname "$0")/.."
+
+version=${1:-$(script/next-version)}
+profile=${NOTARY_PROFILE:-interlinked-notary}
+downloads=${INTERLINKED_DOWNLOADS:-kiwi-init/interlinked-releases}
+fail() { echo "error: $*" >&2; exit 1; }
+
+git fetch --quiet --tags origin main
+[ "$(git rev-parse --abbrev-ref HEAD)" = main ] || fail "release from main"
+[ -z "$(git status --porcelain)" ] || fail "the checkout has uncommitted changes"
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail "main isn't the same as origin/main"
+! git rev-parse -q --verify "refs/tags/v$version" >/dev/null || fail "v$version is already tagged"
+
+identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+[ -n "$identity" ] || fail "no Developer ID Application identity in the keychain"
+xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1 \
+  || fail "no notarytool profile '$profile': run xcrun notarytool store-credentials $profile"
+
+# Build numbers only go up, past CI's run numbers too: the minute it was built.
+build=$(date -u +%Y%m%d%H%M)
+DEVELOPER_ID_IDENTITY="$identity" NOTARY_PROFILE="$profile" script/release "$version" "$build"
+dmg=".build/release/Interlinked-$version.dmg"
+[ -f "$dmg" ] || fail "$dmg wasn't made, so it isn't notarized"
+
+git tag -a "v$version" -m "Interlinked $version"
+git push --quiet origin "v$version"
+
+notes=$(mktemp)
+trap 'rm -f "$notes"' EXIT
+{
+  echo "Requires macOS 26 on an Apple silicon Mac (M1 or later)."
+  echo
+  echo "Install with Homebrew: \`brew install --cask kiwi-init/tap/interlinked\`"
+  echo
+  echo "Jev features use your own OpenRouter key, added in Settings → Intelligence."
+  echo
+  echo "Source: https://github.com/kiwi-init/interlinked/tree/v$version"
+  echo
+  echo "SHA-256: \`$(cut -d' ' -f1 "$dmg.sha256")\`"
+} > "$notes"
+gh release create "v$version" "$dmg" "$dmg.sha256" --repo "$downloads" \
+  --title "Interlinked $version" --notes-file "$notes"
+
+if [ -x script/bump-cask ]; then
+  script/bump-cask "$version"
+else
+  echo "Published. Point the cask at it with: script/bump-cask $version"
+fi

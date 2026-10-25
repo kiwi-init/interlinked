@@ -143,4 +143,6 @@ On memory pressure, the tab lifecycle targets 75 percent of live pages with a fl
 
 ## Releases
 
-Versions are dates: YYYY.M.PATCH, the year and month, then a patch that counts up within the month and starts again at 0 the next (2026.10.0, 2026.10.1, then 2026.11.0). `script/next-version` prints the next one. Pushing its tag, `git tag "v$(script/next-version)" && git push origin --tags`, has CI (`.github/workflows/release.yml`) build the DMG with `script/release`, signed with Developer ID and notarized once those secrets are set. A `-rc.N` tag publishes a pre-release. The build number is CI's run number, so it only goes up.
+Versions are dates: YYYY.M.PATCH, the year and month, then a patch that counts up within the month and starts again at 0 the next (2026.10.0, 2026.10.1, then 2026.11.0). `script/next-version` prints the next one.
+
+Releases are cut from the maintainer's Mac with `script/publish-release [VERSION]`, from a clean `main` that matches `origin/main`. It builds the DMG with `script/release`, signed with the Developer ID in the keychain and notarized with the notarytool profile `interlinked-notary` (made once with `xcrun notarytool store-credentials interlinked-notary`). It then tags the source, publishes the DMG on [kiwi-init/interlinked-releases](https://github.com/kiwi-init/interlinked-releases), and points the Homebrew cask at it. The build number is the minute it was built, so it only goes up. `.github/workflows/release.yml` can build one in CI instead, run by hand, once its signing secrets are set.

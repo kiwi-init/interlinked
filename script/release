@@ -8,8 +8,9 @@
 # The build number only ever goes up; CI uses the workflow's run number.
 #
 # Signing uses DEVELOPER_ID_IDENTITY ("Developer ID Application: …") from the
-# login or a temporary keychain. Notarization uses an App Store Connect API
-# key: NOTARY_KEY_PATH (.p8), NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Without an
+# login or a temporary keychain. Notarization uses NOTARY_PROFILE, a notarytool
+# keychain profile, or an App Store Connect API key: NOTARY_KEY_PATH (.p8),
+# NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Without an
 # identity the DMG is built unsigned and named so, for testing the pipeline;
 # signed without the key, it is named unnotarized, since Gatekeeper refuses it.
 #
@@ -70,7 +71,7 @@ fi
 name="Interlinked-$version"
 if [ -z "$identity" ]; then
   name="$name-unsigned"
-elif [ -z "${NOTARY_KEY_PATH:-}" ]; then
+elif [ -z "${NOTARY_PROFILE:-}${NOTARY_KEY_PATH:-}" ]; then
   name="$name-unnotarized"
 fi
 dmg="$out/$name.dmg"
@@ -83,14 +84,19 @@ rm -rf "$stage"
 
 if [ -n "$identity" ]; then
   codesign --force --timestamp --sign "$identity" "$dmg"
-  if [ -n "${NOTARY_KEY_PATH:-}" ]; then
-    xcrun notarytool submit "$dmg" \
-      --key "$NOTARY_KEY_PATH" --key-id "${NOTARY_KEY_ID:?}" --issuer "${NOTARY_ISSUER_ID:?}" \
-      --wait
+  if [ -n "${NOTARY_PROFILE:-}${NOTARY_KEY_PATH:-}" ]; then
+    if [ -n "${NOTARY_PROFILE:-}" ]; then
+      xcrun notarytool submit "$dmg" --keychain-profile "$NOTARY_PROFILE" --wait
+    else
+      xcrun notarytool submit "$dmg" \
+        --key "$NOTARY_KEY_PATH" --key-id "${NOTARY_KEY_ID:?}" --issuer "${NOTARY_ISSUER_ID:?}" \
+        --wait
+    fi
+    # Stapling fails unless Apple accepted it, which stops the release here.
     xcrun stapler staple "$dmg"
     spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
   else
-    echo "warning: signed but not notarized; set NOTARY_KEY_PATH, NOTARY_KEY_ID, NOTARY_ISSUER_ID." >&2
+    echo "warning: signed but not notarized; set NOTARY_PROFILE, or NOTARY_KEY_PATH, NOTARY_KEY_ID and NOTARY_ISSUER_ID." >&2
   fi
 fi
 

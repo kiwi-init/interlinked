@@ -1,7 +1,10 @@
 name: Release
 
-# A tag like v2026.10.0 (YYYY.M.PATCH, from script/next-version) publishes a
-# release; v2026.10.0-rc.1 publishes a pre-release.
+# Releases are cut from the maintainer's Mac with script/publish-release,
+# which signs and notarizes there and publishes on kiwi-init/interlinked-releases.
+# It pushes the source tag too, so this workflow no longer runs on tags: run it
+# by hand on a tag like v2026.10.0 (or v2026.10.0-rc.1 for a pre-release) once
+# the secrets below are set, to build and publish here instead.
 # Signing and notarization run only when their secrets are set; without them
 # the DMG is published unsigned and labeled so, for testing the pipeline.
 #
@@ -13,10 +16,7 @@ name: Release
 #   NOTARY_ISSUER_ID           the key's issuer ID
 
 on:
-  push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+  workflow_dispatch:
 
 permissions:
   contents: write
