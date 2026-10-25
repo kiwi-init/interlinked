@@ -1,0 +1,15 @@
+#!/bin/sh
+# Print the next release version, YYYY.M.PATCH: this year and month, and a
+# patch that counts up within the month and starts again at 0 the next. The
+# month has no leading zero (2026.3.0), as calver.org's YYYY.MM. Read from
+# the release tags (vYYYY.M.PATCH); release candidates don't use up a patch.
+#
+#   script/next-version                     # 2026.10.0
+#   git tag "v$(script/next-version)" && git push origin --tags
+set -eu
+cd "$(dirname "$0")/.."
+
+git fetch --quiet --tags origin 2>/dev/null || true
+month="$(date +%Y).$(date +%-m)"
+last=$(git tag --list "v$month.*" | grep -v -- - | sed "s/^v$month\.//" | sort -n | tail -1)
+if [ -n "$last" ]; then echo "$month.$((last + 1))"; else echo "$month.0"; fi

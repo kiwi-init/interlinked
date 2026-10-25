@@ -138,3 +138,7 @@ Then open `http://127.0.0.1:8765` in Interlinked.
 On memory pressure, the tab lifecycle targets 75 percent of live pages with a floor of eight on a warning, and 40 percent with a floor of three on a critical event. Protected pages stay live even when that prevents the target. Every five minutes it also puts to sleep background pages unused for 30 minutes; `interlinked sleep-tabs [minutes]` runs that pass now.
 
 `project.yml` defines the Xcode project. After changing it, regenerate with `xcodegen generate`. The generated project is checked in so normal builds only need Xcode. The content blocker engine in `blocker/` is built by a pre-build step and needs Rust (`brew install rust`). Build products and local validation output belong in the ignored `build/` directory.
+
+## Releases
+
+Versions are dates: YYYY.M.PATCH, the year and month, then a patch that counts up within the month and starts again at 0 the next (2026.10.0, 2026.10.1, then 2026.11.0). `script/next-version` prints the next one. Pushing its tag, `git tag "v$(script/next-version)" && git push origin --tags`, has CI (`.github/workflows/release.yml`) build the DMG with `script/release`, signed with Developer ID and notarized once those secrets are set. A `-rc.N` tag publishes a pre-release. The build number is CI's run number, so it only goes up.
