@@ -136,9 +136,15 @@ enum SidebarMetrics {
     static let header: CGFloat = 30
     /// A header's buttons and address field, all on the header's centre line.
     static let headerControl: CGFloat = 26
-    /// The origin inside the address field, the same distance from its top,
-    /// bottom and leading edge.
+    /// The origin inside the address field, the same distance from its top
+    /// and bottom as the field's padding.
     static let originChip: CGFloat = 18
+    /// The address field, centred in the header: compact while you read the
+    /// page, wider while you type. In a narrow split it shrinks to its minimum
+    /// before its text is cut.
+    static let addressWidth: CGFloat = 360
+    static let addressTypingWidth: CGFloat = 560
+    static let addressMinWidth: CGFloat = 120
     /// The room a header row keeps for the window buttons: up to the end of
     /// their slot, less the card's margin and the row's padding.
     static var windowButtonsRoom: CGFloat { WindowButtonPlacement.slot.maxX - 2 * inset }
@@ -524,24 +530,30 @@ struct PageHeader: View {
     /// so nothing moves when a page splits or Find opens.
     var body: some View {
         HStack(spacing: SidebarMetrics.inset) {
-            if holdsWindowButtons {
-                HStack(spacing: 0) {
-                    // The window buttons sit here, drawn by AppKit.
-                    Color.clear
-                        .frame(width: SidebarMetrics.windowButtonsRoom, height: SidebarMetrics.headerControl)
-                        .allowsHitTesting(false)
-                    SidebarToggle(palette: palette)
-                }
-            }
             if focused {
-                navigation
+                // The two sides share what the address leaves, so it stays
+                // centred, and each keeps its icons against its own edge, so
+                // nothing moves when the address widens for typing.
+                HStack(spacing: SidebarMetrics.inset) {
+                    windowButtons
+                    navigation
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 // Reports one row's height, so results and the site's
                 // connection open downward over the page without moving the row.
                 AddressField(palette: palette)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(height: SidebarMetrics.headerControl, alignment: .top)
-                tools
+                    .frame(minWidth: SidebarMetrics.addressMinWidth,
+                           maxWidth: workspace.editing == nil ? SidebarMetrics.addressWidth : SidebarMetrics.addressTypingWidth)
+                    .layoutPriority(1)
+                HStack(spacing: SidebarMetrics.inset) {
+                    tools
+                    closeControl
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
+                windowButtons
                 Button { workspace.clickPane(pane) } label: {
                     HStack(spacing: 6) {
                         SiteIcon(pane: pane, palette: palette, framed: false, size: 16)
@@ -556,12 +568,8 @@ struct PageHeader: View {
                     .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Switch to \(workspace.title(pane))")
+                closeControl
             }
-            control(workspace.isSplit ? "Close this side" : "Close page", symbol: "xmark",
-                    id: "page-close-\(pane.rawValue)") {
-                workspace.closePane(pane)
-            }
-            .help("\(workspace.isSplit ? "Close this side" : "Close page") · ⌘W")
         }
         .buttonStyle(.pointing)
         .foregroundStyle(palette.text)
@@ -570,6 +578,28 @@ struct PageHeader: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { Color.clear.windowDragArea() }
         .animation(reduceMotion ? nil : Metrics.morph, value: finding)
+        .animation(reduceMotion ? nil : Metrics.morph, value: workspace.editing == nil)
+    }
+
+    @ViewBuilder
+    private var windowButtons: some View {
+        if holdsWindowButtons {
+            HStack(spacing: 0) {
+                // The window buttons sit here, drawn by AppKit.
+                Color.clear
+                    .frame(width: SidebarMetrics.windowButtonsRoom, height: SidebarMetrics.headerControl)
+                    .allowsHitTesting(false)
+                SidebarToggle(palette: palette)
+            }
+        }
+    }
+
+    private var closeControl: some View {
+        control(workspace.isSplit ? "Close this side" : "Close page", symbol: "xmark",
+                id: "page-close-\(pane.rawValue)") {
+            workspace.closePane(pane)
+        }
+        .help("\(workspace.isSplit ? "Close this side" : "Close page") · ⌘W")
     }
 
     private var navigation: some View {
@@ -676,21 +706,27 @@ private struct PeekSurface: ViewModifier {
 }
 
 /// The address, which grows downward into search results while you type
-/// and into the site's connection details from its lock.
+/// and into the site's connection details from its lock. At rest the site and
+/// the page's label sit centred in it; typing puts the text at the start.
 private struct AddressField: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var palette: Palette
+    @State private var hovering = false
+    /// The resting label's own width, so the field around it can be centred.
+    @State private var labelWidth: CGFloat = 0
 
     private var origin: TrustedOrigin? { workspace.currentPageURL.flatMap(TrustedOrigin.inspect) }
     private var results: [SearchResult] { workspace.editing == nil ? [] : workspace.searchResults }
     private var identityOpen: Bool { workspace.identityOpen && workspace.editing == nil }
     private var open: Bool { identityOpen || !results.isEmpty }
 
+    private var resting: Bool { workspace.editing == nil }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                if let origin, workspace.editing == nil {
+                if let origin, resting {
                     Button(action: workspace.toggleIdentity) {
                         HStack(spacing: 4) {
                             Image(systemName: origin.transport == .http ? "exclamationmark.triangle.fill" : "lock.fill")
@@ -716,20 +752,35 @@ private struct AddressField: View {
                         .frame(width: SidebarMetrics.originChip, height: SidebarMetrics.originChip)
                 }
                 LineEditor(palette: palette)
-                if workspace.currentPageURL != nil, workspace.editing == nil {
+                    // At rest the field is as wide as its label, so the two
+                    // centre together; typing gives it the whole row.
+                    .frame(maxWidth: resting ? labelWidth : .infinity)
+                    .background(alignment: .leading) {
+                        if resting {
+                            Text(LineEditor.restingText(workspace).isEmpty ? "Search or address" : LineEditor.restingText(workspace))
+                                .font(.system(size: 12))
+                                .fixedSize()
+                                .hidden()
+                                // The text field's own inset on each side.
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width + 6 } action: { labelWidth = $0 }
+                        }
+                    }
+            }
+            .frame(maxWidth: .infinity, alignment: resting ? .center : .leading)
+            // Room on both sides for the copy shortcut, so the label stays centred.
+            .padding(.horizontal, resting ? 36 : (SidebarMetrics.headerControl - SidebarMetrics.originChip) / 2)
+            .frame(height: SidebarMetrics.headerControl)
+            .overlay(alignment: .trailing) {
+                if workspace.currentPageURL != nil, resting, hovering || workspace.showsCopiedPageURL {
                     Text(workspace.showsCopiedPageURL ? "Copied" : "⇧⌘C")
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(palette.textDim)
-                        // Mirrors the origin's own padding on the other side.
-                        .padding(.trailing, 6)
+                        .padding(.trailing, 8)
                         .help(workspace.showsCopiedPageURL ? "Page URL copied" : "Copy page URL")
+                        .transition(.opacity)
                 }
             }
-            // The origin sits as far from the leading edge as from the top
-            // and bottom, and the trailing side mirrors it.
-            .padding(.horizontal, (SidebarMetrics.headerControl - SidebarMetrics.originChip) / 2)
-            .frame(height: SidebarMetrics.headerControl)
 
             if identityOpen {
                 IdentityInspector(origin: origin, palette: palette)
@@ -741,7 +792,9 @@ private struct AddressField: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .modifier(PageGlass(radius: open ? SidebarMetrics.radius : SidebarMetrics.headerControl / 2))
+        .modifier(AddressSurface(open: open, hovering: hovering, palette: palette))
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
         .animation(reduceMotion ? nil : Metrics.morph, value: open)
     }
 
@@ -779,6 +832,39 @@ private struct AddressField: View {
         }
         .frame(maxHeight: 360)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The address field's surface: a quiet solid fill, not glass, a little
+/// brighter under the pointer, and a solid panel on a shadow once it opens
+/// over the page. It claims its whole shape, so the page under an open panel
+/// never gets the click.
+private struct AddressSurface: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+    var open: Bool
+    var hovering: Bool
+    var palette: Palette
+
+    func body(content: Content) -> some View {
+        let radius = open ? Metrics.panelRadius : SidebarMetrics.headerControl / 2
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background {
+                if open {
+                    shape.fill(palette.panel).shadow(color: .black.opacity(0.3), radius: 14, y: 5)
+                } else {
+                    shape.fill(palette.text.opacity(hovering ? 0.11 : 0.07))
+                }
+            }
+            .overlay {
+                if open || contrast == .increased {
+                    shape.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(shape)
+            .onTapGesture { }
+            .background(PageControlRegion(radius: radius))
     }
 }
 
