@@ -306,6 +306,7 @@ figure {
 
 .copybox pre {
   flex: 1;
+  min-width: 0;
   padding: 14px 18px;
   overflow-x: auto;
   white-space: pre;
@@ -452,6 +453,16 @@ footer a:hover {
 @media (max-width: 480px) {
   .dl .for {
     display: none;
+  }
+
+  /* The whole brew line stays in view, wrapped at its space, with copy beside it. */
+  .copybox pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .copybox .nowrap {
+    white-space: nowrap;
   }
 
   .links {
