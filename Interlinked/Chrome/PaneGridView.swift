@@ -18,7 +18,7 @@ extension NSItemProvider {
     }
 }
 
-/// One page, or two side by side, each a card with its own header. Every page
+/// One page, or two side by side, each a card under its own header. Every page
 /// renders from the same list so the first keeps its identity, and its web
 /// view, when the second appears.
 struct SplitLayout: View {
@@ -150,8 +150,8 @@ private struct TabDropDelegate: DropDelegate {
     }
 }
 
-/// A page as its own card, lifted off the window on a shadow: its header, then
-/// the page.
+/// A page: its header on the window's own surface, level with the sidebar's
+/// top row, then the page as a card lifted off the window on a shadow.
 private struct PageCard: View {
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var scheme
@@ -163,13 +163,12 @@ private struct PageCard: View {
     var body: some View {
         let radius = SidebarMetrics.radius
         let card = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        VStack(spacing: 0) {
+        VStack(spacing: SidebarMetrics.headerGap) {
             PageHeader(pane: pane, palette: palette, holdsWindowButtons: holdsWindowButtons)
                 // Above the page, so an open address field spills over it.
                 .zIndex(1)
             BrowserPage(pane: pane, palette: palette)
-                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: radius, bottomTrailingRadius: radius,
-                                                  style: .continuous))
+                .clipShape(card)
                 .overlay {
                     if dimmed {
                         Color.black.opacity(0.16)
@@ -177,16 +176,16 @@ private struct PageCard: View {
                             .transition(.opacity)
                     }
                 }
-        }
-        .background {
-            card.fill(palette.pane)
-                .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.16), radius: 18, y: 6)
-                .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.08), radius: 2, y: 1)
-        }
-        // A hairline keeps a dark page's edge.
-        .overlay {
-            card.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
-                .allowsHitTesting(false)
+                .background {
+                    card.fill(palette.pane)
+                        .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.16), radius: 18, y: 6)
+                        .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.08), radius: 2, y: 1)
+                }
+                // A hairline keeps a dark page's edge.
+                .overlay {
+                    card.strokeBorder(contrast == .increased ? palette.text.opacity(0.5) : palette.hairline)
+                        .allowsHitTesting(false)
+                }
         }
     }
 }

@@ -2,8 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Laid out like a terminal multiplexer: open pages down a sidebar set flush in
-/// the frosted window, and each page a card of its own, lifted off it, with its own
-/// header in place of a toolbar across the window. Each group morphs in
+/// the frosted window, and each page a card of its own, lifted off it, under a
+/// header of its own on the window in place of a toolbar across it. Each group morphs in
 /// place: the sidebar into History or Downloads, the address field into
 /// results or the site's connection, and a header's tools into Find.
 struct SidebarLayout<Page: View>: View {
@@ -134,6 +134,8 @@ enum SidebarMetrics {
     /// The sidebar's top row and each page's header, centered on the window
     /// buttons, which sit in one or the other.
     static let header: CGFloat = 30
+    /// Between a page's header and its card.
+    static let headerGap: CGFloat = inset / 2
     /// A header's buttons and address field, all on the header's centre line.
     static let headerControl: CGFloat = 26
     /// The origin inside the address field, the same distance from its top
@@ -510,8 +512,8 @@ private struct SidebarUsefulInfo: View {
 
 // MARK: - Page header
 
-/// A page's own header inside its card, as each pane has in a terminal
-/// multiplexer. The page with focus carries navigation, the address and its
+/// A page's own header, on the window's surface above its card and level with
+/// the sidebar's top row, as each pane has in a terminal multiplexer. The page with focus carries navigation, the address and its
 /// tools. The other side of a split shows its title, and a click there brings
 /// it in. With the sidebar tucked away, the first page's header makes room for
 /// the window buttons and the button that brings the sidebar back.
