@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
+    <title>Interlinked</title>
+    <meta name="description" content="Interlinked, a minimal browser for macOS. Tabs down a sidebar, each page its own card, and ad blocking built in." />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/fonts/PaperMono.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/"><img src="/icon.svg" alt="" width="26" height="26" />Interlinked</a>
+      <a class="gh" href="https://github.com/kiwi-init/interlinked" aria-label="Source on GitHub" title="Source on GitHub">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"></path></svg>
+      </a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>A minimal browser for macOS.</h1>
+        <p class="lede">Your tabs run down a sidebar, and each page is its own card with its own header, like the panes of a terminal multiplexer. Nothing floats over the page.</p>
+        <div class="ctas">
+          <a class="dl" href="https://github.com/kiwi-init/interlinked-releases/releases/latest"><span class="go">Download</span><span class="for">macOS 26, Apple silicon</span></a>
+          <a class="button quiet" href="https://github.com/kiwi-init/interlinked">Source</a>
+        </div>
+        <div class="copybox">
+          <pre id="brew-hero">brew install --cask kiwi-init/tap/interlinked</pre>
+          <button class="copy" type="button" data-copy="brew-hero">copy</button>
+        </div>
+      </section>
+
+      <figure class="shot">
+        <div class="frame"><img src="/media/window.jpg" width="1520" height="950" alt="Interlinked's window: tabs in the sidebar on the left, and a Wikipedia article in its own card with back, forward, reload, the address and the page's tools in its header" /></div>
+      </figure>
+
+      <section class="features" aria-labelledby="features-title">
+        <h2 id="features-title">Features</h2>
+        <figure class="feature">
+          <figcaption><span class="n">01</span>Two pages side by side: drag a tab onto the page, and each side keeps its own header.</figcaption>
+          <div class="frame"><img src="/media/split.jpg" width="1520" height="950" loading="lazy" alt="Split view: two Wikipedia articles, Web browser and WebKit, side by side, each in its own card with its own header" /></div>
+        </figure>
+        <figure class="feature">
+          <figcaption><span class="n">02</span>Find for me looks for what you mean on a page, not only the exact words.</figcaption>
+          <div class="frame"><img src="/media/find.jpg" width="1520" height="950" loading="lazy" alt="Find for me open in the page's header, searching the WebKit article for browser, with the match highlighted" /></div>
+        </figure>
+        <figure class="feature">
+          <figcaption><span class="n">03</span>Sharing Screen Mode blurs emails, phone numbers, card numbers and keys on every page while you present.</figcaption>
+          <div class="frame"><img src="/media/sharing.jpg" width="1520" height="950" loading="lazy" alt="A team contacts page with Sharing Screen Mode on: its email addresses, phone numbers, card number and API key are blurred" /></div>
+        </figure>
+      </section>
+
+      <section class="built-in" aria-labelledby="built-in-title">
+        <h2 id="built-in-title">Built in</h2>
+        <dl>
+          <div>
+            <dt>Ad and tracker blocking</dt>
+            <dd>Brave's blocking engine with uBlock Origin's lists, inside the browser. No extensions to install.</dd>
+          </div>
+          <div>
+            <dt>Clean addresses</dt>
+            <dd>Tracking parameters like utm_, gclid and fbclid come off every address before the page loads.</dd>
+          </div>
+          <div>
+            <dt>Dark pages</dt>
+            <dd>Sites with a dark theme are asked for it, and light pages are inverted, images left as they are.</dd>
+          </div>
+          <div>
+            <dt>Tabs that rest</dt>
+            <dd>A tab you leave alone sleeps and comes back where you left it, scroll position included.</dd>
+          </div>
+          <div>
+            <dt>History on your Mac</dt>
+            <dd>Kept for 90 days on this Mac, cleared by the hour, the day or all at once, or turned off.</dd>
+          </div>
+          <div>
+            <dt>Your tint</dt>
+            <dd>Color the glass around the page, or let it follow your Mac's accent color.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="get" aria-labelledby="get-title">
+        <h2 id="get-title">Get it</h2>
+        <p class="needs">macOS 26 or later, on an Apple silicon Mac</p>
+        <div class="copybox">
+          <pre id="brew-get">brew install --cask kiwi-init/tap/interlinked</pre>
+          <button class="copy" type="button" data-copy="brew-get">copy</button>
+        </div>
+        <p class="links">
+          <a class="button" href="https://github.com/kiwi-init/interlinked-releases/releases/latest">Download the DMG</a>
+          <a class="button quiet" href="https://github.com/kiwi-init/interlinked">Source code</a>
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>Interlinked by <a href="https://kiwiinit.com">Kiwi Init</a></p>
+      <p>
+        <a href="https://github.com/kiwi-init/interlinked">Source</a>
+        <a href="https://github.com/kiwi-init/interlinked-releases/releases">Releases</a>
+        <a href="https://github.com/kiwi-init/homebrew-tap">Homebrew tap</a>
+      </p>
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

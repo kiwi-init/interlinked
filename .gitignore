@@ -15,3 +15,7 @@ DerivedData/
 # Kiwi Channels signing keys can sit in the checkout; never commit them.
 channels-release.key
 channels-release.pub
+
+# The landing page (site/): wrangler's local state and packages
+/site/.wrangler
+/site/node_modules

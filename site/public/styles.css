@@ -1,0 +1,460 @@
+@font-face {
+  font-family: "Paper Mono";
+  src: url("/fonts/PaperMono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* The same tokens as Channels' site and kiwiinit.com. */
+:root {
+  --black: #000;
+  --ink: #ececec;
+  --ink-2: #9c9c9c;
+  --ink-3: #5c5c5c;
+  --line: #1c1c1c;
+  --link: #8ab4ff;
+  --mono: "Paper Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --gutter: clamp(20px, 4vw, 64px);
+  --spectrum: #ff3b5c, #ffb02e, #f5ff5a, #5dff8f, #39d4ff, #3d5bff, #b04dff;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--black);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--black);
+  color: var(--ink);
+  font: 16px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--link);
+  text-underline-offset: 3px;
+}
+
+h1,
+h2,
+pre {
+  font-family: var(--mono);
+  margin: 0;
+}
+
+p {
+  margin: 0 0 16px;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px var(--gutter);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.gh {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #2c2c2c;
+  border-radius: 6px;
+  color: var(--ink);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.gh:hover,
+.gh:focus-visible {
+  border-color: #5a5a5a;
+  background: #0d0d0d;
+  outline: none;
+}
+
+.brand img {
+  border-radius: 22%;
+}
+
+.hero {
+  padding: clamp(64px, 10vh, 140px) var(--gutter) 0;
+  max-width: 1100px;
+}
+
+h1 {
+  font-weight: 700;
+  font-size: clamp(36px, 5.2vw, 76px);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+
+h2 {
+  font-weight: 700;
+  font-size: clamp(28px, 3vw, 44px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  margin-bottom: 20px;
+}
+
+.lede {
+  max-width: 40em;
+  margin: 24px 0 0;
+  color: var(--ink-2);
+  font-size: 18px;
+}
+
+.ctas {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 32px 0 20px;
+  flex-wrap: wrap;
+}
+
+/* The download button with what it needs beside it, as on Channels' site. */
+.dl {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--black);
+  text-decoration: none;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.dl .go {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  height: 48px;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.dl .go::before {
+  content: "";
+  width: 12px;
+  height: 14px;
+  background: currentColor;
+  clip-path: polygon(40% 0, 60% 0, 60% 55%, 90% 30%, 100% 42%, 50% 86%, 0 42%, 10% 30%, 40% 55%);
+}
+
+.dl .for {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-left: 1px solid rgba(0, 0, 0, 0.14);
+  color: #505050;
+  font-size: 12px;
+}
+
+.dl::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.45;
+  transform: translateX(-130%);
+  background: linear-gradient(112deg, transparent 30%, #ff3b5c 40%, #ffb02e 44%, #f5ff5a 48%, #5dff8f 52%, #39d4ff 56%, #3d5bff 60%, #b04dff 64%, transparent 74%);
+}
+
+.dl:hover::after,
+.dl:focus-visible::after {
+  transform: translateX(130%);
+  transition: transform 1.1s cubic-bezier(0.45, 0, 0.25, 1);
+}
+
+.dl:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.ctas .button {
+  height: 48px;
+  align-items: center;
+  padding: 0 20px;
+  font-size: 15px;
+}
+
+.hero .copybox,
+.get .copybox {
+  max-width: 560px;
+}
+
+figure {
+  margin: 0;
+}
+
+.frame {
+  border: 1px solid #262626;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #050505;
+}
+
+.frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.shot {
+  padding: clamp(48px, 6vw, 96px) var(--gutter) 0;
+}
+
+.features,
+.built-in,
+.get {
+  padding: clamp(64px, 9vw, 140px) var(--gutter) 0;
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 48px clamp(20px, 2.4vw, 40px);
+}
+
+.features h2 {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.feature figcaption {
+  display: flex;
+  gap: 14px;
+  min-height: 3.2em;
+  margin: 0 0 16px;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.n {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding-top: 2px;
+}
+
+.built-in dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(20px, 2.4vw, 40px);
+  margin: 0;
+}
+
+.built-in dl > div {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.built-in dt {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.built-in dd {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.needs {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+
+.get .copybox {
+  margin-bottom: 24px;
+}
+
+.copybox {
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.copybox pre {
+  flex: 1;
+  padding: 14px 18px;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 14px;
+}
+
+.copy {
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: none;
+  color: var(--link);
+  font: 14px var(--mono);
+  padding: 0 18px;
+  cursor: pointer;
+}
+
+.copy:hover,
+.copy:focus-visible {
+  background: var(--ink);
+  color: var(--black);
+  outline: none;
+}
+
+.links {
+  display: flex;
+  gap: 12px;
+  margin: 0;
+  font-size: 14px;
+}
+
+/* The light button with the spectrum sheen, as on Channels' site. */
+.button {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+  isolation: isolate;
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--black);
+  font-family: var(--mono);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.45;
+  transform: translateX(-130%);
+  background: linear-gradient(112deg, transparent 30%, #ff3b5c 40%, #ffb02e 44%, #f5ff5a 48%, #5dff8f 52%, #39d4ff 56%, #3d5bff 60%, #b04dff 64%, transparent 74%);
+}
+
+.button:hover::after,
+.button:focus-visible::after {
+  transform: translateX(130%);
+  transition: transform 1.1s cubic-bezier(0.45, 0, 0.25, 1);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* The second of the pair: the same size, outlined. */
+.button.quiet {
+  background: none;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px #2c2c2c;
+}
+
+.button.quiet::after {
+  display: none;
+}
+
+.button.quiet:hover,
+.button.quiet:focus-visible {
+  background: #0d0d0d;
+  box-shadow: inset 0 0 0 1px #5a5a5a;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: clamp(64px, 8vw, 120px);
+  padding: 24px var(--gutter) 40px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+footer p {
+  margin: 0;
+  display: flex;
+  gap: 24px;
+}
+
+footer a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+footer a:hover {
+  color: var(--ink);
+}
+
+.notfound {
+  padding: clamp(72px, 12vh, 160px) var(--gutter) 0;
+}
+
+.notfound p {
+  margin-top: 24px;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button:hover::after,
+  .button:focus-visible::after,
+  .dl:hover::after,
+  .dl:focus-visible::after {
+    transition: none;
+    transform: translateX(-130%);
+  }
+}
+
+@media (max-width: 900px) {
+  .features,
+  .built-in dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .feature figcaption {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .dl .for {
+    display: none;
+  }
+
+  .links {
+    flex-wrap: wrap;
+  }
+}
