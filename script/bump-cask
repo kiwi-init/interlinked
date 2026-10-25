@@ -14,10 +14,11 @@ set -eu
 version=${1:?usage: script/bump-cask VERSION}
 tap=${INTERLINKED_TAP:-kiwi-init/homebrew-tap}
 downloads=${INTERLINKED_DOWNLOADS:-kiwi-init/interlinked-releases}
-case $version in
-  [0-9][0-9][0-9][0-9].[0-9]*.[0-9]*) ;;
-  *) echo "VERSION must look like YYYY.M.PATCH, not '$version'" >&2; exit 1 ;;
-esac
+# The same check script/release makes.
+printf '%s' "$version" | grep -Eq '^20[0-9]{2}\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)$' || {
+  echo "VERSION must look like YYYY.M.PATCH, not '$version'" >&2
+  exit 1
+}
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
