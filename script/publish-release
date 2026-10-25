@@ -38,6 +38,9 @@ xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1 \
 # Build numbers only go up, past CI's run numbers too: the minute it was built.
 build=$(date -u +%Y%m%d%H%M)
 DEVELOPER_ID_IDENTITY="$identity" NOTARY_PROFILE="$profile" script/release "$version" "$build"
+# script/release regenerates the project, and this xcodegen may write it a
+# little differently. The checkout was clean before the build, so put it back.
+git checkout -- Interlinked.xcodeproj
 dmg=".build/release/Interlinked-$version.dmg"
 [ -f "$dmg" ] || fail "$dmg wasn't made, so it isn't notarized"
 
